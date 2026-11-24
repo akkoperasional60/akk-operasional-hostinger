@@ -8,7 +8,6 @@ import type { Crew, Schedule, UserProfile } from '../types';
 
 const QA_STORAGE_KEY = 'akk_qa_kiriman_sandbox_v63';
 const QA_EVENT = 'akk-qa-kiriman-updated';
-const TEST_EMAIL_RE = /^akk-qa-(driver|helper)-[a-z0-9-]+@example\.com$/i;
 
 type QaTrip = {
   id: string;
@@ -48,11 +47,8 @@ interface Props {
  * follow normal logisticsStore persistence; QA schedules are browser-only.
  */
 export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) => {
-  const isQa = TEST_EMAIL_RE.test(String(user?.email || '')) &&
-    String(user?.notes || '').includes('AKK_QA_TEST_ACCOUNT') &&
-    (user.role === 'driver' || user.role === 'crew_helper') && user.status === 'approved';
   const realCreator = activeTab === 'schedules' && user.status === 'approved' && canEdit(user, 'schedules');
-  const testCreator = activeTab === 'driver_portal' && isQa;
+  const testCreator = activeTab === 'e2e_testing' && user.status === 'approved' && user.role === 'super_admin';
   const active = realCreator || testCreator;
   const [open, setOpen] = useState(false);
   const [date, setDate] = useState(todayJakarta);
@@ -220,14 +216,6 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
     } finally { setBusy(false); }
   };
 
-  const claimQa = (trip: QaTrip, slot: 'driver' | 'helper') => {
-    const latest = readQaTrips();
-    const existing = latest.find(t => t.id === trip.id);
-    if (!existing || existing[slot]) return setError('Slot sudah diambil. Buka ulang daftar kiriman uji.');
-    if (existing.driver?.id === user.id || existing.helper?.id === user.id) return setError('Anda sudah mengisi slot lain pada kiriman ini.');
-    saveQaTrips(latest.map(t => t.id === trip.id ? { ...t, [slot]: { id: user.id, name: user.fullName } } : t));
-    setError(''); setNotice(`Slot ${slot === 'driver' ? 'Driver' : 'Helper'} berhasil diambil untuk kiriman uji.`);
-  };
   const removeQa = (id: string) => {
     if (!window.confirm('Hapus jadwal uji ini dari browser?')) return;
     saveQaTrips(readQaTrips().filter(t => t.id !== id));
@@ -259,7 +247,7 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
               <button type="button" className="akk-ship-close" onClick={() => setOpen(false)} aria-label="Tutup"><X size={20} /></button>
             </div>
             <div className="akk-ship-dialog-body">
-              {testCreator && <div className="akk-ship-qa-warning"><ShieldCheck size={18}/> Hanya tersimpan di browser ini. Tidak mengubah jadwal operasional AKK.</div>}
+              {testCreator && <div className="akk-ship-qa-warning"><ShieldCheck size={18}/> Hanya tersimpan di browser ini. Buka akun uji untuk mengambil slot.</div>}
               <form id="akk-ship-create-form" onSubmit={create} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {picker('Cabang', effectiveBranchId, setBranchId, branches.map(b => ({ value: b.id, label: b.name })), true)}
                 <label><span className={labelClass}>Tanggal kirim</span><input className={fieldClass} type="date" required value={date} onChange={e => setDate(e.target.value)}/></label>
@@ -280,7 +268,7 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
               </form>
               {error && <p role="alert" className="akk-ship-error">{error}</p>}
               {testCreator && <div className="akk-ship-test-list">
-                <h3>Jadwal Uji Saya</h3>
+                <h3>Jadwal Percobaan</h3>
                 {scopedQa.length === 0 && <p className="text-xs text-slate-500">Belum ada kiriman percobaan.</p>}
                 {scopedQa.map(t => (
                   <article key={t.id} className="akk-ship-test-card">
@@ -289,7 +277,7 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
                     <div className="mt-2 grid grid-cols-2 gap-2">
                       {(['driver','helper'] as const).map(slot => <div key={slot} className="akk-ship-test-slot">
                         <span className="text-xs font-semibold">{slot === 'driver' ? 'Driver' : 'Helper'}</span>
-                        {t[slot] ? <span className="text-xs">{t[slot]?.name}</span> : <button type="button" onClick={() => claimQa(t,slot)} className="akk-ship-test-claim">Ambil Slot</button>}
+                        <span className="text-xs">{t[slot]?.name || 'Belum diambil'}</span>
                       </div>)}
                     </div>
                   </article>

@@ -7,6 +7,7 @@ import {
 import { AkkLogo } from './AkkLogo';
 import { ThemeSwitcher } from './ThemeSwitcher';
 import { ShipmentScheduleWorkbench } from './ShipmentScheduleWorkbench';
+import { CrewTestWorkspace, isQaCrewUser } from './CrewTestWorkspace';
 import { logisticsStore } from '../services/store';
 import type { UserProfile } from '../types';
 import { canAccess } from '../utils/rbac';
@@ -182,6 +183,7 @@ const readStoredTabs = (key: string): NavTab[] => {
 const SidebarComponent: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onOpenAuth, isMinimized = false, onToggleMinimize }) => {
   const [user, setUser] = useState<UserProfile>(() => logisticsStore.getCurrentUser());
   const isCrewWorkScreen = currentTab === 'driver_portal' && (user.role === 'driver' || user.role === 'crew_helper');
+  const isQaCrewWorkScreen = isCrewWorkScreen && isQaCrewUser(user);
   const [isMobileOpen, setMobileOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [favorites, setFavorites] = useState<NavTab[]>(() => readStoredTabs(FAVORITE_KEY));
@@ -394,6 +396,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onO
 
   return <>
     <ShipmentScheduleWorkbench activeTab={currentTab} user={user} />
+    {isQaCrewWorkScreen && <CrewTestWorkspace user={user} />}
     {!isCrewWorkScreen && <div className="akk-clean-mobile-top lg:hidden">
       <button type="button" className="akk-clean-icon-button" onClick={() => setMobileOpen(true)} aria-label="Buka menu"><Menu size={22} /></button>
       <button type="button" className="akk-clean-mobile-home" onClick={() => navigate('dashboard')}><AkkLogo size="sm" showSubtitle={false} showText={false} /><strong>AKK</strong></button>
