@@ -1,0 +1,212 @@
+import type { Schedule, UserProfile, Crew } from '../../types';
+import { branchStore } from '../../services/branchStore';
+import { logisticsStore } from '../../services/store';
+
+export const QA_STORAGE_KEY = 'akk_qa_kiriman_sandbox_v63';
+export const QA_EVENT = 'akk-qa-kiriman-updated';
+export type CrewSlot = 'driver' | 'helper';
+export type TripPhase = 'waiting' | 'going' | 'returned';
+export type WorkAction = 'bbm' | 'kendala' | 'toko' | 'retur' | 'form_kirim';
+export type Member = { id: string; name: string };
+export interface FieldReport {
+  id: string;
+  type: WorkAction;
+  note: string;
+  by: string;
+  at: string;
+  photo?: string;
+  gps?: { latitude: number; longitude: number; accuracy: number };
+}
+export interface FieldTrip {
+  id: string;
+  branchId: string;
+  area: string;
+  fleetLabel: string;
+  date: string;
+  departureTime: string;
+  trackingNumber?: string;
+  driver: Member | null;
+  helper: Member | null;
+  phase: TripPhase;
+  createdAt: string;
+  departedAt?: string;
+  returnedAt?: string;
+  odometerStart?: string;
+  inspectionDone?: boolean;
+  waybillValidated?: boolean;
+  reports: FieldReport[];
+  source: 'qa' | 'live';
+  schedule?: Schedule;
+}
+
+export const WORK_LABELS: Record<WorkAction, string> = {
+  bbm: 'Isi BBM', kendala: 'Lapor Kendala', toko: 'Absen Toko', retur: 'Retur Barang', form_kirim: 'Form Kirim'
+};
+export const WORK_FOR_SLOT: Record<CrewSlot, WorkAction[]> = {
+  driver: ['bbm', 'kendala'], helper: ['toko', 'kendala', 'retur', 'form_kirim']
+};
+
+export const isQaAccount = (user: UserProfile | null | undefined): boolean =>
+  Boolean(user?.status === 'approved' &&
+    /^akk-qa-(driver|helper)-[a-z0-9-]+@example\.com$/i.test(String(user.email || '')) &&
+    String(user.notes || '').includes('AKK_QA_TEST_ACCOUNT'));
+
+export function userMatchesMember(user: UserProfile, member?: Member | null): boolean {
+  if (!member) return false;
+  const a = String(user.id || '').toLowerCase().replace(/^(usr-|crw-)/, '');
+  const b = String(member.id || '').toLowerCase().replace(/^(usr-|crw-)/, '');
+  if (a.length >= 3 && b.length >= 3 && a === b) return true;
+  const uname = String(user.fullName || '').trim().toLocaleLowerCase('id-ID');
+  const mname = String(member.name || '').trim().toLocaleLowerCase('id-ID');
+  return Boolean(uname.length >= 4 && uname === mname);
+}
+
+export function slotForUser(trip: FieldTrip, user: UserProfile): CrewSlot | null {
+  return userMatchesMember(user, trip.driver) ? 'driver' : userMatchesMember(user, trip.helper) ? 'helper' : null;
+}
+
+export function readQaTrips(): FieldTrip[] {
+  try {
+    const rows: any[] = JSON.parse(localStorage.getItem(QA_STORAGE_KEY) || '[]');
+    if (!Array.isArray(rows)) return [];
+    return rows.filter(t => t && typeof t.id === 'string' && typeof t.branchId === 'string' && typeof t.area === 'string')
+      .slice(0, 120).map(t => ({
+        id: t.id, branchId: t.branchId, area: t.area, fleetLabel: t.fleetLabel || 'Belum dipilih',
+        date: t.date || '', departureTime: t.departureTime || '07:30', trackingNumber: t.trackingNumber || t.id,
+        driver: t.driver || null, helper: t.helper || null,
+        phase: t.phase === 'returned' || t.phase === 'going' ? t.phase : 'waiting',
+        createdAt: t.createdAt || '', departedAt: t.departedAt, returnedAt: t.returnedAt,
+        odometerStart: t.odometerStart, inspectionDone: t.inspectionDone, waybillValidated: t.waybillValidated,
+        reports: Array.isArray(t.reports) ? t.reports : [], source: 'qa' as const
+      }));
+  } catch { return []; }
+}
+
+export function saveQaTripPatch(tripId: string, change: (trip: FieldTrip) => FieldTrip): FieldTrip {
+  const all = readQaTrips();
+  const found = all.find(t => t.id === tripId);
+  if (!found) throw new Error('Kiriman uji tidak tersedia. Muat ulang halaman.');
+  const updated = change(found);
+  const next = all.map(t => t.id === tripId ? updated : t).map(({ source: _source, schedule: _schedule, ...rest }) => rest);
+  localStorage.setItem(QA_STORAGE_KEY, JSON.stringify(next));
+  window.dispatchEvent(new Event(QA_EVENT));
+  return updated;
+}
+
+export function assertTripVisible(user: UserProfile, trip: FieldTrip): boolean {
+  if (!trip.branchId) return false;
+  return branchStore.getActiveBranches().some(b => b.id === trip.branchId) &&
+    branchStore.canUserAccessBranch(user, trip.branchId);
+}
+
+export function memberFromUser(user: UserProfile): Member {
+  return { id: `crw-${user.id}`, name: user.fullName || user.email || 'Kru AKK' };
+}
+
+function strictScheduleBranch(s: Schedule): string | null {
+  const extra = s as Schedule & { originBranchId?: string; branchId?: string };
+  const branches = branchStore.getActiveBranches();
+  if (extra.originBranchId && branches.some(b => b.id === extra.originBranchId)) return extra.originBranchId;
+  if (extra.branchId && branches.some(b => b.id === extra.branchId)) return extra.branchId;
+  const explicit = branchStore.getExplicitScheduleBranchId(s.id);
+  if (explicit) return explicit;
+  const origin = (s.originName || '').toLocaleLowerCase('id-ID');
+  if (/sidoarjo|surabaya/.test(origin)) return 'cab-sidoarjo';
+  if (/banyuwangi|nusantara/.test(origin)) return 'cab-banyuwangi';
+  if (s.fleet?.branchId && branches.some(b => b.id === s.fleet?.branchId)) return s.fleet.branchId;
+  return null;
+}
+
+function getMember(crew?: Crew | null, id?: string): Member | null {
+  if (crew?.id && crew?.name) return { id: crew.id, name: crew.name };
+  if (!id || id === '-' || /pending|tbd|none/i.test(id)) return null;
+  const mapped = logisticsStore.getCrews().find(c => c.id === id);
+  return mapped?.name ? { id: mapped.id, name: mapped.name } : null;
+}
+
+export function normalizeLiveSchedule(s: Schedule): FieldTrip | null {
+  const branchId = strictScheduleBranch(s);
+  if (!branchId || !s.id) return null;
+  const status = String(s.status || '').toLowerCase();
+  const phase: TripPhase = status === 'delivered' ? 'returned' :
+    status === 'picked_up' || status === 'in_transit' ? 'going' : 'waiting';
+  const dateRaw = s.deliveryDate || s.departureDate || '';
+  const date = dateRaw.match(/^\d{4}-\d{2}-\d{2}/)?.[0] || '';
+  const driver = getMember(s.crew, s.crewId);
+  const helper = getMember(s.crewHelper, s.crewHelperId);
+  return {
+    id: s.id, branchId, area: s.areaName || s.store?.storeName || 'Area belum ditentukan',
+    fleetLabel: s.fleet?.initialCode || s.armada || s.fleet?.plateNumber || 'Armada belum dipilih',
+    date, departureTime: s.departureTime || s.departureDate?.match(/T(\d{2}:\d{2})/)?.[1] || '07:30',
+    trackingNumber: s.trackingNumber, driver, helper, phase,
+    createdAt: s.createdAt, departedAt: s.actualDeparture, returnedAt: s.actualArrival,
+    odometerStart: String((s as any).crewOdometerStart || ''),
+    inspectionDone: Boolean((s as any).crewInspectionDone),
+    waybillValidated: Boolean((s as any).crewWaybillValidated),
+    reports: [], source: 'live', schedule: s
+  };
+}
+
+export function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem('akk_session_token_v1') || sessionStorage.getItem('akk_session_token_v1') || '';
+  return token ? { Authorization: `Bearer ${token}`, 'x-akk-session-token': token } : {};
+}
+
+export async function fetchQaTrips(): Promise<FieldTrip[]> {
+  const response = await fetch('/api/crew-qa/trips', {headers:getAuthHeaders(),credentials:'same-origin',cache:'no-store'});
+  if (!response.ok) throw new Error('Jadwal uji server belum tersedia. Coba buka ulang.');
+  const result = await response.json();
+  if (!result?.success || !Array.isArray(result.trips)) throw new Error('Data jadwal uji tidak valid.');
+  return result.trips.map((t:any): FieldTrip => ({
+    id:t.id, branchId:t.branchId, area:t.area, fleetLabel:t.fleetLabel || 'Armada Uji',
+    date:t.date, departureTime:t.departureTime, trackingNumber:t.id,
+    driver:t.driver || null, helper:t.helper || null, createdAt:t.createdAt || '',
+    phase:t.phase === 'going' || t.phase === 'returned' ? t.phase : 'waiting',
+    departedAt:t.departedAt, returnedAt:t.returnedAt, odometerStart:t.odometerStart,
+    inspectionDone:!!t.inspectionDone, waybillValidated:!!t.waybillValidated,
+    reports:Array.isArray(t.reports)?t.reports:[],source:'qa'
+  }));
+}
+
+export async function fetchLiveTrips(): Promise<FieldTrip[]> {
+  const response = await fetch('/api/crew-assignments', { headers: getAuthHeaders(), credentials: 'same-origin', cache: 'no-store' });
+  if (!response.ok) throw new Error('Jadwal server belum bisa dibaca. Coba ulangi.');
+  const result = await response.json();
+  if (!result?.success || !Array.isArray(result?.schedules)) throw new Error('Data jadwal dari server tidak valid.');
+  const reportBySchedule = new Map<string, FieldReport[]>();
+  for (const item of Array.isArray(result.reports) ? result.reports : []) {
+    if (!item || typeof item.scheduleId !== 'string' || !WORK_LABELS[item.type as WorkAction]) continue;
+    const reports = reportBySchedule.get(item.scheduleId) || [];
+    reports.push({ id: String(item.id), type: item.type as WorkAction,
+      note: String(item.note || ''), by: String(item.by || ''), at: String(item.at || ''),
+      gps: item.gps || undefined });
+    reportBySchedule.set(item.scheduleId, reports);
+  }
+  return (result.schedules as Schedule[]).map(normalizeLiveSchedule)
+    .filter((x): x is FieldTrip => Boolean(x))
+    .map(t => ({ ...t, reports: reportBySchedule.get(t.id) || [] }));
+}
+
+export function safeDate(iso: string): string {
+  if (!iso) return '-';
+  const [y, m, d] = iso.slice(0, 10).split('-');
+  return y && m && d ? `${d}/${m}/${y}` : iso;
+}
+
+export const isCompleted = (t: FieldTrip): boolean => t.phase === 'returned';
+export const tripPhaseLabel = (t: FieldTrip): string => t.phase === 'returned' ? 'Selesai' : t.phase === 'going' ? 'Dalam perjalanan' : 'Belum berangkat';
+
+export function freshGps(): Promise<{ latitude: number; longitude: number; accuracy: number }> {
+  return new Promise((resolve, reject) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      reject(new Error('GPS tidak tersedia pada perangkat ini.'));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      p => resolve({ latitude: p.coords.latitude, longitude: p.coords.longitude, accuracy: p.coords.accuracy }),
+      e => reject(new Error(e.code === 1 ? 'Izin lokasi ditolak. Aktifkan GPS untuk melanjutkan.' :
+        'Lokasi belum bisa dibaca. Periksa GPS lalu coba lagi.')),
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+    );
+  });
+}

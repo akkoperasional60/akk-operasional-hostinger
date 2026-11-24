@@ -5,33 +5,12 @@ import { logisticsStore } from '../services/store';
 import { branchStore } from '../services/branchStore';
 import { canEdit } from '../utils/rbac';
 import type { Crew, Schedule, UserProfile } from '../types';
+import { getAuthHeaders } from './crew/crewModel';
 
-const QA_STORAGE_KEY = 'akk_qa_kiriman_sandbox_v63';
 const QA_EVENT = 'akk-qa-kiriman-updated';
-
-type QaTrip = {
-  id: string;
-  branchId: string;
-  area: string;
-  fleetLabel: string;
-  date: string;
-  departureTime: string;
-  driver: { id: string; name: string } | null;
-  helper: { id: string; name: string } | null;
-  createdAt: string;
-};
-
+type QaTrip = {id:string;branchId:string;area:string;fleetLabel:string;date:string;departureTime:string;
+  driver:{id:string;name:string}|null;helper:{id:string;name:string}|null;createdAt:string};
 const todayJakarta = (): string => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' });
-const readQaTrips = (): QaTrip[] => {
-  try {
-    const data = JSON.parse(localStorage.getItem(QA_STORAGE_KEY) || '[]');
-    return Array.isArray(data) ? data.filter((entry): entry is QaTrip => Boolean(entry && typeof entry.id === 'string' && typeof entry.area === 'string')).slice(0, 60) : [];
-  } catch { return []; }
-};
-const saveQaTrips = (trips: QaTrip[]) => {
-  localStorage.setItem(QA_STORAGE_KEY, JSON.stringify(trips.slice(0, 60)));
-  window.dispatchEvent(new Event(QA_EVENT));
-};
 
 const fieldClass = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-medium text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:ring-blue-900';
 const labelClass = 'mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300';
@@ -59,7 +38,7 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
   const [fleetId, setFleetId] = useState('');
   const [driverId, setDriverId] = useState('');
   const [helperId, setHelperId] = useState('');
-  const [qaTrips, setQaTrips] = useState<QaTrip[]>(readQaTrips);
+  const [qaTrips, setQaTrips] = useState<QaTrip[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -91,15 +70,25 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
   useEffect(() => {
     if (!active) setOpen(false);
   }, [active]);
+  const loadQaTrips = async () => {
+    if (!testCreator) return;
+    try {
+      const response = await fetch('/api/crew-qa/trips', {
+        headers: getAuthHeaders(), credentials: 'same-origin', cache: 'no-store'
+      });
+      if (!response.ok) return;
+      const result = await response.json();
+      if (result?.success && Array.isArray(result.trips)) setQaTrips(result.trips);
+    } catch { /* keep last server-confirmed list */ }
+  };
   useEffect(() => {
-    const refresh = () => setQaTrips(readQaTrips());
-    window.addEventListener('storage', refresh);
+    if (!testCreator) return;
+    void loadQaTrips();
+    const refresh = () => void loadQaTrips();
     window.addEventListener(QA_EVENT, refresh);
-    return () => {
-      window.removeEventListener('storage', refresh);
-      window.removeEventListener(QA_EVENT, refresh);
-    };
-  }, []);
+    const timer = window.setInterval(refresh, 5000);
+    return () => { window.removeEventListener(QA_EVENT, refresh); clearInterval(timer); };
+  }, [testCreator]);
   useEffect(() => { setFleetId(''); setDriverId(''); setHelperId(''); }, [effectiveBranchId]);
 
   const start = () => {
@@ -108,23 +97,25 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
     setOpen(true);
   };
 
-  const addQaTrip = () => {
+  const addQaTrip = async () => {
     const label = fleets.find(f => f.id === fleetId);
     const branch = branches.find(b => b.id === effectiveBranchId);
-    const next: QaTrip = {
-      id: `QA-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-      branchId: branch?.id || effectiveBranchId,
-      date,
-      area: area.trim(),
-      fleetLabel: label?.initialCode || label?.plateNumber || 'Armada Uji',
-      departureTime,
-      driver: null,
-      helper: null,
-      createdAt: new Date().toISOString()
-    };
-    saveQaTrips([next, ...readQaTrips()]);
-    setNotice(`Kiriman uji ${next.id} dibuat (hanya di browser ini).`);
-    setArea('');
+    setBusy(true);
+    try {
+      const response = await fetch('/api/crew-qa/trips', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ branchId: branch?.id || effectiveBranchId, date, area: area.trim(),
+          fleetLabel: label?.initialCode || label?.plateNumber || 'Armada Uji', departureTime })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result?.success) throw new Error(result?.error || 'Gagal membuat jadwal uji.');
+      setNotice('Kiriman uji berhasil dibuat. Dapat diuji dari dua HP atau browser berbeda.');
+      setArea('');
+      await loadQaTrips();
+      window.dispatchEvent(new Event(QA_EVENT));
+    } catch (e) { setError(e instanceof Error ? e.message : 'Gagal menyimpan jadwal uji.'); }
+    finally { setBusy(false); }
   };
 
   const create = async (event: React.FormEvent) => {
@@ -135,7 +126,7 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
     if (!area.trim() || area.trim().length < 3) return setError('Isi area tujuan minimal 3 huruf.');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return setError('Pilih tanggal kirim yang benar.');
     if (!/^\d{2}:\d{2}$/.test(departureTime) || !/^\d{2}:\d{2}$/.test(returnTime)) return setError('Isi jam keberangkatan dan perkiraan pulang.');
-    if (testCreator) { addQaTrip(); return; }
+    if (testCreator) { await addQaTrip(); return; }
     const fleet = fleets.find(f => f.id === fleetId);
     if (!fleet) return setError('Pilih armada dari cabang yang benar.');
     if (driverId && helperId && driverId === helperId) return setError('Satu orang tidak boleh mengisi dua slot di kiriman yang sama.');
@@ -216,9 +207,17 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
     } finally { setBusy(false); }
   };
 
-  const removeQa = (id: string) => {
-    if (!window.confirm('Hapus jadwal uji ini dari browser?')) return;
-    saveQaTrips(readQaTrips().filter(t => t.id !== id));
+  const removeQa = async (id: string) => {
+    if (!window.confirm('Hapus jadwal uji ini dari database percobaan?')) return;
+    try {
+      const response = await fetch(`/api/crew-qa/trips/${encodeURIComponent(id)}`, {
+        method: 'DELETE', credentials: 'same-origin', headers: getAuthHeaders()
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result?.success) throw new Error(result?.error || 'Gagal menghapus jadwal.');
+      await loadQaTrips();
+      window.dispatchEvent(new Event(QA_EVENT));
+    } catch (e) { setError(e instanceof Error ? e.message : 'Gagal menghapus jadwal.'); }
   };
 
   if (!active || typeof document === 'undefined') return null;
@@ -247,7 +246,7 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
               <button type="button" className="akk-ship-close" onClick={() => setOpen(false)} aria-label="Tutup"><X size={20} /></button>
             </div>
             <div className="akk-ship-dialog-body">
-              {testCreator && <div className="akk-ship-qa-warning"><ShieldCheck size={18}/> Hanya tersimpan di browser ini. Buka akun uji untuk mengambil slot.</div>}
+              {testCreator && <div className="akk-ship-qa-warning"><ShieldCheck size={18}/> Data percobaan disimpan terpisah dan tersinkron antar-akun uji.</div>}
               <form id="akk-ship-create-form" onSubmit={create} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {picker('Cabang', effectiveBranchId, setBranchId, branches.map(b => ({ value: b.id, label: b.name })), true)}
                 <label><span className={labelClass}>Tanggal kirim</span><input className={fieldClass} type="date" required value={date} onChange={e => setDate(e.target.value)}/></label>
