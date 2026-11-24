@@ -3,7 +3,7 @@ import { Camera, CheckCircle2, LoaderCircle, MapPin, RotateCcw, VideoOff } from 
 import { Button, Dialog } from './CrewFieldUI';
 import { CAMERA_MAX_ACCURACY_METERS, CAMERA_MAX_DATA_URL, validateCameraEvidence, type CameraEvidence } from './crewCaptureEvidence';
 
-interface Props { onClose: () => void; onCapture: (value: CameraEvidence) => void; }
+interface Props { title?: string; onClose: () => void; onCapture: (value: CameraEvidence) => void; }
 
 function cameraError(error: unknown) {
   const e = error as DOMException;
@@ -42,7 +42,7 @@ function captureJpeg(video: HTMLVideoElement): string {
 }
 
 /** No input[type=file], no gallery, no cached location fallback. */
-export function CrewLiveCamera({ onClose, onCapture }: Props) {
+export function CrewLiveCamera({ title = 'Kamera', onClose, onCapture }: Props) {
   const video = useRef<HTMLVideoElement>(null);
   const stream = useRef<MediaStream | null>(null);
   const session = useRef(0);
@@ -101,7 +101,7 @@ export function CrewLiveCamera({ onClose, onCapture }: Props) {
       if (id === session.current) { shutterBusy.current = false; setLocating(false); }
     }
   };
-  return <Dialog title="Kamera" onClose={close}>
+  return <Dialog title={title} onClose={close}>
     <div className="relative aspect-[3/4] max-h-[50dvh] w-full overflow-hidden rounded-xl bg-slate-950">
       <video ref={video} autoPlay playsInline muted aria-label="Pratinjau kamera langsung" className="h-full w-full object-contain" onCanPlay={()=>{if(stream.current)setReady(true);}}/>
       {(opening || !ready) && <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center text-white!" role="status">{opening ? <LoaderCircle className="animate-spin" size={30}/> : <VideoOff size={32}/>}<span className="text-sm! font-medium text-white!">{opening?'Membuka kamera...':'Kamera belum aktif'}</span></div>}

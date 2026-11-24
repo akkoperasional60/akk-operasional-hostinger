@@ -196,7 +196,11 @@ const SidebarComponent: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onO
 
   const visible = useMemo(() => SECTIONS.filter(s => s.access(user)).map(section => ({
     ...section,
-    items: section.items.filter(item => canAccess(user, item.tab)),
+    items: section.items.filter(item =>
+      item.tab === 'e2e_testing'
+        ? user.role === 'super_admin' && user.status === 'approved'
+        : canAccess(user, item.tab)
+    ),
   })).filter(section => section.items.length > 0), [user]);
 
   const allItems = useMemo(() => visible.flatMap(s => s.items.map(item => ({ ...item, sectionId: s.id, sectionLabel: s.label }))), [visible]);

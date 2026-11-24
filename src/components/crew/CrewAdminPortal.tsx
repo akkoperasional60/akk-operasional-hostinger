@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { CheckCircle2, ChevronDown, ClipboardCheck, CloudOff, FileClock, FileText, LoaderCircle, MapPin, RefreshCw, RotateCcw, Search, ShieldCheck, Truck, X } from 'lucide-react';
+import { Camera, CheckCircle2, ChevronDown, ClipboardCheck, CloudOff, FileClock, FileText, FlaskConical, LoaderCircle, MapPin, RefreshCw, RotateCcw, Search, ShieldCheck, Truck, X } from 'lucide-react';
 import type { UserProfile } from '../../types';
-import { WORK_FOR_SLOT, WORK_LABELS, type CrewSlot, type FieldTrip } from './crewModel';
+import { isCompleted, isTodayOrTomorrowTrip, WORK_FOR_SLOT, WORK_LABELS, type CrewSlot, type FieldTrip } from './crewModel';
 import { getTripsForUser, listenCrewChanged, resetTripAssignment } from './crewApi';
 import { ActiveTrip, ActionGrid, Button, Empty, Heading, IconTile, Journey, Panel, shortDate, Status, TABS, TAB_ART, TaskRow, TripCard, type Screen } from './CrewFieldUI';
 import { CrewArt } from './CrewIllustrations';
+import CrewSystemTestSandbox from './CrewSystemTestSandbox';
 import './crewFieldV66.css';
 
 type Snapshot = { userId: string; trips: FieldTrip[] };
@@ -31,6 +32,7 @@ export default function CrewAdminPortal({currentUser: user}: {currentUser: UserP
   const [branch, setBranch] = useState('');
   const [confirmResetId, setConfirmResetId] = useState<string | null>(null);
   const [resetBusy, setResetBusy] = useState(false);
+  const [testMode, setTestMode] = useState(false);
   const refreshRef = useRef<() => void>(NO_WRITE);
   const mainRef = useRef<HTMLElement | null>(null);
 
@@ -70,8 +72,20 @@ export default function CrewAdminPortal({currentUser: user}: {currentUser: UserP
   const trips = useMemo(() => current?.trips || [], [current]);
   const branches = useMemo(() => Array.from(new Set(trips.map(t => t.branchId))).sort(), [trips]);
   const filtered = useMemo(() => trips.filter(t => !branch || t.branchId === branch), [trips,branch]);
-  const ongoing = filtered.filter(t => t.phase !== 'returned');
-  const completed = filtered.filter(t => t.phase === 'returned');
+  const ongoing = useMemo(
+    () =>
+      filtered
+        .filter(t => !isCompleted(t) && (t.phase === 'going' || isTodayOrTomorrowTrip(t)))
+        .sort((a, b) => (a.date === b.date ? a.departureTime.localeCompare(b.departureTime) : a.date.localeCompare(b.date))),
+    [filtered]
+  );
+  const completed = useMemo(
+    () =>
+      filtered
+        .filter(isCompleted)
+        .sort((a, b) => String(b.returnedAt || b.date || '').localeCompare(String(a.returnedAt || a.date || ''))),
+    [filtered]
+  );
   const selected = filtered.find(t => t.id === selectedId) || ongoing[0] || completed[0] || null;
   const visible = ongoing.filter(t => {
     const q = search.trim().toLocaleLowerCase('id-ID');
@@ -103,11 +117,27 @@ export default function CrewAdminPortal({currentUser: user}: {currentUser: UserP
   );
   const tripPicker = (all = false) => <label className="cv66-picker cv70-wide"><span>Kiriman</span><select aria-label="Pilih kiriman" value={all ? selectedId : selected?.id || ''} onChange={e=>setSelectedId(e.target.value)}>{all && <option value="">Semua kiriman</option>}{filtered.map(t=><option key={t.id} value={t.id}>{t.area} · {shortDate(t.date)} · {t.fleetLabel}</option>)}</select><ChevronDown size={17}/></label>;
 
+  if (isSuperAdmin && testMode) {
+    return <CrewSystemTestSandbox currentUser={user} onExit={() => setTestMode(false)} />;
+  }
+
   return <section id="akk-crew-v66" className="cv66-root cv70-monitor" data-testid="akk-crew-admin-monitor" data-version="70">
     <div className="cv66-shell">
       <header className="cv66-header">
         <div className="cv66-brand"><span className="cv66-brand-icon"><CrewArt name="truck" size={37}/></span><div className="cv66-brand-text"><span className="cv66-brand-title">Portal Driver</span><span className="cv66-brand-sub">Pemantauan Admin</span></div></div>
-        <div className="cv66-header-actions"><button type="button" aria-label="Muat ulang jadwal" className="cv66-icon-button" disabled={loading} onClick={()=>refreshRef.current()}><RefreshCw size={20} className={loading?'cv66-spin':''}/></button></div>
+        <div className="cv66-header-actions">
+          {isSuperAdmin && (
+            <button
+              type="button"
+              className="cv72-header-test-btn"
+              onClick={() => setTestMode(true)}
+            >
+              <FlaskConical size={15}/>
+              <span>Uji Sistem</span>
+            </button>
+          )}
+          <button type="button" aria-label="Muat ulang jadwal" className="cv66-icon-button" disabled={loading} onClick={()=>refreshRef.current()}><RefreshCw size={20} className={loading?'cv66-spin':''}/></button>
+        </div>
       </header>
       <main ref={mainRef} className="cv66-main" aria-busy={loading}>
         {branches.length>1 && <div className="cv70-filters">
@@ -121,7 +151,7 @@ export default function CrewAdminPortal({currentUser: user}: {currentUser: UserP
             {screen==='kiriman' && <>
               <Heading title="Kiriman"/>
               {(ongoing.length>0||search) && <label className="cv66-search cv70-wide"><Search size={20}/><input aria-label="Cari kiriman" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Cari area, armada atau kru"/>{search && <button type="button" aria-label="Hapus pencarian" onClick={()=>setSearch('')}><X size={18}/></button>}</label>}
-              {visible.length?visible.map(t=><TripCard key={t.id} trip={t} mine={null} claimAllowed={false} busy={false} readOnly onOpen={()=>pick(t.id)} onClaim={NO_WRITE}/>):<Empty icon={Truck} title={search?'Kiriman tidak ditemukan':'Belum ada kiriman'}/>}
+              {visible.length?visible.map(t=><TripCard key={t.id} trip={t} mine={null} claimAllowed={false} busy={false} readOnly onOpen={()=>pick(t.id)} onClaim={NO_WRITE}/>):<Empty icon={Truck} title={search?'Kiriman tidak ditemukan':'Belum ada kiriman hari ini & besok'} detail={search?undefined:'Jadwal hari ini dan besok yang belum tiba di gudang akan tampil di sini.'}/>}
             </>}
             {screen==='tugas' && <>
               <Heading title="Tugas"/>
@@ -130,7 +160,29 @@ export default function CrewAdminPortal({currentUser: user}: {currentUser: UserP
                 <div className="cv70-toggle cv70-wide" aria-label="Lihat posisi kru">{(['driver','helper'] as const).map(role=><button type="button" key={role} aria-pressed={slot===role} className={slot===role?'cv70-selected':''} onClick={()=>setSlot(role)}>{role==='driver'?'Driver':'Helper'}</button>)}</div>
                 <ActiveTrip trip={selected} slot={slot}/>
                 <Panel title="Persiapan">
-                  {slot==='driver'?<><div className="cv66-km"><div className="cv66-km-label"><IconTile icon={Truck} art={selected.odometerStart?'success':'gauge'} tone={selected.odometerStart?'green':'blue'}/><span className="cv66-row-title">KM Awal</span><span className={selected.odometerStart?'cv66-km-value':'cv66-meta'}>{selected.odometerStart?`${selected.odometerStart} km`:'Belum diisi'}</span></div></div><TaskRow icon={ShieldCheck} label="Cek Armada" detail={selected.inspectionDone?undefined:'Belum diperiksa'} done={Boolean(selected.inspectionDone)} disabled onClick={NO_WRITE}/></>:<TaskRow icon={ClipboardCheck} label="Validasi Surat Jalan" detail={selected.waybillValidated?undefined:'Belum divalidasi'} done={Boolean(selected.waybillValidated)} disabled onClick={NO_WRITE}/>}
+                  {slot==='driver'?<>
+                    <div className="cv66-km"><div className="cv66-km-label"><IconTile icon={Truck} art={selected.odometerStart?'success':'gauge'} tone={selected.odometerStart?'green':'blue'}/><span className="cv66-row-title">KM Awal</span><span className={selected.odometerStart?'cv66-km-value':'cv66-meta'}>{selected.odometerStart?`${selected.odometerStart} km`:'Belum diisi'}</span></div></div>
+                    <TaskRow icon={ShieldCheck} label="Cek Armada" detail={selected.inspectionDone?'7 item & 4 foto bukti tersimpan':'Belum diperiksa'} done={Boolean(selected.inspectionDone)} disabled onClick={NO_WRITE}/>
+                    {selected.inspectionDone && selected.inspectionChecklist && selected.inspectionChecklist.length > 0 && (
+                      <div className="cv72-admin-checklist">
+                        {selected.inspectionChecklist.map(item => (
+                          <div key={item.key} className="cv72-admin-check-item">
+                            <span className="cv72-admin-check-title">
+                              <CheckCircle2 size={13} style={{ color: 'var(--cv-green)' }}/>
+                              <span>{item.label}</span>
+                            </span>
+                            {item.requiresPhoto && item.photo ? (
+                              <img src={item.photo} alt={`Bukti ${item.label}`} className="cv72-admin-check-photo"/>
+                            ) : item.requiresPhoto && item.photoAttached ? (
+                              <span className="cv66-meta cv66-inline"><Camera size={12}/>Foto terlampir</span>
+                            ) : (
+                              <span className="cv66-meta">Dicek</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>:<TaskRow icon={ClipboardCheck} label="Validasi Surat Jalan" detail={selected.waybillValidated?undefined:'Belum divalidasi'} done={Boolean(selected.waybillValidated)} disabled onClick={NO_WRITE}/>}
                 </Panel>
                 <Journey trip={selected} busy={false} readOnly onMove={NO_WRITE}/>
                 <Panel title="Aktivitas" className="cv69-action-panel cv70-wide"><ActionGrid actions={WORK_FOR_SLOT[slot]} busy onAction={NO_WRITE}/></Panel>

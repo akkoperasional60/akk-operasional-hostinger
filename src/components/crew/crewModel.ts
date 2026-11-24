@@ -17,6 +17,76 @@ export interface FieldReport {
   photo?: string;
   gps?: { latitude: number; longitude: number; accuracy: number };
 }
+export type VehicleChecklistKey =
+  | 'oli_mesin'
+  | 'air_radiator'
+  | 'air_aki'
+  | 'rem_minyak_rem'
+  | 'kebersihan_kabin'
+  | 'inventaris_mobil'
+  | 'ban_cadangan';
+
+export interface VehicleChecklistItemDef {
+  key: VehicleChecklistKey;
+  label: string;
+  requiresPhoto: boolean;
+}
+
+export const VEHICLE_CHECKLIST_ITEMS: readonly VehicleChecklistItemDef[] = [
+  { key: 'oli_mesin', label: 'Oli Mesin', requiresPhoto: true },
+  { key: 'air_radiator', label: 'Air Radiator', requiresPhoto: true },
+  { key: 'air_aki', label: 'Air Aki', requiresPhoto: false },
+  { key: 'rem_minyak_rem', label: 'Rem Mobil & Minyak Rem', requiresPhoto: true },
+  { key: 'kebersihan_kabin', label: 'Kebersihan Kabin', requiresPhoto: true },
+  { key: 'inventaris_mobil', label: 'Inventaris Mobil', requiresPhoto: false },
+  { key: 'ban_cadangan', label: 'Ban Cadangan', requiresPhoto: false }
+] as const;
+
+export interface InspectionChecklistEntry {
+  key: VehicleChecklistKey;
+  label: string;
+  checked: boolean;
+  requiresPhoto: boolean;
+  photo?: string;
+  photoAttached?: boolean;
+  capturedAt?: string;
+  gps?: { latitude: number; longitude: number; accuracy: number };
+}
+
+export function validateVehicleChecklist(entries: unknown): string | null {
+  if (!Array.isArray(entries)) {
+    return 'Checklist kendaraan wajib diisi lengkap.';
+  }
+  const byKey = new Map<string, any>();
+  for (const item of entries) {
+    if (item && typeof item === 'object' && typeof (item as any).key === 'string') {
+      byKey.set((item as any).key, item);
+    }
+  }
+  const unchecked: string[] = [];
+  const missingPhotos: string[] = [];
+  for (const def of VEHICLE_CHECKLIST_ITEMS) {
+    const entry = byKey.get(def.key);
+    if (!entry || entry.checked !== true) {
+      unchecked.push(def.label);
+    }
+    if (def.requiresPhoto) {
+      const photo = typeof entry?.photo === 'string' ? entry.photo.trim() : '';
+      const validPhoto = photo.startsWith('data:image/') && photo.length >= 80;
+      if (!validPhoto) {
+        missingPhotos.push(def.label);
+      }
+    }
+  }
+  if (missingPhotos.length > 0) {
+    return `Foto bukti wajib belum lengkap: ${missingPhotos.join(', ')}.`;
+  }
+  if (unchecked.length > 0) {
+    return `Item checklist belum dicentang: ${unchecked.join(', ')}.`;
+  }
+  return null;
+}
+
 export interface FieldTrip {
   id: string;
   branchId: string;
@@ -33,6 +103,7 @@ export interface FieldTrip {
   returnedAt?: string;
   odometerStart?: string;
   inspectionDone?: boolean;
+  inspectionChecklist?: InspectionChecklistEntry[];
   waybillValidated?: boolean;
   reports: FieldReport[];
   source: 'qa' | 'live';
@@ -128,8 +199,16 @@ export function normalizeLiveSchedule(s: Schedule): FieldTrip | null {
   const branchId = strictScheduleBranch(s);
   if (!branchId || !s.id) return null;
   const status = String(s.status || '').toLowerCase();
-  const phase: TripPhase = status === 'delivered' ? 'returned' :
-    status === 'picked_up' || status === 'in_transit' ? 'going' : 'waiting';
+  const hasArrived =
+    status === 'delivered' ||
+    status === 'completed' ||
+    status === 'returned' ||
+    Boolean(s.actualArrival);
+  const phase: TripPhase = hasArrived
+    ? 'returned'
+    : status === 'picked_up' || status === 'in_transit'
+      ? 'going'
+      : 'waiting';
   const dateRaw = s.deliveryDate || s.departureDate || '';
   const date = dateRaw.match(/^\d{4}-\d{2}-\d{2}/)?.[0] || '';
   const driver = getMember(s.crew, s.crewId);
@@ -142,6 +221,7 @@ export function normalizeLiveSchedule(s: Schedule): FieldTrip | null {
     createdAt: s.createdAt, departedAt: s.actualDeparture, returnedAt: s.actualArrival,
     odometerStart: String((s as any).crewOdometerStart || ''),
     inspectionDone: Boolean((s as any).crewInspectionDone),
+    inspectionChecklist: Array.isArray((s as any).crewInspectionChecklist) ? (s as any).crewInspectionChecklist : undefined,
     waybillValidated: Boolean((s as any).crewWaybillValidated),
     reports: [], source: 'live', schedule: s
   };
@@ -163,7 +243,9 @@ export async function fetchQaTrips(): Promise<FieldTrip[]> {
     driver:t.driver || null, helper:t.helper || null, createdAt:t.createdAt || '',
     phase:t.phase === 'going' || t.phase === 'returned' ? t.phase : 'waiting',
     departedAt:t.departedAt, returnedAt:t.returnedAt, odometerStart:t.odometerStart,
-    inspectionDone:!!t.inspectionDone, waybillValidated:!!t.waybillValidated,
+    inspectionDone:!!t.inspectionDone,
+    inspectionChecklist:Array.isArray(t.inspectionChecklist)?t.inspectionChecklist:undefined,
+    waybillValidated:!!t.waybillValidated,
     reports:Array.isArray(t.reports)?t.reports:[],source:'qa'
   }));
 }
@@ -200,8 +282,32 @@ export function safeDate(iso: string): string {
   return y && m && d ? `${d}/${m}/${y}` : iso;
 }
 
-export const isCompleted = (t: FieldTrip): boolean => t.phase === 'returned';
-export const tripPhaseLabel = (t: FieldTrip): string => t.phase === 'returned' ? 'Selesai' : t.phase === 'going' ? 'Dalam perjalanan' : 'Belum berangkat';
+export function getTodayTomorrowJakarta(): { today: string; tomorrow: string } {
+  const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' });
+  const baseMs = Date.parse(`${today}T12:00:00Z`);
+  const tomorrow = Number.isFinite(baseMs)
+    ? new Date(baseMs + 86400000).toISOString().slice(0, 10)
+    : today;
+  return { today, tomorrow };
+}
+
+export function isTodayOrTomorrowTrip(trip: FieldTrip): boolean {
+  const { today, tomorrow } = getTodayTomorrowJakarta();
+  const candidates = [
+    trip.date,
+    trip.schedule?.deliveryDate,
+    trip.schedule?.departureDate
+  ]
+    .map(v => String(v || '').match(/^\d{4}-\d{2}-\d{2}/)?.[0] || '')
+    .filter(Boolean);
+  return candidates.some(d => d === today || d === tomorrow);
+}
+
+export const isCompleted = (t: FieldTrip): boolean =>
+  t.phase === 'returned' ||
+  Boolean(t.returnedAt) ||
+  String(t.schedule?.status || '').toLowerCase() === 'delivered';
+export const tripPhaseLabel = (t: FieldTrip): string => isCompleted(t) ? 'Selesai' : t.phase === 'going' ? 'Dalam perjalanan' : 'Belum berangkat';
 
 export function freshGps(): Promise<{ latitude: number; longitude: number; accuracy: number }> {
   return new Promise((resolve, reject) => {

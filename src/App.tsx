@@ -1326,7 +1326,7 @@ export default function App() {
             <SupabaseSqlArchitecture />
           )}
 
-          {currentTab === 'e2e_testing' && (
+          {currentTab === 'e2e_testing' && currentUser?.role === 'super_admin' && currentUser?.status === 'approved' && (
             <E2ETesterModule onNavigate={(tab) => setCurrentTab(tab)} />
           )}
           </Suspense>

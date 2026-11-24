@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Plus, ShieldCheck, Trash2, Users, X } from 'lucide-react';
+import { Check, Clock3, Plus, ShieldCheck, Trash2, Users, X } from 'lucide-react';
 import { logisticsStore } from '../services/store';
 import { branchStore } from '../services/branchStore';
 import { canEdit } from '../utils/rbac';
@@ -55,6 +55,40 @@ const todayJakarta = (): string => new Date().toLocaleDateString('sv-SE', { time
 const fieldClass = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-medium text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:ring-blue-900';
 const labelClass = 'mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300';
 const buttonClass = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-700 active:scale-[.98] disabled:cursor-not-allowed disabled:opacity-50';
+const HOURS_24 = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+const MINUTES_60 = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
+
+const Time24Field: React.FC<{ label: string; value: string; onChange: (next: string) => void }> = ({ label, value, onChange }) => {
+  const [rawH = '07', rawM = '30'] = (value || '07:30').split(':');
+  const hour = HOURS_24.includes(rawH) ? rawH : '07';
+  const minute = MINUTES_60.includes(rawM) ? rawM : '00';
+  return (
+    <div className="block">
+      <span className={labelClass}>{label} <span className="font-normal text-slate-400">(24 jam)</span></span>
+      <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 transition focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus-within:ring-blue-900">
+        <select
+          aria-label={`Jam ${label}`}
+          value={hour}
+          onChange={e => onChange(`${e.target.value}:${minute}`)}
+          className="flex-1 bg-transparent py-1 text-center text-sm font-bold tabular-nums text-slate-900 outline-none dark:bg-slate-900 dark:text-white"
+        >
+          {HOURS_24.map(h => <option key={h} value={h}>{h}</option>)}
+        </select>
+        <span className="text-base font-bold text-slate-400">:</span>
+        <select
+          aria-label={`Menit ${label}`}
+          value={minute}
+          onChange={e => onChange(`${hour}:${e.target.value}`)}
+          className="flex-1 bg-transparent py-1 text-center text-sm font-bold tabular-nums text-slate-900 outline-none dark:bg-slate-900 dark:text-white"
+        >
+          {MINUTES_60.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <span className="text-[11px] font-semibold text-slate-400">WIB</span>
+        <Clock3 size={15} className="shrink-0 text-slate-400" />
+      </div>
+    </div>
+  );
+};
 
 interface Props {
   activeTab: string;
@@ -380,9 +414,9 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
                   )}
                 </div>
                 <label><span className={labelClass}>Tanggal berangkat</span><input className={fieldClass} type="date" required value={departureDate} onChange={e => { setDepartureDateEdited(true); setDepartureDate(e.target.value); }}/></label>
-                <label><span className={labelClass}>Berangkat</span><input className={fieldClass} type="time" required value={departureTime} onChange={e => setDepartureTime(e.target.value)}/></label>
+                <Time24Field label="Berangkat" value={departureTime} onChange={setDepartureTime} />
                 <label><span className={labelClass}>Tanggal pulang</span><input className={fieldClass} type="date" required value={returnDate} onChange={e => { setReturnDateEdited(true); setReturnDate(e.target.value); }}/></label>
-                <label><span className={labelClass}>Pulang</span><input className={fieldClass} type="time" required value={returnTime} onChange={e => setReturnTime(e.target.value)}/></label>
+                <Time24Field label="Pulang" value={returnTime} onChange={setReturnTime} />
                 {!testCreator && <div className="sm:col-span-2 akk-ship-crew-picker">
                   <strong className="flex items-center gap-2 text-sm"><Users size={18}/> Slot kru <span className="text-xs font-normal text-slate-500">(boleh kosong)</span></strong>
                   <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">

@@ -334,3 +334,33 @@ html.dark #akk-crew-v66 .cv69-camera-entry{color:#b5d4ff!important}
   #akk-crew-v66.cv70-monitor .cv70-screen--tugas>.cv70-toggle{justify-self:start;min-width:270px}
 }
 @media(max-width:700px){#akk-crew-v66.cv70-monitor{height:calc(100dvh - 72px);min-height:400px}#akk-crew-v66.cv70-monitor .cv70-filters>*{flex:1;max-width:none}}
+
+/* V72: 7-item vehicle checklist with mandatory photo documentation + Super Admin Uji Sistem button */
+#akk-crew-v66 .cv72-header-test-btn{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 12px;border-radius:999px;border:1px solid var(--cv-line)!important;background:var(--cv-blue-soft)!important;color:var(--cv-blue)!important;font-size:12px!important;font-weight:700!important;white-space:nowrap}
+#akk-crew-v66 .cv72-header-test-btn:hover{background:var(--cv-blue)!important;color:#fff!important;border-color:var(--cv-blue)!important}
+html.dark #akk-crew-v66 .cv72-header-test-btn{color:#b8d4ff!important}
+#akk-crew-v66 .cv72-header-test-btn--exit{background:var(--cv-amber-soft)!important;color:var(--cv-amber)!important;border-color:transparent!important}
+#akk-crew-v66 .cv72-check-summary{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 11px;border-radius:11px;background:var(--cv-bg);font-size:12px!important;font-weight:600;color:var(--cv-ink)}
+#akk-crew-v66 .cv72-check-summary--ready{background:var(--cv-green-soft);color:var(--cv-green)!important}
+#akk-crew-v66 .cv72-check-list{display:flex;flex-direction:column;gap:8px;max-height:54vh;overflow:auto;padding-right:2px}
+#akk-crew-v66 .cv72-check-card{display:flex;flex-direction:column;gap:8px;padding:10px 11px;border:1px solid var(--cv-line);border-radius:12px;background:var(--cv-surface)}
+#akk-crew-v66 .cv72-check-card--done{border-color:#93d6b7;background:var(--cv-green-soft)}
+html.dark #akk-crew-v66 .cv72-check-card--done{border-color:#2b6c54}
+#akk-crew-v66 .cv72-check-top{display:flex;align-items:center;gap:10px;cursor:pointer;min-height:28px;font-size:13.5px!important;font-weight:600;color:var(--cv-ink)}
+#akk-crew-v66 .cv72-check-top input{appearance:auto!important;width:20px;height:20px;flex-shrink:0;accent-color:var(--cv-blue);margin:0}
+#akk-crew-v66 .cv72-check-label{flex:1;min-width:0;line-height:1.3}
+#akk-crew-v66 .cv72-photo-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:6px;font-size:10.5px!important;font-weight:700!important;white-space:nowrap;background:var(--cv-amber-soft);color:var(--cv-amber)}
+#akk-crew-v66 .cv72-photo-badge--ok{background:var(--cv-green-soft);color:var(--cv-green)}
+#akk-crew-v66 .cv72-check-photo-row{display:flex;align-items:center;gap:9px;padding-top:6px;border-top:1px dashed var(--cv-line)}
+#akk-crew-v66 .cv72-check-thumb{width:54px;height:42px;border-radius:8px;object-fit:cover;border:1px solid var(--cv-line);background:var(--cv-bg);flex-shrink:0}
+#akk-crew-v66 .cv72-check-photo-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;flex:1;min-width:0}
+#akk-crew-v66 .cv72-photo-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:34px;padding:5px 11px;border-radius:9px;border:1px solid var(--cv-line)!important;background:var(--cv-blue-soft)!important;color:var(--cv-blue)!important;font-size:12px!important;font-weight:650!important}
+html.dark #akk-crew-v66 .cv72-photo-btn{color:#bfd7ff!important}
+#akk-crew-v66 .cv72-photo-btn--ghost{background:var(--cv-bg)!important;color:var(--cv-ink)!important}
+#akk-crew-v66 .cv72-check-warning{padding:8px 10px;border-radius:10px;background:var(--cv-amber-soft);color:var(--cv-amber)!important;font-size:12px!important;font-weight:500;line-height:1.4}
+#akk-crew-v66 .cv72-admin-checklist{display:grid;grid-template-columns:repeat(auto-fill,minmax(145px,1fr));gap:8px;margin-top:6px;padding-top:8px;border-top:1px solid var(--cv-line)}
+#akk-crew-v66 .cv72-admin-check-item{display:flex;flex-direction:column;gap:5px;padding:8px;border-radius:10px;background:var(--cv-bg);border:1px solid var(--cv-line)}
+#akk-crew-v66 .cv72-admin-check-title{display:flex;align-items:center;gap:5px;font-size:11.5px!important;font-weight:650;color:var(--cv-ink);line-height:1.25}
+#akk-crew-v66 .cv72-admin-check-photo{width:100%;height:78px;object-fit:cover;border-radius:7px;border:1px solid var(--cv-line);background:var(--cv-surface)}
+#akk-crew-v66 .cv72-sandbox-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:9px 12px;border-radius:14px;background:var(--cv-amber-soft);color:var(--cv-amber);font-size:12px!important;font-weight:600}
+

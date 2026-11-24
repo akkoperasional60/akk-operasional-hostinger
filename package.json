@@ -19,9 +19,7 @@
     "lint": "tsc --noEmit",
     "test": "NODE_OPTIONS='-r ./scripts/setup_test_env.js' tsx scripts/run_e2e_tests.ts"
   },
-  "engines": {
-    "node": "24.x"
-  },
+  "engines": { "node": "24.x" },
   "dependencies": {
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.3.3",

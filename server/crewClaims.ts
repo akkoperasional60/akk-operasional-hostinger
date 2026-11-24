@@ -141,6 +141,73 @@ function checkLocation(input: unknown) {
   return { latitude, longitude, accuracy };
 }
 
+const REQUIRED_VEHICLE_CHECKLIST = [
+  { key: 'oli_mesin', label: 'Oli Mesin', requiresPhoto: true },
+  { key: 'air_radiator', label: 'Air Radiator', requiresPhoto: true },
+  { key: 'air_aki', label: 'Air Aki', requiresPhoto: false },
+  { key: 'rem_minyak_rem', label: 'Rem Mobil & Minyak Rem', requiresPhoto: true },
+  { key: 'kebersihan_kabin', label: 'Kebersihan Kabin', requiresPhoto: true },
+  { key: 'inventaris_mobil', label: 'Inventaris Mobil', requiresPhoto: false },
+  { key: 'ban_cadangan', label: 'Ban Cadangan', requiresPhoto: false }
+] as const;
+
+function validateAndNormalizeChecklist(raw: unknown) {
+  if (!Array.isArray(raw)) {
+    throw Object.assign(new Error('Checklist kendaraan wajib diisi lengkap.'), { status: 422 });
+  }
+  const byKey = new Map<string, any>();
+  for (const item of raw) {
+    if (item && typeof item === 'object' && typeof (item as any).key === 'string') {
+      byKey.set((item as any).key, item);
+    }
+  }
+  const missingPhotos: string[] = [];
+  const unchecked: string[] = [];
+  const normalized: any[] = [];
+  for (const def of REQUIRED_VEHICLE_CHECKLIST) {
+    const entry = byKey.get(def.key);
+    if (!entry || entry.checked !== true) {
+      unchecked.push(def.label);
+      continue;
+    }
+    if (def.requiresPhoto) {
+      const photo = typeof entry.photo === 'string' ? entry.photo.trim() : '';
+      if (!/^data:image\/(jpeg|png|webp);base64,/i.test(photo) || photo.length < 80) {
+        missingPhotos.push(def.label);
+        continue;
+      }
+      if (photo.length > 3_500_000) {
+        throw Object.assign(new Error(`Foto ${def.label} terlalu besar.`), { status: 413 });
+      }
+      const itemGps = checkLocation(entry.gps) || undefined;
+      normalized.push({
+        key: def.key,
+        label: def.label,
+        checked: true,
+        requiresPhoto: true,
+        photo,
+        photoAttached: true,
+        capturedAt: clean(entry.capturedAt) || new Date().toISOString(),
+        ...(itemGps ? { gps: itemGps } : {})
+      });
+    } else {
+      normalized.push({
+        key: def.key,
+        label: def.label,
+        checked: true,
+        requiresPhoto: false
+      });
+    }
+  }
+  if (missingPhotos.length > 0) {
+    throw Object.assign(new Error(`Foto bukti wajib belum lengkap: ${missingPhotos.join(', ')}.`), { status: 422 });
+  }
+  if (unchecked.length > 0) {
+    throw Object.assign(new Error(`Item checklist belum dicentang: ${unchecked.join(', ')}.`), { status: 422 });
+  }
+  return normalized;
+}
+
 export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): void {
   const readSchedulesPayload = async (): Promise<any> => {
     if (isDatabaseConfigured()) {
@@ -334,6 +401,7 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
         else trip.actualArrival = now;
         trip.crewFieldEvents = (Array.isArray(trip.crewFieldEvents) ? trip.crewFieldEvents : []).slice(-(MAX_REPORT_EVENTS - 1));
         trip.crewFieldEvents.push({ action, actorId: clean(actor.id), actorName: clean(actor.full_name), position: role, gps, at: now });
+        trip.crewClaimVersion = Number(trip.crewClaimVersion || 0) + 1;
         trip.updatedAt = now;
         payload.updatedAt = now;
         if (conn) {
@@ -374,6 +442,9 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
           trip.crewOdometerStart = String(value);
         } else if (task === 'inspection') {
           if (slot !== 'driver') throw Object.assign(new Error('Checklist kendaraan hanya tugas Driver.'), { status: 403 });
+          if (!trip.crewOdometerStart) throw Object.assign(new Error('Isi KM awal terlebih dahulu sebelum mengisi checklist kendaraan.'), { status: 409 });
+          const normalizedChecklist = validateAndNormalizeChecklist(req.body?.checklist);
+          trip.crewInspectionChecklist = normalizedChecklist;
           trip.crewInspectionDone = true;
         } else {
           if (slot !== 'helper') throw Object.assign(new Error('Surat jalan hanya tugas Helper.'), { status: 403 });
@@ -385,6 +456,7 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
           action: task, actorId: clean(actor.id), actorName: clean(actor.full_name), position: slot,
           value: task === 'km' ? trip.crewOdometerStart : undefined, gps, at: now
         });
+        trip.crewClaimVersion = Number(trip.crewClaimVersion || 0) + 1;
         trip.updatedAt = now;
         payload.updatedAt = now;
         if (conn) {
@@ -474,6 +546,7 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
         delete trip.actualArrival;
         delete trip.crewOdometerStart;
         delete trip.crewInspectionDone;
+        delete trip.crewInspectionChecklist;
         delete trip.crewWaybillValidated;
         trip.crewFieldEvents = [];
         trip.crewClaimAudit = [];

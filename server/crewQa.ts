@@ -78,6 +78,42 @@ const same = (a: any, b: any) => {
 };
 const roleOf = (trip: any, u: any): 'driver' | 'helper' | null => same(trip.driver?.id, u.id) ? 'driver' : same(trip.helper?.id, u.id) ? 'helper' : null;
 const err = (message: string, status = 400) => Object.assign(new Error(message), { status });
+const QA_VEHICLE_CHECKLIST = [
+  { key: 'oli_mesin', label: 'Oli Mesin', requiresPhoto: true },
+  { key: 'air_radiator', label: 'Air Radiator', requiresPhoto: true },
+  { key: 'air_aki', label: 'Air Aki', requiresPhoto: false },
+  { key: 'rem_minyak_rem', label: 'Rem Mobil & Minyak Rem', requiresPhoto: true },
+  { key: 'kebersihan_kabin', label: 'Kebersihan Kabin', requiresPhoto: true },
+  { key: 'inventaris_mobil', label: 'Inventaris Mobil', requiresPhoto: false },
+  { key: 'ban_cadangan', label: 'Ban Cadangan', requiresPhoto: false }
+] as const;
+const validateQaChecklist = (raw: unknown) => {
+  if (!Array.isArray(raw)) throw err('Checklist kendaraan wajib diisi lengkap.', 422);
+  const byKey = new Map<string, any>();
+  for (const item of raw) {
+    if (item && typeof item === 'object' && typeof (item as any).key === 'string') byKey.set((item as any).key, item);
+  }
+  const missingPhotos: string[] = [];
+  const unchecked: string[] = [];
+  const summary: any[] = [];
+  for (const def of QA_VEHICLE_CHECKLIST) {
+    const entry = byKey.get(def.key);
+    if (!entry || entry.checked !== true) { unchecked.push(def.label); continue; }
+    if (def.requiresPhoto) {
+      const photo = typeof entry.photo === 'string' ? entry.photo.trim() : '';
+      if (!/^data:image\/(jpeg|png|webp);base64,/i.test(photo) || photo.length < 80) {
+        missingPhotos.push(def.label);
+        continue;
+      }
+      summary.push({ key: def.key, label: def.label, checked: true, requiresPhoto: true, photoAttached: true, capturedAt: str(entry.capturedAt) || new Date().toISOString() });
+    } else {
+      summary.push({ key: def.key, label: def.label, checked: true, requiresPhoto: false });
+    }
+  }
+  if (missingPhotos.length > 0) throw err(`Foto bukti wajib belum lengkap: ${missingPhotos.join(', ')}.`, 422);
+  if (unchecked.length > 0) throw err(`Item checklist belum dicentang: ${unchecked.join(', ')}.`, 422);
+  return summary;
+};
 const getRows = async (conn: any, lock = false): Promise<any[]> => {
   const [rows] = await conn.execute(`SELECT state_json FROM app_state WHERE state_key=? LIMIT 1 ${lock?'FOR UPDATE':''}`, [QA_KEY]);
   const parsed = json(rows?.[0]?.state_json);
@@ -225,6 +261,8 @@ export function registerCrewQaRoutes(app: Express, requireAuth: any) {
           t.odometerStart=String(km);
         }else if(action==='inspection'){
           if(slot!=='driver')throw err('Checklist armada hanya untuk Driver.',403);
+          if(!t.odometerStart)throw err('Isi KM awal terlebih dahulu sebelum mengisi checklist kendaraan.',409);
+          t.inspectionChecklist=validateQaChecklist(req.body?.checklist);
           t.inspectionDone=true;
         }else if(action==='waybill'){
           if(slot!=='helper')throw err('Validasi SJ hanya untuk Helper.',403);
@@ -266,6 +304,7 @@ export function registerCrewQaRoutes(app: Express, requireAuth: any) {
         delete t.returnedAt;
         delete t.odometerStart;
         delete t.inspectionDone;
+        delete t.inspectionChecklist;
         delete t.waybillValidated;
         t.reports = [];
         t.updatedAt = new Date().toISOString();

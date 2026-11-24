@@ -2,14 +2,17 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
-  ArrowUpRight, Check, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck,
-  CloudOff, FileClock, FileText, LoaderCircle, LogOut, RefreshCw, Search, ShieldCheck,
+  ArrowUpRight, Camera, Check, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck,
+  CloudOff, FileClock, FileText, LoaderCircle, LogOut, RefreshCw, RotateCcw, Search, ShieldCheck,
   Truck, Users, X
 } from 'lucide-react';
 import type { UserProfile } from '../../types';
 import { logisticsStore } from '../../services/store';
-import { WORK_FOR_SLOT, WORK_LABELS, isQaAccount, isCompleted, slotForUser,
-  type CrewSlot, type FieldTrip, type WorkAction } from './crewModel';
+import {
+  VEHICLE_CHECKLIST_ITEMS, WORK_FOR_SLOT, WORK_LABELS, isQaAccount, isCompleted,
+  isTodayOrTomorrowTrip, slotForUser, validateVehicleChecklist,
+  type CrewSlot, type FieldTrip, type InspectionChecklistEntry, type VehicleChecklistKey, type WorkAction
+} from './crewModel';
 import { canClaimLive, claimTrip, getTripsForUser, listenCrewChanged, markTask,
   moveTrip, recordKm, submitWorkReport } from './crewApi';
 import { TABS, shortDate, initials, roleName, Button, IconTile, Heading,
@@ -47,6 +50,11 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
   const [accountOpen, setAccountOpen] = useState(false);
   const [taskConfirm, setTaskConfirm] = useState<{tripId: string; kind: 'inspection' | 'waybill'} | null>(null);
   const [taskChecks, setTaskChecks] = useState<[boolean, boolean]>([false,false]);
+  const [inspectionChecks, setInspectionChecks] = useState<Record<VehicleChecklistKey, boolean>>(() =>
+    VEHICLE_CHECKLIST_ITEMS.reduce((acc, item) => ({ ...acc, [item.key]: false }), {} as Record<VehicleChecklistKey, boolean>)
+  );
+  const [inspectionPhotos, setInspectionPhotos] = useState<Partial<Record<VehicleChecklistKey, CameraEvidence>>>({});
+  const [inspectionCameraKey, setInspectionCameraKey] = useState<VehicleChecklistKey | null>(null);
   const [reportKind, setReportKind] = useState<WorkAction | null>(null);
   const [reportTripId, setReportTripId] = useState<string | null>(null);
   const [reportNote, setReportNote] = useState('');
@@ -142,9 +150,22 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
   const mine = useMemo(() => trips.filter(t => Boolean(slotForUser(t, user))), [trips, user.id, user.fullName]);
   const claimedDates = useMemo(() => new Set(mine.map(t => t.date).filter(Boolean)), [mine]);
   const ongoing = useMemo(() => mine.filter(t => !isCompleted(t)), [mine]);
-  const completed = useMemo(() => mine.filter(isCompleted), [mine]);
+  const completed = useMemo(
+    () =>
+      mine
+        .filter(isCompleted)
+        .sort((a, b) => String(b.returnedAt || b.date || '').localeCompare(String(a.returnedAt || a.date || ''))),
+    [mine]
+  );
   const hasActiveAssignment = ongoing.length > 0 || claimReceipt !== null;
-  const openTrips = useMemo(() => hasActiveAssignment ? ongoing : trips.filter(t => t.phase !== 'returned'), [trips, ongoing, hasActiveAssignment]);
+  const openTrips = useMemo(() => {
+    const list = hasActiveAssignment
+      ? ongoing
+      : trips.filter(t => !isCompleted(t) && isTodayOrTomorrowTrip(t));
+    return [...list].sort((a, b) =>
+      a.date === b.date ? a.departureTime.localeCompare(b.departureTime) : a.date.localeCompare(b.date)
+    );
+  }, [trips, ongoing, hasActiveAssignment]);
   const visibleTrips = useMemo(() => openTrips.filter(t => {
     if (hasActiveAssignment) return true;
     const query = search.trim().toLocaleLowerCase('id-ID');
@@ -165,10 +186,11 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     const ids = Array.from(new Set(trips.map(t => t.branchId)));
     return ids.length === 1 ? (ids[0] === 'cab-sidoarjo' ? 'Sidoarjo' : ids[0] === 'cab-banyuwangi' ? 'Nusantara' : '') : '';
   }, [trips]);
-  const modalOpen = Boolean(claimId || taskConfirm || accountOpen || cameraOpen);
+  const modalOpen = Boolean(claimId || taskConfirm || accountOpen || cameraOpen || inspectionCameraKey);
   useEffect(() => { main.current?.scrollTo({top:0, behavior:'instant'}); }, [screen, selectedId, reportKind]);
   useEffect(() => { setKmValue(''); }, [activeTrip?.id]);
   useEffect(() => { if (!reportTrip || screen !== 'laporan') setCameraOpen(false); }, [reportTrip?.id, screen]);
+  useEffect(() => { if (!taskConfirm || taskConfirm.kind !== 'inspection') setInspectionCameraKey(null); }, [taskConfirm]);
   useEffect(() => {
     if (!message) return;
     const timer = window.setTimeout(() => setMessage(''), 2500);
@@ -198,9 +220,26 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
       setClaimReceipt(id); setClaimId(null); setClaimPosition(null); choose(id);
     });
   };
+  const resetInspectionForm = () => {
+    setInspectionChecks(
+      VEHICLE_CHECKLIST_ITEMS.reduce((acc, item) => ({ ...acc, [item.key]: false }), {} as Record<VehicleChecklistKey, boolean>)
+    );
+    setInspectionPhotos({});
+    setInspectionCameraKey(null);
+  };
   const openTaskConfirm = (kind: 'inspection' | 'waybill') => {
     if (!activeTrip || busy || (kind === 'inspection' ? activeTrip.inspectionDone : activeTrip.waybillValidated)) return;
-    clearNotice(); setTaskChecks([false,false]); setTaskConfirm({tripId:activeTrip.id,kind});
+    if (kind === 'inspection' && !activeTrip.odometerStart) {
+      setFault('Isi KM awal terlebih dahulu sebelum mengisi checklist kendaraan.');
+      return;
+    }
+    clearNotice();
+    if (kind === 'inspection') {
+      resetInspectionForm();
+    } else {
+      setTaskChecks([false, false]);
+    }
+    setTaskConfirm({ tripId: activeTrip.id, kind });
   };
   const openReport = (kind: WorkAction) => {
     if (!activeTrip || !activeSlot || busy || !WORK_FOR_SLOT[activeSlot].includes(kind)) return;
@@ -224,12 +263,67 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     if (!activeTrip || !activeSlot) return;
     void invoke(() => moveTrip(user,activeTrip.id,phase), phase === 'going' ? 'Keberangkatan tercatat.' : 'Kiriman selesai.', phase === 'returned' ? () => {setScreen('riwayat'); setExpandedHistory(activeTrip.id); resetReport();} : undefined);
   };
+  const inspectionEntries = useMemo<InspectionChecklistEntry[]>(() =>
+    VEHICLE_CHECKLIST_ITEMS.map(item => {
+      const evidence = item.requiresPhoto ? inspectionPhotos[item.key] : undefined;
+      return {
+        key: item.key,
+        label: item.label,
+        checked: Boolean(inspectionChecks[item.key]),
+        requiresPhoto: item.requiresPhoto,
+        ...(item.requiresPhoto ? {
+          photo: evidence?.photo,
+          photoAttached: Boolean(evidence?.photo),
+          capturedAt: evidence?.capturedAt,
+          gps: evidence?.gps
+        } : {})
+      };
+    }),
+    [inspectionChecks, inspectionPhotos]
+  );
+  const inspectionCheckedCount = useMemo(
+    () => VEHICLE_CHECKLIST_ITEMS.filter(item => inspectionChecks[item.key]).length,
+    [inspectionChecks]
+  );
+  const inspectionPhotoTotal = useMemo(
+    () => VEHICLE_CHECKLIST_ITEMS.filter(item => item.requiresPhoto).length,
+    []
+  );
+  const inspectionPhotoCount = useMemo(
+    () => VEHICLE_CHECKLIST_ITEMS.filter(item => item.requiresPhoto && Boolean(inspectionPhotos[item.key]?.photo)).length,
+    [inspectionPhotos]
+  );
+  const inspectionValidationError = useMemo(
+    () => validateVehicleChecklist(inspectionEntries),
+    [inspectionEntries]
+  );
+  const activeInspectionCamItem = inspectionCameraKey
+    ? VEHICLE_CHECKLIST_ITEMS.find(item => item.key === inspectionCameraKey) || null
+    : null;
   const saveCheck = () => {
-    if (!taskConfirm || !taskChecks.every(Boolean)) return;
+    if (!taskConfirm) return;
     const target = ongoing.find(t=>t.id===taskConfirm.tripId);
     const slot = target ? slotForUser(target,user) : null;
     if (!target || slot !== (taskConfirm.kind === 'inspection' ? 'driver' : 'helper')) {setFault('Tugas tidak tersedia. Muat ulang jadwal.');return;}
-    void invoke(() => markTask(user,taskConfirm.tripId,taskConfirm.kind), 'Pemeriksaan tersimpan.', () => setTaskConfirm(null));
+    if (taskConfirm.kind === 'inspection') {
+      if (!target.odometerStart) {
+        setFault('Isi KM awal terlebih dahulu sebelum mengisi checklist kendaraan.');
+        return;
+      }
+      const err = validateVehicleChecklist(inspectionEntries);
+      if (err) {
+        setFault(err);
+        return;
+      }
+      void invoke(
+        () => markTask(user, taskConfirm.tripId, 'inspection', inspectionEntries),
+        'Checklist & foto kendaraan tersimpan.',
+        () => { setTaskConfirm(null); resetInspectionForm(); }
+      );
+      return;
+    }
+    if (!taskChecks.every(Boolean)) return;
+    void invoke(() => markTask(user,taskConfirm.tripId,'waybill'), 'Validasi surat jalan tersimpan.', () => setTaskConfirm(null));
   };
   const notice = fault ? <div className="cv66-notice cv66-notice--error" role="alert"><CloudOff size={18}/><span>{fault}</span><button type="button" aria-label="Tutup pesan" onClick={()=>setFault('')}><X size={17}/></button></div>
     : message ? <div className="cv66-notice cv66-notice--success" role="status"><CheckCircle2 size={18}/><span>{message}</span><button type="button" aria-label="Tutup pesan" onClick={()=>setMessage('')}><X size={17}/></button></div> : null;
@@ -255,7 +349,7 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
                 {visibleTrips.length ? visibleTrips.map(t => {
                   const lockedSameDay = Boolean(t.date && claimedDates.has(t.date) && !slotForUser(t, user));
                   return <TripCard key={t.id} trip={t} mine={slotForUser(t,user)} claimAllowed={claimAllowed} sameDayLocked={lockedSameDay} busy={busy} onOpen={()=>choose(t.id)} onClaim={()=>{if (!claimAllowed || lockedSameDay || busy) return; clearNotice();setClaimPosition(null);setClaimId(t.id);}}/>;
-                }) : <Empty icon={Truck} title={hasActiveAssignment ? 'Kiriman tersimpan' : search ? 'Kiriman tidak ditemukan' : 'Belum ada kiriman'} detail={hasActiveAssignment ? 'Muat ulang untuk menampilkan kiriman aktif.' : search ? undefined : 'Jadwal dari Admin akan muncul di sini.'} action={hasActiveAssignment ? {label:'Muat Ulang',run:()=>void refresh()} : undefined}/>}
+                }) : <Empty icon={Truck} title={hasActiveAssignment ? 'Kiriman tersimpan' : search ? 'Kiriman tidak ditemukan' : 'Belum ada kiriman hari ini & besok'} detail={hasActiveAssignment ? 'Muat ulang untuk menampilkan kiriman aktif.' : search ? undefined : 'Jadwal hari ini dan besok dari Admin akan muncul di sini.'} action={hasActiveAssignment ? {label:'Muat Ulang',run:()=>void refresh()} : undefined}/>}
               </>}
               {screen === 'tugas' && <>
                 <Heading title="Tugas"/>
@@ -266,7 +360,14 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
                       <div className="cv66-km"><div className="cv66-km-label"><IconTile icon={activeTrip.odometerStart ? CheckCircle2 : Truck} art={activeTrip.odometerStart ? 'success' : 'gauge'} tone={activeTrip.odometerStart ? 'green' : 'blue'}/><span className="cv66-row-title">KM Awal</span>{activeTrip.odometerStart && <span className="cv66-km-value">{activeTrip.odometerStart} km</span>}</div>
                         {!activeTrip.odometerStart && <form className="cv66-km-form" onSubmit={saveKm}><input type="number" inputMode="numeric" min="1" max="99999999" step="1" value={kmValue} placeholder="Isi KM" aria-label="KM awal kendaraan" onChange={e=>setKmValue(e.target.value)} required/><Button type="submit" disabled={busy || !Number.isFinite(Number(kmValue)) || Number(kmValue)<=0 || Number(kmValue)>99999999}>Simpan</Button></form>}
                       </div>
-                      <TaskRow icon={ShieldCheck} label="Cek Armada" done={Boolean(activeTrip.inspectionDone)} disabled={busy} onClick={()=>openTaskConfirm('inspection')}/>
+                      <TaskRow
+                        icon={ShieldCheck}
+                        label="Cek Armada"
+                        detail={!activeTrip.odometerStart ? 'Isi KM awal terlebih dahulu' : activeTrip.inspectionDone ? '7 item & 4 foto bukti tersimpan' : '7 item checklist · 4 foto bukti wajib'}
+                        done={Boolean(activeTrip.inspectionDone)}
+                        disabled={busy || !activeTrip.odometerStart}
+                        onClick={()=>openTaskConfirm('inspection')}
+                      />
                     </> : <TaskRow icon={ClipboardCheck} label="Validasi Surat Jalan" done={Boolean(activeTrip.waybillValidated)} disabled={busy} onClick={()=>openTaskConfirm('waybill')}/>}
                   </Panel>
                   <Journey trip={activeTrip} busy={busy} onMove={handleMove}/>
@@ -294,7 +395,6 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
         </main>
         <nav className="cv66-tabs" aria-label="Navigasi pekerjaan">{TABS.map(({id,label})=><motion.button type="button" key={id} disabled={busy} aria-current={screen===id?'page':undefined} className={`cv66-tab ${screen===id?'cv66-tab--active':''}`} onClick={()=>nav(id)} whileTap={busy || reduced ? undefined : {scale:.94}}>{screen===id && <motion.span className="cv69-tab-indicator" layoutId="cv69-tab-indicator" transition={reduced?{duration:0}:{type:'spring',stiffness:440,damping:36}}/>}<CrewArt name={TAB_ART[id]} size={30} active={screen===id}/><span className="cv69-tab-label">{label}</span></motion.button>)}</nav>
       </div>
-      {cameraOpen && reportTrip && reportKind && <CrewLiveCamera key={`${reportTrip.id}:${reportKind}`} onClose={()=>setCameraOpen(false)} onCapture={evidence=>{setReportEvidence(evidence);setCameraOpen(false);clearNotice();}}/>}
       <AnimatePresence>
         {claimId && <Dialog key="claim" title={claimPosition ? "Konfirmasi Kiriman" : "Pilih Posisi"} busy={busy} onClose={closeClaim}>
           {notice}
@@ -309,9 +409,115 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
           </>}
           {!claimEnabled && <p className="cv66-required">Pengambilan kiriman belum aktif.</p>}
         </Dialog>}
-        {taskConfirm && <Dialog key="check" title={taskConfirm.kind==='inspection'?'Cek Armada':'Cek Surat Jalan'} busy={busy} onClose={()=>{setTaskConfirm(null);clearNotice();}}>{notice}<div className="cv66-checklist">{(taskConfirm.kind==='inspection'?['Ban, rem, dan lampu aman','Kendaraan dan perlengkapan siap']:['Tujuan dan jumlah surat jalan sesuai','Dokumen lengkap dan siap dibawa']).map((label,i)=><label key={label}><input type="checkbox" checked={taskChecks[i]} disabled={busy} onChange={e=>{const checked=e.target.checked;setTaskChecks(v=>i===0?[checked,v[1]]:[v[0],checked]);}}/><span>{label}</span></label>)}</div><Button disabled={busy || !taskChecks.every(Boolean)} loading={busy} onClick={saveCheck}><Check size={18}/>Simpan</Button>{!qa && <p className="cv66-meta cv66-gps">Waktu dan GPS dicatat.</p>}</Dialog>}
+        {taskConfirm && (
+          <Dialog
+            key="check"
+            title={taskConfirm.kind === 'inspection' ? 'Cek Armada' : 'Cek Surat Jalan'}
+            busy={busy || Boolean(inspectionCameraKey)}
+            onClose={() => { setTaskConfirm(null); setInspectionCameraKey(null); clearNotice(); }}
+          >
+            {notice}
+            {taskConfirm.kind === 'inspection' ? (
+              <>
+                <div className={`cv72-check-summary ${!inspectionValidationError ? 'cv72-check-summary--ready' : ''}`}>
+                  <span>Checklist: {inspectionCheckedCount}/{VEHICLE_CHECKLIST_ITEMS.length}</span>
+                  <span>Foto bukti: {inspectionPhotoCount}/{inspectionPhotoTotal}</span>
+                </div>
+                <div className="cv72-check-list">
+                  {VEHICLE_CHECKLIST_ITEMS.map(item => {
+                    const checked = Boolean(inspectionChecks[item.key]);
+                    const evidence = item.requiresPhoto ? inspectionPhotos[item.key] : undefined;
+                    const itemComplete = checked && (!item.requiresPhoto || Boolean(evidence?.photo));
+                    return (
+                      <div key={item.key} className={`cv72-check-card ${itemComplete ? 'cv72-check-card--done' : ''}`}>
+                        <label className="cv72-check-top">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={busy}
+                            onChange={e => {
+                              const nextVal = e.target.checked;
+                              setInspectionChecks(prev => ({ ...prev, [item.key]: nextVal }));
+                            }}
+                          />
+                          <span className="cv72-check-label">{item.label}</span>
+                          {item.requiresPhoto && (
+                            <span className={`cv72-photo-badge ${evidence?.photo ? 'cv72-photo-badge--ok' : ''}`}>
+                              <Camera size={12}/>
+                              {evidence?.photo ? 'Foto OK' : 'Wajib Foto'}
+                            </span>
+                          )}
+                        </label>
+                        {item.requiresPhoto && (
+                          <div className="cv72-check-photo-row">
+                            {evidence?.photo && (
+                              <img src={evidence.photo} alt={`Bukti ${item.label}`} className="cv72-check-thumb"/>
+                            )}
+                            <div className="cv72-check-photo-actions">
+                              <button
+                                type="button"
+                                className={`cv72-photo-btn ${evidence?.photo ? 'cv72-photo-btn--ghost' : ''}`}
+                                disabled={busy}
+                                onClick={() => { clearNotice(); setInspectionCameraKey(item.key); }}
+                              >
+                                {evidence?.photo ? <RotateCcw size={14}/> : <Camera size={14}/>}
+                                <span>{evidence?.photo ? 'Ambil Ulang' : 'Ambil Foto'}</span>
+                              </button>
+                              {evidence?.photo && (
+                                <span className="cv66-meta">Dokumentasi tersimpan</span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {inspectionValidationError && (
+                  <p className="cv72-check-warning" role="alert">{inspectionValidationError}</p>
+                )}
+                <Button
+                  disabled={busy || Boolean(inspectionCameraKey) || Boolean(inspectionValidationError)}
+                  loading={busy}
+                  onClick={saveCheck}
+                >
+                  <Check size={18}/>Simpan Checklist Armada
+                </Button>
+                {!qa && <p className="cv66-meta cv66-gps">Seluruh 7 item & 4 foto bukti wajib lengkap sebelum melanjutkan ke Berangkat.</p>}
+              </>
+            ) : (
+              <>
+                <div className="cv66-checklist">
+                  {['Tujuan dan jumlah surat jalan sesuai','Dokumen lengkap dan siap dibawa'].map((label,i)=>(
+                    <label key={label}>
+                      <input type="checkbox" checked={taskChecks[i]} disabled={busy} onChange={e=>{const checked=e.target.checked;setTaskChecks(v=>i===0?[checked,v[1]]:[v[0],checked]);}}/>
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+                <Button disabled={busy || !taskChecks.every(Boolean)} loading={busy} onClick={saveCheck}><Check size={18}/>Simpan</Button>
+                {!qa && <p className="cv66-meta cv66-gps">Waktu dan GPS dicatat.</p>}
+              </>
+            )}
+          </Dialog>
+        )}
         {accountOpen && <Dialog key="account" title="Akun" onClose={()=>{setAccountOpen(false);clearNotice();}}><div className="cv66-profile"><span className="cv66-profile-avatar">{initials(user.fullName)}</span><div><span className="cv66-profile-name">{user.fullName||'Kru AKK'}</span><span className="cv66-meta">{user.email}</span></div></div>{!qa && onOpenClassic && <Button variant="secondary" onClick={()=>{setAccountOpen(false);onOpenClassic();}}>Fitur Operasional Lengkap<ArrowUpRight size={18}/></Button>}<Button variant="danger" onClick={()=>logisticsStore.logoutUser()}><LogOut size={18}/>Keluar Akun</Button></Dialog>}
       </AnimatePresence>
+      {cameraOpen && reportTrip && reportKind && <CrewLiveCamera key={`${reportTrip.id}:${reportKind}`} onClose={()=>setCameraOpen(false)} onCapture={evidence=>{setReportEvidence(evidence);setCameraOpen(false);clearNotice();}}/>}
+      {taskConfirm?.kind === 'inspection' && activeInspectionCamItem && (
+        <CrewLiveCamera
+          key={`insp-${taskConfirm.tripId}-${activeInspectionCamItem.key}`}
+          title={`Foto: ${activeInspectionCamItem.label}`}
+          onClose={() => setInspectionCameraKey(null)}
+          onCapture={evidence => {
+            const key = activeInspectionCamItem.key;
+            setInspectionPhotos(prev => ({ ...prev, [key]: evidence }));
+            setInspectionChecks(prev => ({ ...prev, [key]: true }));
+            setInspectionCameraKey(null);
+            clearNotice();
+          }}
+        />
+      )}
     </div>, document.body
   );
 };

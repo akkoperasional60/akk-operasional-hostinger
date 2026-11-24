@@ -2,7 +2,8 @@ import type { UserProfile } from '../../types';
 import { logisticsStore } from '../../services/store';
 import {
   assertTripVisible, fetchLiveTrips, fetchQaTrips, freshGps, getAuthHeaders, isQaAccount,
-  QA_EVENT, slotForUser, isCompleted, type CrewSlot, type FieldTrip, type WorkAction
+  QA_EVENT, slotForUser, isCompleted, validateVehicleChecklist,
+  type CrewSlot, type FieldTrip, type InspectionChecklistEntry, type WorkAction
 } from './crewModel';
 import { validateCameraEvidence, type CameraEvidence } from './crewCaptureEvidence';
 
@@ -236,14 +237,30 @@ export async function recordKm(user: UserProfile, tripId: string, value: string)
   notifyCrewChanged();
 }
 
-export async function markTask(user: UserProfile, tripId: string, task: 'inspection' | 'waybill'): Promise<void> {
+export async function markTask(
+  user: UserProfile,
+  tripId: string,
+  task: 'inspection' | 'waybill',
+  checklist?: InspectionChecklistEntry[]
+): Promise<void> {
+  if (task === 'inspection') {
+    const checklistError = validateVehicleChecklist(checklist);
+    if (checklistError) throw new Error(checklistError);
+  }
   if (!isQaAccount(user)) {
     const gps = await freshGps();
-    await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/task`, 'POST', { action:task, gps });
+    await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/task`, 'POST', {
+      action: task,
+      gps,
+      ...(task === 'inspection' ? { checklist } : {})
+    });
     notifyCrewChanged();
     return;
   }
-  await jsonRequest(`/api/crew-qa/trips/${encodeURIComponent(tripId)}/action`, 'POST', { action: task });
+  await jsonRequest(`/api/crew-qa/trips/${encodeURIComponent(tripId)}/action`, 'POST', {
+    action: task,
+    ...(task === 'inspection' ? { checklist } : {})
+  });
   notifyCrewChanged();
 }
 
