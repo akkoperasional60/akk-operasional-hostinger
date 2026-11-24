@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { AkkLogo } from './AkkLogo';
 import { ThemeSwitcher } from './ThemeSwitcher';
+import { ShipmentScheduleWorkbench } from './ShipmentScheduleWorkbench';
 import { logisticsStore } from '../services/store';
 import type { UserProfile } from '../types';
 import { canAccess } from '../utils/rbac';
@@ -392,6 +393,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onO
   );
 
   return <>
+    <ShipmentScheduleWorkbench activeTab={currentTab} user={user} />
     {!isCrewWorkScreen && <div className="akk-clean-mobile-top lg:hidden">
       <button type="button" className="akk-clean-icon-button" onClick={() => setMobileOpen(true)} aria-label="Buka menu"><Menu size={22} /></button>
       <button type="button" className="akk-clean-mobile-home" onClick={() => navigate('dashboard')}><AkkLogo size="sm" showSubtitle={false} showText={false} /><strong>AKK</strong></button>
