@@ -11,6 +11,7 @@ import type { UserProfile } from '../types';
 import { canAccess } from '../utils/rbac';
 import { preloadTabModule } from '../utils/tabLoaders';
 import '../styles/akk-clean-design.css';
+import '../styles/akk-driver-helper-clean.css';
 
 // All existing tab IDs remain unchanged. Routes, role permissions, and saved links keep working.
 export type NavTab =
