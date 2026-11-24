@@ -155,3 +155,499 @@ html.dark .akk-crew-notice.error,html.dark .akk-crew-alert,html.dark .akk-crew-e
   .akk-crew-slots>div {padding:10px}
   .akk-crew-switch button {font-size:12px}
 }
+
+/* ==========================================================================
+   AKK CREW V62 - FIELD WORKSPACE
+   A single visual system across crew schedule, forms, dialogs and sheets.
+   Scoped to the existing DriverMobileView and its mounted dialogs.
+   Keep the existing React events, API calls, permission checks and GPS flow.
+   ========================================================================== */
+
+body.akk-crew-portal-ui {
+  --akk-crew-bg: #f4f6fa;
+  --akk-crew-card: #ffffff;
+  --akk-crew-line: #e7ebf2;
+  --akk-crew-ink: #14233b;
+  --akk-crew-muted: #66768e;
+  --akk-crew-accent: #225be7;
+  --akk-crew-accent-soft: #eaf0ff;
+  --akk-crew-shadow: 0 6px 23px rgba(24, 47, 83, .055);
+  --akk-crew-easing: cubic-bezier(.2,.8,.2,1);
+}
+
+/* The crew account uses the in-app title bar, not two competing headers. */
+@media (max-width: 1023px) {
+  body.akk-crew-focus #root main:has(.akk-driver-mobile) {
+    padding-top: 0 !important;
+  }
+}
+body.akk-crew-portal-ui .akk-driver-mobile {
+  width: 100%;
+  max-width: 500px !important;
+  margin: 0 auto;
+  background: var(--akk-crew-bg) !important;
+  color: var(--akk-crew-ink) !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  font-size: 14px;
+  line-height: 1.5;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > header {
+  background: rgba(255,255,255,.97) !important;
+  border-bottom: 1px solid var(--akk-crew-line) !important;
+  padding: 13px 18px !important;
+  box-shadow: none !important;
+  min-height: 66px;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > header > div:first-child {gap: 11px !important;}
+body.akk-crew-portal-ui .akk-driver-mobile > header h1 {
+  color: var(--akk-crew-ink) !important;
+  font-size: 17px !important;
+  letter-spacing: -.04em !important;
+  font-weight: 800 !important;
+  text-transform: none !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > header .bg-blue-600\/15 {
+  background: var(--akk-crew-accent-soft) !important;
+  border-color: #d5e1ff !important;
+  color: var(--akk-crew-accent) !important;
+  border-radius: 11px !important;
+}
+/* When the connection is healthy, don't give it valuable header space.
+   Offline and queued changes remain visible. */
+body.akk-crew-portal-ui .akk-driver-mobile > header button:has(> svg[class*="text-emerald-400"]) { display: none !important; }
+body.akk-crew-portal-ui .akk-driver-mobile > header button[aria-label="Perbarui Data Pengiriman"] {
+  background: transparent !important;
+  color: #718096 !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > header button[aria-label="Buka Profil Kru"] {
+  background: #edf2fb !important;
+  color: var(--akk-crew-ink) !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: none !important;
+  border-radius: 12px !important;
+  width: 37px !important;
+  height: 37px !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > header > div:last-child {display:none !important;}
+
+/* One task per card; avoid bright borders, gradients and visual clutter. */
+body.akk-crew-portal-ui .akk-driver-mobile > main {
+  padding: 18px 15px 112px !important;
+  line-height: 1.5;
+  gap: 16px;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main :is(div.bg-white, div.bg-slate-900):is(.rounded-2xl, .rounded-xl) {
+  background: var(--akk-crew-card) !important;
+  border-color: var(--akk-crew-line) !important;
+  box-shadow: var(--akk-crew-shadow) !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main :is(h1,h2,h3,h4) {
+  color: var(--akk-crew-ink) !important;
+  font-weight: 800;
+  letter-spacing: -.035em;
+  line-height: 1.33;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main :where(.text-white, .text-slate-100, .text-slate-200):not(button):not([class*="bg-blue-600"]):not([class*="bg-emerald-"]) {
+  color: var(--akk-crew-ink);
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main :is(.text-slate-400,.text-slate-500) {color: var(--akk-crew-muted);}
+body.akk-crew-portal-ui .akk-driver-mobile > main :where(button, input, textarea, select) {
+  font-size: 13px;
+  letter-spacing: -.012em;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main button {
+  transition: transform .17s var(--akk-crew-easing), background-color .17s ease, border-color .17s ease;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main button:active { transform: scale(.98); }
+body.akk-crew-portal-ui .akk-driver-mobile > main :is(input,select,textarea) {
+  font-size: 15px !important;
+  border-radius: 12px !important;
+  min-height: 44px;
+  background: #fff;
+  color: var(--akk-crew-ink);
+  border-color: var(--akk-crew-line);
+  box-shadow: none;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main input::placeholder {
+  color: #8997aa;
+}
+
+/* Personal summary should say who is working and what action is next. */
+body.akk-crew-portal-ui .akk-driver-mobile > main > div:first-child {
+  padding: 17px !important;
+  border-radius: 18px !important;
+  background: var(--akk-crew-card) !important;
+  border: 1px solid var(--akk-crew-line) !important;
+  box-shadow: var(--akk-crew-shadow) !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main > div:first-child h2 {
+  font-size: 16px !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main > div:first-child button {
+  border-radius: 12px !important;
+  min-height: 44px;
+  padding: 9px 15px !important;
+}
+/* Native GPS with a valid fix can remain automatic. Keep its warning and
+   enable-location action visible only when positioning is unavailable. */
+body.akk-crew-portal-ui .akk-driver-mobile > main > div:first-child > div.border-t:has([title*="Koordinat"]):has(.text-emerald-700) {
+  display: none !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main > div:first-child > div.border-t:not(:has(.text-emerald-700)) {
+  border-top-color: #e9edf4 !important;
+  padding-top: 11px !important;
+}
+
+/* Search and status: one quiet toolbar, one simple segmented control. */
+body.akk-crew-portal-ui .akk-driver-mobile > main input[id="portal-search-query"] {
+  background: #fff !important;
+  border: 1px solid var(--akk-crew-line) !important;
+  border-radius: 14px !important;
+  min-height: 48px !important;
+  font-size: 14px !important;
+  box-shadow: 0 2px 10px rgba(21,41,71,.025);
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main .grid.grid-cols-3:has(> button) {
+  border-radius: 14px !important;
+  border-color: var(--akk-crew-line) !important;
+  background: #e9edf4 !important;
+  padding: 4px !important;
+  gap: 3px !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main .grid.grid-cols-3:has(> button) > button {
+  min-height: 43px !important;
+  font-size: 12px !important;
+  font-weight: 720;
+  border-radius: 10px !important;
+  color: #64748b;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main .grid.grid-cols-3:has(> button) > button.bg-amber-500 {
+  background: #fff !important;
+  color: var(--akk-crew-accent) !important;
+  box-shadow: 0 2px 7px rgba(23,44,87,.095) !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main .py-8.text-center:has(h3) {
+  padding: 32px 20px !important;
+  border-radius: 18px !important;
+  border-color: var(--akk-crew-line) !important;
+  background: #fff !important;
+  box-shadow: var(--akk-crew-shadow);
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main .py-8.text-center:has(h3) h3 {
+  font-size: 16px !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main .py-8.text-center:has(h3) p {
+  margin-top: 4px !important;
+  color: #7b899d !important;
+  font-size: 12px !important;
+  line-height: 1.55 !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main .py-8.text-center:has(h3) button {
+  background: var(--akk-crew-accent-soft);
+  color: var(--akk-crew-accent) !important;
+  border: none !important;
+  padding: 10px 13px !important;
+  border-radius: 11px !important;
+  font-weight: 750;
+}
+
+/* Bottom navigation: a predictable tab bar instead of a floating five-icon puzzle. */
+body.akk-crew-portal-ui .akk-driver-mobile > nav {
+  bottom: 0 !important;
+  padding: 8px 10px calc(10px + env(safe-area-inset-bottom, 0px)) !important;
+  background: rgba(255,255,255,.97);
+  border-top: 1px solid var(--akk-crew-line);
+  border-radius: 0 !important;
+  box-shadow: 0 -7px 28px rgba(27,44,74,.07) !important;
+  max-width: 500px;
+  backdrop-filter: blur(16px);
+}
+body.akk-crew-portal-ui .akk-driver-mobile > nav > div {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  backdrop-filter: none;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > nav .grid.grid-cols-5 {gap: 4px;}
+body.akk-crew-portal-ui .akk-driver-mobile > nav button {
+  min-height: 59px !important;
+  border-radius: 13px !important;
+  color: #77859a;
+  font-size: 11px !important;
+  font-weight: 650 !important;
+  padding-block: 8px !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > nav button.text-blue-600,
+body.akk-crew-portal-ui .akk-driver-mobile > nav button.text-cyan-600 {color: var(--akk-crew-accent) !important;}
+body.akk-crew-portal-ui .akk-driver-mobile > nav [class*="-mt-7"] {margin-top: 0 !important;}
+body.akk-crew-portal-ui .akk-driver-mobile > nav button[aria-label="Fitur Lapangan Driver & Helper"] {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  width: 43px !important;
+  height: 43px !important;
+  min-height: 43px !important;
+  margin: 0 auto 13px;
+  border-radius: 14px !important;
+  border: none !important;
+  background: var(--akk-crew-accent) !important;
+  box-shadow: 0 3px 12px rgba(34,91,231,.20) !important;
+  color: #fff !important;
+  outline: none;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > nav button[aria-label="Fitur Lapangan Driver & Helper"] svg {
+  width: 23px;
+  height: 23px;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > nav button[aria-label="Fitur Lapangan Driver & Helper"]::after {
+  content: 'Lapor';
+  position: absolute;
+  top: 46px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--akk-crew-muted);
+  font: 650 11px/1.2 'Plus Jakarta Sans', sans-serif;
+  white-space: nowrap;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > nav .grid button > span:last-child[class*="w-1.5"] {display:none;}
+
+/* Common modal shell for check-in, reports, checklist, form kirim and surat jalan.
+   Camera capture and document preview retain their own full-screen treatment. */
+body.akk-crew-portal-ui div.fixed.inset-0:has(> div.max-w-md),
+body.akk-crew-portal-ui div.fixed.inset-0:has(> div.max-w-lg),
+body.akk-crew-portal-ui div.fixed.inset-0:has(> div.max-w-xl) {
+  background: rgba(16,29,51,.39) !important;
+  backdrop-filter: blur(7px) !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-md,
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg,
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-xl {
+  background: #fff !important;
+  color: var(--akk-crew-ink) !important;
+  border: 1px solid var(--akk-crew-line) !important;
+  box-shadow: 0 28px 90px rgba(8,26,52,.17) !important;
+  border-radius: 22px !important;
+  max-height: min(92dvh, 900px) !important;
+  overflow: hidden;
+}
+/* First section is the dialog heading in all crew workflow forms. */
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-md > div:first-child,
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div:first-child,
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-xl > div:first-child {
+  background: #fff !important;
+  border-bottom: 1px solid var(--akk-crew-line) !important;
+  padding: 18px 19px !important;
+  box-shadow: none !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) > div:first-child :is(h2,h3,h4,.font-black) {
+  color: var(--akk-crew-ink) !important;
+  font-size: 17px !important;
+  font-weight: 800 !important;
+  text-transform: none !important;
+  letter-spacing: -.032em !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) > div:first-child p {
+  display:none !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) > div:first-child button:has(svg) {
+  color: #66758a !important;
+  border-radius: 10px;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) > div.flex-1.overflow-y-auto {
+  background: #fff !important;
+  padding: 16px 18px !important;
+  gap: 15px !important;
+  color: var(--akk-crew-ink) !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) :is(label, input, select, textarea) {
+  font-family: inherit;
+  letter-spacing: -.008em;
+  text-transform: none !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) label {
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
+  color: #465770 !important;
+  line-height: 1.4 !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+  background: #fff !important;
+  color: var(--akk-crew-ink) !important;
+  border: 1px solid #dee5ef !important;
+  min-height: 46px;
+  padding: 11px 13px;
+  border-radius: 12px !important;
+  font-size: 14px !important;
+  box-shadow: none !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) textarea {
+  min-height: 92px;
+  line-height: 1.55;
+  resize: vertical;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) :is(input,textarea)::placeholder {color:#98a3b4;}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) :is(input,textarea,select):focus {
+  outline: 2px solid #bcd0ff !important;
+  outline-offset: 1px;
+  border-color: var(--akk-crew-accent) !important;
+}
+/* Light surfaces and dark-on-light labels, keeping colored primary actions readable. */
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) div.bg-slate-950:not([class*="bg-black"]),
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) div.bg-slate-900:not([class*="bg-black"]) {
+  background: #f8fafd !important;
+  border-color: var(--akk-crew-line) !important;
+  box-shadow: none !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) :is(h1,h2,h3,h4,label) {
+  color: var(--akk-crew-ink) !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) :where(p,.text-slate-300,.text-slate-400):not(button) {
+  color: #66768e !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) :is(.rounded-2xl,.rounded-xl) {
+  border-radius: 13px !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) button:not(:disabled) {
+  cursor:pointer;
+  transition: transform .17s var(--akk-crew-easing),background-color .17s ease,border-color .17s ease;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) button:active:not(:disabled) {transform:scale(.985);}
+
+/* Report sheet: category first, no long instructions and no repeated BBM heading. */
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div:first-child h3 {
+  font-size: 0 !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div:first-child h3::after {
+  content: 'Buat laporan';
+  display:inline;
+  font-size: 18px;
+  color: var(--akk-crew-ink);
+  font-weight: 800;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div.flex-1.overflow-y-auto > div.space-y-1\.5:first-child > label {
+  display:none !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div.flex-1.overflow-y-auto > div:first-child.grid,
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div.flex-1.overflow-y-auto > div:first-child > .grid {
+  gap: 9px !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div.flex-1.overflow-y-auto > div:first-child > .grid > button {
+  min-height: 54px !important;
+  border-radius: 13px !important;
+  justify-content: flex-start !important;
+  padding: 13px !important;
+  background: #f8fafd !important;
+  border: 1px solid #e2e9f2 !important;
+  color: #41536c !important;
+  font-size: 12px !important;
+  font-weight: 760;
+  box-shadow: none !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div.flex-1.overflow-y-auto > div:first-child > .grid > button:is(.bg-amber-600,.bg-rose-600,.bg-blue-600,.bg-indigo-600) {
+  background: var(--akk-crew-accent-soft) !important;
+  border: 1px solid #a7c0ff !important;
+  color: var(--akk-crew-accent) !important;
+  box-shadow: inset 0 0 0 1px #a7c0ff !important;
+}
+/* The selected category is already named by its tab. Don't repeat an icon,
+   heading, and paragraph before the first field. */
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div.flex-1.overflow-y-auto > div.p-3\.5.rounded-2xl > div.flex:first-child:has(> div) {
+  display:none !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div.flex-1.overflow-y-auto > div.p-3\.5.rounded-2xl {
+  border: 1px solid var(--akk-crew-line) !important;
+  background: #fff !important;
+  padding: 13px !important;
+  border-radius: 14px !important;
+  box-shadow: none !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div.flex-1.overflow-y-auto > div.p-3\.5.rounded-2xl > div.flex:first-child:has(> div) p {
+  display:none !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div.flex-1.overflow-y-auto > div.p-3\.5.rounded-2xl :where(.text-white,.text-slate-100,.text-slate-200):not(button) {
+  color: var(--akk-crew-ink) !important;
+}
+/* Prefer primary Save; WhatsApp remains available but visually secondary. */
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div:last-child:has(button) {
+  background: #fff !important;
+  border-top: 1px solid var(--akk-crew-line) !important;
+  padding: 12px 17px calc(13px + env(safe-area-inset-bottom, 0px)) !important;
+  gap: 10px !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div:last-child:has(button) > button:first-child {
+  flex: 0 0 35%;
+  background: #f1f4f9 !important;
+  color: #405570 !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 12px !important;
+  font-size: 12px !important;
+  min-height: 48px;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div:last-child:has(button) > button:last-child {
+  flex: 1 1 auto;
+  background: var(--akk-crew-accent) !important;
+  color: #fff !important;
+  border: none !important;
+  border-radius: 12px !important;
+  font-size: 13px !important;
+  min-height: 48px;
+}
+
+/* Check-in and other operations use the same visual rhythm. */
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-md > div.flex-1.overflow-y-auto > div:first-child:has(.text-amber-400) {
+  background: #f8fafd !important;
+  padding: 11px 13px !important;
+  border-color: var(--akk-crew-line) !important;
+  border-radius: 12px !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) .grid.grid-cols-2:has(> button) > button {
+  min-height: 48px;
+  border-radius: 12px !important;
+  font-weight: 750;
+  font-size: 13px;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) .bg-amber-500:not(input) {
+  background: var(--akk-crew-accent) !important;
+  color: white !important;
+  border-color: var(--akk-crew-accent) !important;
+}
+
+/* Quiet, accessible transitions. Do not animate live status indicators wildly. */
+@media (prefers-reduced-motion: reduce) {
+  body.akk-crew-portal-ui .akk-driver-mobile *,
+  body.akk-crew-portal-ui div.fixed.inset-0 :is(button,input,textarea,select) {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
+}
+@media (max-width: 600px) {
+  body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) {
+    border-radius: 24px 24px 0 0 !important;
+    max-height: min(94dvh, 1000px) !important;
+    margin-bottom: 0 !important;
+  }
+  body.akk-crew-portal-ui div.fixed.inset-0:has(> div.max-w-lg),
+  body.akk-crew-portal-ui div.fixed.inset-0:has(> div.max-w-md),
+  body.akk-crew-portal-ui div.fixed.inset-0:has(> div.max-w-xl) {
+    align-items: flex-end !important;
+    padding: 0 !important;
+  }
+  body.akk-crew-portal-ui .akk-driver-mobile > main {padding-inline: 13px !important;}
+  body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div.flex-1.overflow-y-auto {padding: 15px !important;}
+}
+
+/* Primary work CTA uses one consistent accent, rather than an urgent orange. */
+body.akk-crew-portal-ui .akk-driver-mobile > main > div:first-child button.bg-amber-500,
+body.akk-crew-portal-ui .akk-driver-mobile > main > div:first-child button.hover\:bg-amber-400 {
+  background: var(--akk-crew-accent) !important;
+  color: #fff !important;
+  border-color: var(--akk-crew-accent) !important;
+  box-shadow: 0 5px 14px rgba(34,91,231,.16) !important;
+}
