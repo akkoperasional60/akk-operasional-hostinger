@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   CheckCircle2,
   Plus,
@@ -102,24 +102,40 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
   const [selectedMonth, setSelectedMonth] = useState('Agustus');
   const [selectedYear, setSelectedYear] = useState('2026');
   const [saveToastMsg, setSaveToastMsg] = useState<string | null>(null);
+  const [jobdeskConfigState, setJobdeskConfigState] = useState<Record<string, any>>({});
+  const [checklistHistoryState, setChecklistHistoryState] = useState<any[]>([]);
+  const activitiesHydratedRef = useRef(false);
 
-  const [checklistRows, setChecklistRows] = useState<ChecklistRow[]>(() => {
-    let jobdeskConfig: Record<string, any> = {};
-    let history: any[] = [];
+  const getActivitiesAuthHeaders = () => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     try {
-      const rawCfg = JSON.parse(localStorage.getItem('akk_master_jobdesk_v2') || '{}');
-      if (rawCfg && typeof rawCfg === 'object') jobdeskConfig = rawCfg;
+      const token =
+        (typeof localStorage !== 'undefined'
+          ? localStorage.getItem('akk_session_token') || localStorage.getItem('session_token')
+          : null) ||
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('akk_session_token') : null) ||
+        '';
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['x-akk-session-token'] = token;
+      }
     } catch {}
-    try {
-      const rawHist = JSON.parse(localStorage.getItem('akk_checklist_history') || '[]');
-      if (Array.isArray(rawHist)) history = rawHist;
-    } catch {}
+    return headers;
+  };
 
-    const configuredJobs = jobdeskConfig[selectedAdmin === 'SEMUA ADMIN' ? 'SEMUA ADMIN' : selectedAdmin];
-    const jobsForAdmin = Array.isArray(configuredJobs) && configuredJobs.length > 0
-      ? configuredJobs
-      : DEFAULT_CHECKLIST_JOBS;
-    const periodKey = `${selectedAdmin}_${selectedMonth}_${selectedYear}`;
+  const buildChecklistRowsForPeriod = (
+    admin: string,
+    month: string,
+    year: string,
+    jobdeskConfig: Record<string, any>,
+    history: any[]
+  ): ChecklistRow[] => {
+    const configuredJobs = jobdeskConfig[admin === 'SEMUA ADMIN' ? 'SEMUA ADMIN' : admin];
+    const jobsForAdmin =
+      Array.isArray(configuredJobs) && configuredJobs.length > 0
+        ? configuredJobs
+        : DEFAULT_CHECKLIST_JOBS;
+    const periodKey = `${admin}_${month}_${year}`;
     const existingPeriod = history.find((h: any) => h && h.key === periodKey);
 
     if (existingPeriod && Array.isArray(existingPeriod.rows) && existingPeriod.rows.length > 0) {
@@ -135,56 +151,93 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
       name: job,
       days: Array(30).fill(false)
     }));
-  });
+  };
+
+  const [checklistRows, setChecklistRows] = useState<ChecklistRow[]>(() =>
+    buildChecklistRowsForPeriod('SEMUA ADMIN', 'Agustus', '2026', {}, [])
+  );
+
+  const [taskStatuses, setTaskStatuses] = useState<TaskStatusRow[]>(() => INITIAL_TASK_STATUSES);
 
   useEffect(() => {
-    let jobdeskConfig: Record<string, any> = {};
-    let history: any[] = [];
     try {
-      const rawCfg = JSON.parse(localStorage.getItem('akk_master_jobdesk_v2') || '{}');
-      if (rawCfg && typeof rawCfg === 'object') jobdeskConfig = rawCfg;
-    } catch {}
-    try {
-      const rawHist = JSON.parse(localStorage.getItem('akk_checklist_history') || '[]');
-      if (Array.isArray(rawHist)) history = rawHist;
-    } catch {}
-
-    const configuredJobs = jobdeskConfig[selectedAdmin === 'SEMUA ADMIN' ? 'SEMUA ADMIN' : selectedAdmin];
-    const jobsForAdmin = Array.isArray(configuredJobs) && configuredJobs.length > 0
-      ? configuredJobs
-      : DEFAULT_CHECKLIST_JOBS;
-    const periodKey = `${selectedAdmin}_${selectedMonth}_${selectedYear}`;
-    const existingPeriod = history.find((h: any) => h && h.key === periodKey);
-
-    if (existingPeriod && Array.isArray(existingPeriod.rows) && existingPeriod.rows.length > 0) {
-      setChecklistRows(
-        existingPeriod.rows.map((r: any, idx: number) => ({
-          id: String(r?.id || idx + 1),
-          name: String(r?.name || 'Tugas'),
-          days: Array.isArray(r?.days) ? r.days : Array(30).fill(false)
-        }))
-      );
-    } else {
-      setChecklistRows(
-        jobsForAdmin.map((job: string, index: number) => ({
-          id: String(index + 1),
-          name: job,
-          days: Array(30).fill(false)
-        }))
-      );
-    }
-  }, [selectedAdmin, selectedMonth, selectedYear]);
-
-  const [taskStatuses, setTaskStatuses] = useState<TaskStatusRow[]>(() => {
-    try {
-      const saved = localStorage.getItem('akk_task_status_v1');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem('akk_master_jobdesk_v2');
+        localStorage.removeItem('akk_checklist_history');
+        localStorage.removeItem('akk_task_status_v1');
+        localStorage.removeItem('akk_daily_checklist_v1');
       }
     } catch {}
-    return INITIAL_TASK_STATUSES;
-  });
+
+    let active = true;
+    fetch(
+      '/api/app-state?keys=akk_master_jobdesk_v2,akk_checklist_history,akk_task_status_v1,akk_daily_checklist_v1',
+      {
+        credentials: 'same-origin',
+        headers: getActivitiesAuthHeaders()
+      }
+    )
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        if (!active) return;
+        const entries = data?.entries || {};
+        const remoteCfg =
+          entries.akk_master_jobdesk_v2 && typeof entries.akk_master_jobdesk_v2 === 'object'
+            ? entries.akk_master_jobdesk_v2
+            : {};
+        const remoteHist = Array.isArray(entries.akk_checklist_history)
+          ? entries.akk_checklist_history
+          : [];
+        const remoteTaskStatuses = Array.isArray(entries.akk_task_status_v1)
+          ? entries.akk_task_status_v1
+          : null;
+        const remoteDailyChecklist = Array.isArray(entries.akk_daily_checklist_v1)
+          ? entries.akk_daily_checklist_v1
+          : null;
+
+        setJobdeskConfigState(remoteCfg);
+        setChecklistHistoryState(remoteHist);
+        if (remoteTaskStatuses && remoteTaskStatuses.length > 0) {
+          setTaskStatuses(remoteTaskStatuses);
+        }
+
+        const periodKey = `${selectedAdmin}_${selectedMonth}_${selectedYear}`;
+        const hasPeriod = remoteHist.some((h: any) => h && h.key === periodKey);
+        if (!hasPeriod && remoteDailyChecklist && remoteDailyChecklist.length > 0) {
+          setChecklistRows(
+            remoteDailyChecklist.map((r: any, idx: number) => ({
+              id: String(r?.id || idx + 1),
+              name: String(r?.name || 'Tugas'),
+              days: Array.isArray(r?.days) ? r.days : Array(30).fill(false)
+            }))
+          );
+        } else {
+          setChecklistRows(
+            buildChecklistRowsForPeriod(selectedAdmin, selectedMonth, selectedYear, remoteCfg, remoteHist)
+          );
+        }
+        activitiesHydratedRef.current = true;
+      })
+      .catch(() => {
+        activitiesHydratedRef.current = true;
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    setChecklistRows(
+      buildChecklistRowsForPeriod(
+        selectedAdmin,
+        selectedMonth,
+        selectedYear,
+        jobdeskConfigState,
+        checklistHistoryState
+      )
+    );
+  }, [selectedAdmin, selectedMonth, selectedYear, jobdeskConfigState, checklistHistoryState]);
 
   const [activeViewMode, setActiveViewMode] = useState<'checklist' | 'all_activities'>('checklist');
 
@@ -207,11 +260,23 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
   }, [salesAdminNames, newAdmin]);
 
   useEffect(() => {
-    localStorage.setItem('akk_daily_checklist_v1', JSON.stringify(checklistRows));
+    if (!activitiesHydratedRef.current) return;
+    void fetch('/api/app-state', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: getActivitiesAuthHeaders(),
+      body: JSON.stringify({ entries: { akk_daily_checklist_v1: checklistRows } })
+    }).catch(() => {});
   }, [checklistRows]);
 
   useEffect(() => {
-    localStorage.setItem('akk_task_status_v1', JSON.stringify(taskStatuses));
+    if (!activitiesHydratedRef.current) return;
+    void fetch('/api/app-state', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: getActivitiesAuthHeaders(),
+      body: JSON.stringify({ entries: { akk_task_status_v1: taskStatuses } })
+    }).catch(() => {});
   }, [taskStatuses]);
 
   useEffect(() => {
@@ -246,10 +311,8 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
   };
 
   const handleSavePeriod = () => {
-    const history = JSON.parse(localStorage.getItem('akk_checklist_history') || '[]');
     const periodKey = `${selectedAdmin}_${selectedMonth}_${selectedYear}`;
-
-    const filteredHistory = history.filter((h: any) => h.key !== periodKey);
+    const filteredHistory = checklistHistoryState.filter((h: any) => h && h.key !== periodKey);
     filteredHistory.push({
       key: periodKey,
       admin: selectedAdmin,
@@ -259,8 +322,14 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
       savedAt: new Date().toISOString()
     });
 
-    localStorage.setItem('akk_checklist_history', JSON.stringify(filteredHistory));
-    setSaveToastMsg(`Data checklist ${selectedAdmin} (${selectedMonth} ${selectedYear}) berhasil disimpan!`);
+    setChecklistHistoryState(filteredHistory);
+    void fetch('/api/app-state', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: getActivitiesAuthHeaders(),
+      body: JSON.stringify({ entries: { akk_checklist_history: filteredHistory } })
+    }).catch(() => {});
+    setSaveToastMsg(`Data checklist ${selectedAdmin} (${selectedMonth} ${selectedYear}) berhasil disimpan ke MySQL!`);
     setTimeout(() => setSaveToastMsg(null), 3000);
   };
 
@@ -545,12 +614,8 @@ export const AdminActivitiesTab: React.FC<AdminActivitiesTabProps & { adminOptio
             </h4>
             <div className="flex flex-wrap gap-2">
               {(() => {
-                let jobs = DEFAULT_CHECKLIST_JOBS;
-                try {
-                  const raw = JSON.parse(localStorage.getItem('akk_master_jobdesk_v2') || '{}');
-                  const target = raw?.[selectedAdmin === 'SEMUA ADMIN' ? 'SEMUA ADMIN' : selectedAdmin];
-                  if (Array.isArray(target) && target.length > 0) jobs = target;
-                } catch {}
+                const target = jobdeskConfigState?.[selectedAdmin === 'SEMUA ADMIN' ? 'SEMUA ADMIN' : selectedAdmin];
+                const jobs = Array.isArray(target) && target.length > 0 ? target : DEFAULT_CHECKLIST_JOBS;
                 return jobs.map((job: string) => (
                   <span key={job} className="bg-white dark:bg-slate-900 text-indigo-800 dark:text-indigo-300 text-xs font-semibold px-3 py-1 rounded-lg border border-indigo-200 dark:border-indigo-800">
                     {job}

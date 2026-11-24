@@ -20,7 +20,7 @@ import {
 import { Crew, DriverShiftCheckin, Fleet } from '../types';
 import { driverShiftService } from '../services/driverShiftService';
 import { useToast } from '../context/ToastContext';
-import { OFFICIAL_DESTINATION_AREAS } from '../utils/areaNormalizer';
+import { getOfficialAreasForBranch } from '../utils/areaNormalizer';
 import { logisticsStore } from '../services/store';
 import { branchStore } from '../services/branchStore';
 
@@ -297,11 +297,29 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
   const [selectedHelper2Id, setSelectedHelper2Id] = useState<string>('');
   const [openDropdown, setOpenDropdown] = useState<'area' | 'fleet' | 'helper1' | 'helper2' | null>(null);
 
+  const [storeTick, setStoreTick] = useState<number>(0);
+
+  useEffect(() => {
+    const unsubStore = logisticsStore.subscribe(() => setStoreTick(t => t + 1));
+    const unsubBranch = branchStore.subscribe(() => setStoreTick(t => t + 1));
+    return () => {
+      unsubStore();
+      unsubBranch();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    void logisticsStore.refreshUsersFromHostinger();
+    void branchStore.syncFromServer();
+  }, [isOpen]);
+
   const areaOptions = useMemo<ComboboxOption[]>(() => {
+    const branchDefaultAreas = getOfficialAreasForBranch(branchId);
     const merged = Array.from(
       new Set([
         ...(availableAreas || []),
-        ...OFFICIAL_DESTINATION_AREAS
+        ...branchDefaultAreas
       ])
     )
       .map(a => String(a || '').trim())
@@ -323,13 +341,18 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
       label: area,
       searchText: area
     }));
-  }, [availableAreas]);
+  }, [availableAreas, branchId]);
 
   const fleetOptions = useMemo(() => {
-    const valid = availableFleets.filter(f => f && f.id);
+    const isPhantom = (plate?: string) => {
+      const p = String(plate || '').trim();
+      return !p || /^FLT-\d+$/i.test(p) || p.toUpperCase().endsWith('AKK');
+    };
+    const sourceFleets = availableFleets && availableFleets.length > 0 ? availableFleets : logisticsStore.getFleets();
+    const valid = sourceFleets.filter(f => f && f.id && !isPhantom(f.plateNumber));
     if (!branchId) return valid;
-    return valid.filter(f => branchStore.getFleetBranchId(f.id, f.plateNumber, f.initialCode) === branchId);
-  }, [availableFleets, branchId]);
+    return valid.filter(f => branchStore.getFleetBranchId(f.id, f.plateNumber, f.initialCode, f.branchId) === branchId);
+  }, [availableFleets, branchId, storeTick]);
 
   const fleetComboboxOptions = useMemo<ComboboxOption[]>(() => {
     return fleetOptions.map(f => {
@@ -387,7 +410,7 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
     });
 
     return Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name, 'id'));
-  }, [availableCrews, driverId, driverName, branchId]);
+  }, [availableCrews, driverId, driverName, branchId, storeTick]);
 
   const helper1Options = useMemo<ComboboxOption[]>(() => {
     const emptyOpt: ComboboxOption = {
@@ -475,13 +498,14 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
   const detectedTeamDriverShift = useMemo(() => {
     if (selectedRole !== 'helper') return null;
     return driverShiftService.findActivePartnerDriverShift({
+      branchId,
       fleetId: selectedFleetId || chosenFleet?.id || fleetId,
       plateNumber: chosenFleet?.plateNumber || (plateNumber !== '-' ? plateNumber : ''),
       selectedArea,
       helperId: driverId,
       helperName: driverName
     });
-  }, [selectedRole, selectedFleetId, chosenFleet?.id, chosenFleet?.plateNumber, fleetId, plateNumber, selectedArea, driverId, driverName, shiftSyncTick]);
+  }, [branchId, selectedRole, selectedFleetId, chosenFleet?.id, chosenFleet?.plateNumber, fleetId, plateNumber, selectedArea, driverId, driverName, shiftSyncTick]);
 
   // Hanya inisialisasi field saat modal baru dibuka (transisi false -> true), sehingga salah PIN / refresh background tidak mereset isian di atas
   const wasOpenRef = useRef<boolean>(false);
@@ -504,6 +528,7 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
     const partnerDriver =
       resolvedDefaultRole === 'helper'
         ? driverShiftService.findActivePartnerDriverShift({
+            branchId,
             helperId: driverId,
             helperName: driverName
           })
@@ -655,6 +680,7 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
 
     setIsSubmitting(true);
     const res = await driverShiftService.checkInDriver({
+      branchId,
       driverId,
       driverName,
       userRole: roleLabel,

@@ -112,20 +112,30 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
   const [cameraFacingMode, setCameraFacingMode] = useState<'environment' | 'user'>('environment');
   const [liveCameraError, setLiveCameraError] = useState<string | null>(null);
   const liveVideoRef = React.useRef<HTMLVideoElement>(null);
+  const streamRef = React.useRef<MediaStream | null>(null);
+  const isOpenRef = React.useRef<boolean>(isOpen);
+  const cameraSeqRef = React.useRef<number>(0);
 
   const stopLiveCamera = React.useCallback(() => {
-    if (cameraStream) {
-      cameraStream.getTracks().forEach(track => {
+    cameraSeqRef.current += 1;
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => {
         try {
           track.stop();
         } catch {
           // ignore
         }
       });
-      setCameraStream(null);
+      streamRef.current = null;
     }
+    if (liveVideoRef.current) {
+      try {
+        liveVideoRef.current.srcObject = null;
+      } catch {}
+    }
+    setCameraStream(null);
     setIsLiveCameraOpen(false);
-  }, [cameraStream]);
+  }, []);
 
   const startLiveCamera = async (
     mode: 'environment' | 'user' = cameraFacingMode,
@@ -134,51 +144,92 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
     setCameraTarget(target);
     setLiveCameraError(null);
     setIsLiveCameraOpen(true);
-    if (cameraStream) {
-      cameraStream.getTracks().forEach(t => {
+    const requestSeq = ++cameraSeqRef.current;
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => {
         try { t.stop(); } catch {}
       });
+      streamRef.current = null;
     }
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Kamera langsung tidak didukung di browser ini.');
+        throw new Error('Kamera langsung tidak didukung di browser ini. Gunakan Kamera Bawaan HP di bawah.');
       }
       let stream: MediaStream | null = null;
+      let lastErr: unknown = null;
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: { ideal: mode }, width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false
         });
-      } catch {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: false
-        });
+      } catch (err1) {
+        lastErr = err1;
       }
+      if (!stream && isOpenRef.current && cameraSeqRef.current === requestSeq) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: mode },
+            audio: false
+          });
+        } catch (err2) {
+          lastErr = err2;
+        }
+      }
+      if (!stream && isOpenRef.current && cameraSeqRef.current === requestSeq) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false
+          });
+        } catch (err3) {
+          lastErr = err3;
+        }
+      }
+
+      if (!isOpenRef.current || cameraSeqRef.current !== requestSeq) {
+        if (stream) {
+          stream.getTracks().forEach(t => {
+            try { t.stop(); } catch {}
+          });
+        }
+        return;
+      }
+
+      if (!stream) {
+        throw lastErr || new Error('Akses kamera ditolak atau tidak tersedia.');
+      }
+
+      streamRef.current = stream;
       setCameraStream(stream);
       if (liveVideoRef.current) {
         liveVideoRef.current.srcObject = stream;
+        liveVideoRef.current.muted = true;
         await liveVideoRef.current.play().catch(() => {});
       }
     } catch (err: any) {
+      if (!isOpenRef.current || cameraSeqRef.current !== requestSeq) return;
       setLiveCameraError(
-        err?.message || 'Akses kamera ditolak oleh perangkat. Izinkan kamera pada browser atau gunakan Kamera HP.'
+        err?.message || 'Akses kamera ditolak oleh perangkat. Izinkan kamera pada browser atau gunakan Kamera Bawaan HP.'
       );
     }
   };
 
   React.useEffect(() => {
-    if (isLiveCameraOpen && liveVideoRef.current && cameraStream) {
-      liveVideoRef.current.srcObject = cameraStream;
+    if (isLiveCameraOpen && liveVideoRef.current && (streamRef.current || cameraStream)) {
+      liveVideoRef.current.srcObject = streamRef.current || cameraStream;
       liveVideoRef.current.muted = true;
       liveVideoRef.current.play().catch(() => {});
     }
   }, [isLiveCameraOpen, cameraStream, cameraTarget]);
 
   React.useEffect(() => {
+    isOpenRef.current = isOpen;
     if (!isOpen) {
       stopLiveCamera();
     }
+    return () => {
+      stopLiveCamera();
+    };
   }, [isOpen, stopLiveCamera]);
 
   const applyCapturedDataUrl = (
@@ -214,8 +265,12 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
   const captureFromLiveVideo = () => {
     if (!liveVideoRef.current) return;
     const video = liveVideoRef.current;
-    const rawW = video.videoWidth || 800;
-    const rawH = video.videoHeight || 450;
+    if (video.videoWidth === 0 || video.videoHeight === 0 || video.readyState < 2) {
+      setLiveCameraError('Kamera masih memuat gambar. Tunggu sebentar atau gunakan Kamera Bawaan HP.');
+      return;
+    }
+    const rawW = video.videoWidth;
+    const rawH = video.videoHeight;
     const maxDim = 800;
     let cw = rawW;
     let ch = rawH;
@@ -279,57 +334,65 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
     const activeTarget = cameraTarget;
     const targetItem = activeTarget !== 'evidence' ? checklist.items.find(i => i.id === activeTarget) : null;
     const labelTitle = targetItem ? targetItem.name.toUpperCase() : 'INSPEKSI ARMADA / ODOMETER';
-    extractExifFromFile(file).then(exifMeta => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const img = new Image();
-        img.onload = () => {
-          const maxDim = 800;
-          let cw = img.width || 800;
-          let ch = img.height || 450;
-          if (cw > maxDim || ch > maxDim) {
-            if (cw > ch) {
-              ch = Math.round((ch * maxDim) / cw);
-              cw = maxDim;
-            } else {
-              cw = Math.round((cw * maxDim) / ch);
-              ch = maxDim;
-            }
-          }
-          const canvas = document.createElement('canvas');
-          canvas.width = cw;
-          canvas.height = ch;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) return;
-          ctx.drawImage(img, 0, 0, cw, ch);
-          drawExifMetadataOnCanvas(ctx, cw, ch, exifMeta);
-          // Watermark proporsional
-          const bannerH = Math.max(58, Math.round(ch * 0.14));
-          const bannerY = ch - bannerH;
-          const titlePx = Math.max(11, Math.round(cw * 0.017));
-          const subPx = Math.max(9, Math.round(cw * 0.013));
-          ctx.fillStyle = 'rgba(2, 6, 23, 0.85)';
-          ctx.fillRect(0, bannerY, cw, bannerH);
-          ctx.fillStyle = '#06b6d4';
-          ctx.fillRect(0, bannerY, cw, 2);
-          ctx.fillStyle = '#ffffff';
-          ctx.font = `bold ${titlePx}px system-ui, sans-serif`;
-          ctx.fillText(`${labelTitle}: ${plateNumber} (${vehicleType}) | DRIVER: ${driverName}`, 12, bannerY + Math.round(bannerH * 0.38));
-          ctx.fillStyle = '#f59e0b';
-          ctx.font = `bold ${subPx}px monospace`;
-          ctx.fillText(
-            `EXIF: ${exifMeta.DateTimeOriginal} (${exifMeta.OffsetTimeOriginal}) | ${inspectionType === 'pre_trip' ? 'CHECKLIST PAGI' : 'CHECKLIST PULANG'}`,
-            12,
-            bannerY + Math.round(bannerH * 0.78)
-          );
-
-          applyCapturedDataUrl(canvas.toDataURL('image/jpeg', 0.55), activeTarget, exifMeta);
-          stopLiveCamera();
+    extractExifFromFile(file)
+      .catch(() => createExifMetadataFromDate(new Date(), 'CAMERA_CAPTURE_SENSOR'))
+      .then(exifMeta => {
+        const reader = new FileReader();
+        reader.onerror = () => {
+          setLiveCameraError('Gagal membaca foto dari perangkat. Silakan coba kembali.');
         };
-        img.src = reader.result as string;
-      };
-      reader.readAsDataURL(file);
-    });
+        reader.onload = () => {
+          const img = new Image();
+          img.onerror = () => {
+            setLiveCameraError('Format foto tidak valid atau gagal dimuat.');
+          };
+          img.onload = () => {
+            const maxDim = 800;
+            let cw = img.width || 800;
+            let ch = img.height || 450;
+            if (cw > maxDim || ch > maxDim) {
+              if (cw > ch) {
+                ch = Math.round((ch * maxDim) / cw);
+                cw = maxDim;
+              } else {
+                cw = Math.round((cw * maxDim) / ch);
+                ch = maxDim;
+              }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = cw;
+            canvas.height = ch;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            ctx.drawImage(img, 0, 0, cw, ch);
+            drawExifMetadataOnCanvas(ctx, cw, ch, exifMeta);
+            // Watermark proporsional
+            const bannerH = Math.max(58, Math.round(ch * 0.14));
+            const bannerY = ch - bannerH;
+            const titlePx = Math.max(11, Math.round(cw * 0.017));
+            const subPx = Math.max(9, Math.round(cw * 0.013));
+            ctx.fillStyle = 'rgba(2, 6, 23, 0.85)';
+            ctx.fillRect(0, bannerY, cw, bannerH);
+            ctx.fillStyle = '#06b6d4';
+            ctx.fillRect(0, bannerY, cw, 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = `bold ${titlePx}px system-ui, sans-serif`;
+            ctx.fillText(`${labelTitle}: ${plateNumber} (${vehicleType}) | DRIVER: ${driverName}`, 12, bannerY + Math.round(bannerH * 0.38));
+            ctx.fillStyle = '#f59e0b';
+            ctx.font = `bold ${subPx}px monospace`;
+            ctx.fillText(
+              `EXIF: ${exifMeta.DateTimeOriginal} (${exifMeta.OffsetTimeOriginal}) | ${inspectionType === 'pre_trip' ? 'CHECKLIST PAGI' : 'CHECKLIST PULANG'}`,
+              12,
+              bannerY + Math.round(bannerH * 0.78)
+            );
+
+            applyCapturedDataUrl(canvas.toDataURL('image/jpeg', 0.55), activeTarget, exifMeta);
+            stopLiveCamera();
+          };
+          img.src = reader.result as string;
+        };
+        reader.readAsDataURL(file);
+      });
     e.target.value = '';
   };
 
@@ -603,7 +666,7 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
       {liveCameraError ? (
         <div className="p-3 rounded-xl bg-slate-900 border border-amber-500/40 text-center space-y-2">
           <p className="text-[11px] text-amber-300 font-semibold">{liveCameraError}</p>
-          <div className="flex items-center justify-center gap-2">
+          <div className="flex flex-wrap items-center justify-center gap-2">
             <button
               type="button"
               onClick={() => startLiveCamera(cameraFacingMode, targetId)}
@@ -611,16 +674,13 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
             >
               Coba Buka Kamera Lagi
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setCameraTarget(targetId);
-                cameraInputRef.current?.click();
-              }}
+            <label
+              htmlFor="checklist-native-camera-input"
+              onClick={() => setCameraTarget(targetId)}
               className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] border border-slate-700 cursor-pointer"
             >
               Buka Kamera Bawaan HP
-            </button>
+            </label>
           </div>
         </div>
       ) : (
@@ -1003,12 +1063,13 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
             </div>
 
             <input
+              id="checklist-native-camera-input"
               ref={cameraInputRef}
               type="file"
               accept="image/*"
               capture="environment"
               onChange={handlePhotoCapture}
-              className="hidden"
+              className="sr-only"
             />
 
             {isLiveCameraOpen && cameraTarget === 'evidence' ? (
@@ -1029,14 +1090,24 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
                 <ExifMetadataBadge exif={photoExifMap.evidence} />
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={() => startLiveCamera('environment', 'evidence')}
-                className="w-full py-2.5 px-3 rounded-xl border border-dashed border-cyan-500/50 hover:border-cyan-400 bg-slate-950/60 hover:bg-slate-950 text-slate-200 hover:text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition active:scale-95"
-              >
-                <Camera className="w-4 h-4 text-cyan-400" />
-                <span>Buka Kamera Langsung &amp; Ambil Foto Armada</span>
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => startLiveCamera('environment', 'evidence')}
+                  className="w-full py-2.5 px-3 rounded-xl border border-dashed border-cyan-500/50 hover:border-cyan-400 bg-slate-950/60 hover:bg-slate-950 text-slate-200 hover:text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition active:scale-95"
+                >
+                  <Camera className="w-4 h-4 text-cyan-400" />
+                  <span>Kamera Langsung Browser</span>
+                </button>
+                <label
+                  htmlFor="checklist-native-camera-input"
+                  onClick={() => setCameraTarget('evidence')}
+                  className="w-full py-2.5 px-3 rounded-xl border border-dashed border-emerald-500/50 hover:border-emerald-400 bg-slate-950/60 hover:bg-slate-950 text-emerald-300 hover:text-emerald-200 text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition active:scale-95"
+                >
+                  <Camera className="w-4 h-4 text-emerald-400" />
+                  <span>Kamera Bawaan HP</span>
+                </label>
+              </div>
             )}
           </div>
         </div>

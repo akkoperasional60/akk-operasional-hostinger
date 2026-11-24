@@ -33,7 +33,7 @@ Dokumen ini adalah guardrail untuk Google AI Studio, GitHub, dan Hostinger. Jang
 
 `Google AI Studio → GitHub main → Hostinger auto-deploy → npm install → npm run build → node server.js`
 
-`npm run build` menjalankan baseline validator. Jika AI Studio merusak konfigurasi production, build sengaja dihentikan sebelum deploy.
+`npm run build` selalu membangun frontend ke `dist/` (target Hostinger) dan menjalankan baseline validator. Jangan gunakan `npm run build:portal` atau `npm run build:driver` untuk deployment utama Hostinger. Upload/deploy seluruh isi `dist/` beserta semua file `dist/assets/` secara utuh; jangan hanya mengganti `index.html`. Jika ada JS chunk yang hilang, server mengembalikan 404 aset yang jelas dan tidak menyamarkannya sebagai `index.html`.
 
 ## Environment Variables production
 

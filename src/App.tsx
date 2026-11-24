@@ -19,8 +19,8 @@ import { canAccess, getFirstAccessibleTabForUser, getUserRoleDisplayTitle } from
 import { useRoleAccess } from './hooks/useRoleAccess';
 import { getTabPath, normalizePathname, resolveTabFromUrl } from './utils/navigationRoutes';
 import { ReadOnlyModuleBoundary } from './components/ReadOnlyModuleBoundary';
-import { ExecutiveDashboard } from './components/ExecutiveDashboard';
 import {
+  loadExecutiveDashboard,
   loadScheduleManagement,
   loadFleetCrewManagement,
   loadSparePartManagement,
@@ -45,7 +45,6 @@ import {
   loadE2ETesterModule,
   loadMasterCabang,
   loadSchedulePortalValidationReport,
-  loadLiveTripsMonitorPanel,
   preloadTabsSequential,
   lazyWithRetry
 } from './utils/tabLoaders';
@@ -59,6 +58,7 @@ if (typeof window !== 'undefined') {
   } catch {}
 }
 
+const ExecutiveDashboard = lazyWithRetry(loadExecutiveDashboard);
 const ScheduleManagement = lazyWithRetry(loadScheduleManagement);
 const FleetCrewManagement = lazyWithRetry(loadFleetCrewManagement);
 const SparePartManagement = lazyWithRetry(loadSparePartManagement);
@@ -83,12 +83,32 @@ const AnalyticsReportingModule = lazyWithRetry(loadAnalyticsReportingModule);
 const E2ETesterModule = lazyWithRetry(loadE2ETesterModule);
 const MasterCabang = lazyWithRetry(loadMasterCabang);
 const SchedulePortalValidationReport = lazyWithRetry(loadSchedulePortalValidationReport);
-const LiveTripsMonitorPanel = lazyWithRetry(loadLiveTripsMonitorPanel);
 
 const AppShellSkeleton: React.FC<{
   statusLabel?: string;
 }> = ({ statusLabel = 'Memverifikasi sesi...' }) => {
   const [logoImgFailed, setLogoImgFailed] = useState(false);
+
+  // Portal Driver uses a compact mobile loader rather than a desktop dashboard skeleton.
+  if (typeof window !== 'undefined' && /\/portal-driver(?:\/|$)/.test(window.location.pathname)) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-5">
+        <div className="w-full max-w-sm rounded-3xl border border-slate-800 bg-slate-900 p-6 text-center space-y-5 shadow-xl">
+          <div className="mx-auto h-16 w-16 rounded-2xl bg-white p-3 flex items-center justify-center">
+            <img src="/favicon.svg" alt="AKK" className="h-full w-full object-contain" />
+          </div>
+          <div className="space-y-1">
+            <h1 className="text-xl font-bold tracking-tight">Portal Kiriman</h1>
+            <p className="text-sm text-slate-300">Menyiapkan jadwal Anda...</p>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
+            <div className="h-full w-1/3 rounded-full bg-blue-400 animate-pulse" />
+          </div>
+          <p className="text-xs text-slate-400">{statusLabel}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex">
@@ -249,7 +269,19 @@ const AppShellSkeleton: React.FC<{
   );
 };
 
-const ModuleLoaderFallback: React.FC = () => (
+const ModuleLoaderFallback: React.FC = () => {
+  if (typeof window !== 'undefined' && /\/portal-driver(?:\/|$)/.test(window.location.pathname)) {
+    return (
+      <div className="mx-auto max-w-sm rounded-2xl border border-slate-800 bg-slate-900 p-5 text-center text-slate-100 space-y-3 mt-6">
+        <div className="mx-auto h-12 w-12 rounded-xl bg-white p-2">
+          <img src="/favicon.svg" alt="AKK" className="h-full w-full object-contain" />
+        </div>
+        <p className="font-bold">Menyiapkan kiriman...</p>
+        <p className="text-xs text-slate-400">Harap periksa koneksi jika terlalu lama.</p>
+      </div>
+    );
+  }
+  return (
   <div className="space-y-4">
     <div className="h-1 w-full bg-blue-500/15 rounded-full overflow-hidden relative">
       <div className="absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-blue-600 via-sky-400 to-indigo-500 rounded-full animate-[shimmer_1.1s_infinite]" />
@@ -283,7 +315,8 @@ const ModuleLoaderFallback: React.FC = () => (
       </div>
     </div>
   </div>
-);
+  );
+};
 
 const FLEET_MANAGEMENT_TABS: NavTab[] = [
   'schedules',
@@ -425,8 +458,8 @@ export default function App() {
     try {
       const res = await fetch('/api/auth/profile', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
+        headers: logisticsStore.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+        credentials: 'same-origin',
         body: JSON.stringify({
           userId: currentUser.id,
           fullName: profileForm.fullName.trim(),
@@ -439,8 +472,11 @@ export default function App() {
       if (!res.ok) {
         throw new Error(json.error || 'Gagal menyimpan perubahan profil.');
       }
-      await logisticsStore.restoreServerSession().catch(() => {});
-      addNotification('schedule', 'Profil Diperbarui', 'Data profil akun berhasil disimpan ke database MySQL.');
+      await Promise.all([
+        logisticsStore.restoreServerSession().catch(() => {}),
+        logisticsStore.refreshUsersFromHostinger().catch(() => {})
+      ]);
+      addNotification('schedule', 'Profil Diperbarui', 'Data profil akun dan nomor WhatsApp berhasil disimpan ke database MySQL.');
       setIsAccountProfileOpen(false);
     } catch (err: any) {
       addNotification('sla_warning', 'Gagal Menyimpan', err?.message || 'Terjadi kesalahan saat menyimpan profil.');
@@ -463,8 +499,8 @@ export default function App() {
     try {
       const res = await fetch('/api/auth/change-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
+        headers: logisticsStore.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+        credentials: 'same-origin',
         body: JSON.stringify({
           userId: currentUser.id,
           currentPassword: passwordForm.currentPassword,
@@ -647,7 +683,6 @@ export default function App() {
       case 'operational_dashboard': return 'Dashboard Logistik & Pengiriman';
       case 'schedules': return 'Manajemen Jadwal Pengiriman & Muat';
       case 'portal_validation': return 'Validasi Portal Driver & Helper';
-      case 'live_trips': return 'Live Trips, Riwayat Rute & Playback Perjalanan';
       case 'fleets': return 'Manajemen Armada & Kru Supir';
       case 'spareparts': return 'Manajemen Stok & Pemakaian Sparepart';
       case 'maintenance_costs': return 'Biaya Servis & Pemeliharaan Armada';
@@ -946,11 +981,12 @@ export default function App() {
           </div>
         )}
 
-        <main className={`flex-1 max-w-7xl w-full mx-auto ${
+        <main className={`flex-1 min-w-0 w-full max-w-none mx-0 ${
           currentTab === 'driver_portal' || currentTab === 'sales_rfid_scanner'
             ? 'px-0 pb-0 pt-14 lg:pt-0'
-            : `p-4 sm:p-6 lg:p-8 ${currentUser.status === 'pending' ? 'pt-28 lg:pt-6' : 'pt-20 sm:pt-20 lg:pt-6'}`
+            : `px-3 sm:px-4 lg:px-5 pb-4 sm:pb-5 lg:pb-6 ${currentUser.status === 'pending' ? 'pt-28 lg:pt-5' : 'pt-20 sm:pt-20 lg:pt-5'}`
         }`}>
+
           <ReadOnlyModuleBoundary user={currentUser} activeTab={currentTab}>
           <Suspense fallback={<ModuleLoaderFallback />}>
           {currentTab === 'dashboard' && (
@@ -1005,10 +1041,6 @@ export default function App() {
 
           {currentTab === 'portal_validation' && (canManageFleet() || canAccess(currentUser, 'portal_validation')) && (
             <SchedulePortalValidationReport />
-          )}
-
-          {currentTab === 'live_trips' && (canManageFleet() || canAccess(currentUser, 'live_trips')) && (
-            <LiveTripsMonitorPanel />
           )}
 
           {currentTab === 'fleets' && (canManageFleet() || canAccess(currentUser, 'fleets')) && (
@@ -1304,7 +1336,7 @@ export default function App() {
         {/* Enterprise AKK Footer (hidden on driver portal & sales rfid scanner to keep clean mobile bottom bar) */}
         {currentTab !== 'driver_portal' && currentTab !== 'sales_rfid_scanner' && (
           <footer className="bg-slate-950 border-t border-slate-900 py-4 text-slate-500 text-xs text-center mt-auto">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2">
+            <div className="w-full max-w-none mx-0 px-3 sm:px-4 lg:px-5 flex flex-col sm:flex-row items-center justify-between gap-2">
               <div className="text-slate-400">
                 <span>&copy; {new Date().getFullYear()} PT Anugrah Kemasan Kreatif &middot; Sistem Distribusi &amp; Manajemen Operasional</span>
               </div>

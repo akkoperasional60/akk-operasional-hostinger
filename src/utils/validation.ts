@@ -38,9 +38,10 @@ export function validateFleet(
   } else if (!INDONESIAN_PLATE_REGEX.test(plate)) {
     errors.plateNumber = 'Format plat tidak valid. Contoh format: P 8125 VC atau B 9503 XYZ.';
   } else {
-    // Check uniqueness
+    // Check uniqueness (ignoring whitespace variations)
+    const cleanPlate = plate.replace(/\s+/g, '');
     const duplicate = existingFleets.find(
-      f => f.plateNumber.trim().toUpperCase() === plate && (!isEdit || f.id !== currentId)
+      f => f.plateNumber.replace(/\s+/g, '').toUpperCase() === cleanPlate && (!isEdit || f.id !== currentId)
     );
     if (duplicate) {
       errors.plateNumber = `Plat nomor ${plate} sudah terdaftar pada armada lain (${duplicate.initialCode || duplicate.vehicleType}).`;
@@ -53,6 +54,27 @@ export function validateFleet(
     errors.initialCode = 'Inisial armada wajib diisi (contoh: N1, NP1, DS-1, WB-01).';
   } else if (initial.length < 2) {
     errors.initialCode = 'Inisial armada minimal 2 karakter.';
+  } else {
+    const normalizeTokens = (val: string) =>
+      val
+        .toUpperCase()
+        .split(/[\s\/\-_,()]+/)
+        .map(t => t.trim())
+        .filter(t => t.length >= 2);
+    const inputTokens = normalizeTokens(initial);
+    const inputCompact = initial.toUpperCase().replace(/[\s\/\-_,()]+/g, '');
+    const duplicateInitial = existingFleets.find(f => {
+      if (isEdit && f.id === currentId) return false;
+      const fInit = (f.initialCode || '').trim();
+      if (!fInit) return false;
+      const fCompact = fInit.toUpperCase().replace(/[\s\/\-_,()]+/g, '');
+      if (inputCompact && fCompact === inputCompact) return true;
+      const fTokens = normalizeTokens(fInit);
+      return inputTokens.some(tok => fTokens.includes(tok));
+    });
+    if (duplicateInitial) {
+      errors.initialCode = `Inisial armada "${initial}" bentrok / duplikat dengan armada ${duplicateInitial.plateNumber} (${duplicateInitial.initialCode}).`;
+    }
   }
 
   // 3. Tipe Kendaraan

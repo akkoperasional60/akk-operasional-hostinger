@@ -756,6 +756,7 @@ export type DriverShiftStatus = 'checked_in' | 'on_duty' | 'break' | 'checked_ou
 
 export interface DriverShiftCheckin {
   id: string; // e.g. 'SHIFT-20261008-001'
+  branchId?: string;
   driverId: string;
   driverName: string;
   checkinRole?: 'driver' | 'helper';
@@ -831,6 +832,8 @@ export interface LiveGpsTripRecord {
   currentLat?: number;
   currentLng?: number;
   points: LiveGpsTripPoint[];
+  /** Number of stored route points (available from lightweight Live Trips summaries). */
+  pointCount?: number;
   updatedAt?: string;
 }
 
@@ -1099,7 +1102,6 @@ export interface ChatMessage {
   attachmentName?: string;
   cabangId?: string;
 }
-
 
 
 

@@ -1,584 +1,314 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  ShieldCheck,
-  Play,
-  RotateCcw,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  Users,
-  Terminal,
-  Download,
-  ExternalLink,
-  Lock,
-  Eye,
-  AlertTriangle,
-  ChevronDown,
-  ChevronRight,
-  Server,
-  Layers,
-  Sparkles,
-  Smartphone
+  AlertCircle, ArrowRight, Check, CheckCircle2, ClipboardCheck, Copy,
+  ExternalLink, Loader2, LockKeyhole, Play, RotateCcw, ShieldCheck,
+  Trash2, Truck, Users, XCircle
 } from 'lucide-react';
-import { E2ETestRunner, E2ESummary, E2ETestResult } from '../services/e2eTestRunner';
+import { E2ETestRunner, type E2ESummary } from '../services/e2eTestRunner';
+import { getDefaultPermissionsForRole } from '../utils/rbac';
 import { logisticsStore } from '../services/store';
-import { UserProfile } from '../types';
-import { NavTab } from './Sidebar';
+import type { NavTab } from './Sidebar';
 
 interface E2ETesterModuleProps {
   onNavigate?: (tab: NavTab) => void;
 }
 
-export const E2ETesterModule: React.FC<E2ETesterModuleProps> = ({ onNavigate }) => {
-  const [isRunning, setIsRunning] = useState<boolean>(false);
-  const [progress, setProgress] = useState<number>(0);
-  const [currentRunningTitle, setCurrentRunningTitle] = useState<string>('');
-  const [testSummary, setTestSummary] = useState<E2ESummary | null>(null);
-  const [expandedTestId, setExpandedTestId] = useState<string | null>(null);
-  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
-  const [currentUser, setCurrentUser] = useState<UserProfile>(logisticsStore.getCurrentUser());
+type TestAccount = {
+  id: string;
+  email: string;
+  password: string;
+  name: string;
+  role: 'driver' | 'crew_helper';
+};
+type TestSlot = 'driver' | 'helper';
 
-  // Available test persona accounts
-  const allUsers = logisticsStore.getUsers();
-  const samplePersonas: UserProfile[] = [
-    allUsers.find(u => u.email === 'admin') || {
-      id: 'usr-001',
-      fullName: 'Administrator Sistem',
-      email: 'admin',
-      role: 'super_admin',
-      status: 'approved',
-      department: 'IT',
-      phone: '0812-1351-3590',
-      createdAt: ''
-    },
-    allUsers.find(u => u.email === 'bahri@gmail.com') || {
-      id: 'usr-bahri',
-      fullName: 'Muhammad Syaiful Bahri',
-      email: 'bahri@gmail.com',
-      role: 'spv_logistik',
-      status: 'approved',
-      department: 'Operasional',
-      phone: '0812-3456-7890',
-      createdAt: ''
-    },
-    allUsers.find(u => u.email === 'zainul@gmail.com') || {
-      id: 'usr-zainul',
-      fullName: 'Zainul Agustiar',
-      email: 'zainul@gmail.com',
-      role: 'driver',
-      status: 'approved',
-      department: 'Logistik',
-      phone: '0813-2233-4455',
-      createdAt: ''
-    },
-    allUsers.find(u => u.email === 'aan@gmail.com') || {
-      id: 'usr-aan',
-      fullName: 'Aan Adi Saputra',
-      email: 'aan@gmail.com',
-      role: 'spv_logistik',
-      status: 'approved',
-      department: 'Operasional',
-      phone: '0819-3344-5566',
-      createdAt: ''
-    },
-    allUsers.find(u => u.email === 'bayun@gmail.com') || {
-      id: 'usr-bayun',
-      fullName: 'Bayu Novianto Dimas Permana',
-      email: 'bayun@gmail.com',
-      role: 'spv_logistik',
-      status: 'approved',
-      department: 'Operasional',
-      phone: '0812-9876-5432',
-      createdAt: ''
-    }
-  ];
+const BRANCHES = [
+  { value: 'cab-sidoarjo', label: 'Sidoarjo' },
+  { value: 'cab-banyuwangi', label: 'Nusantara' }
+] as const;
 
-  // Run tests automatically on mount
-  useEffect(() => {
-    handleRunTests();
-  }, []);
+function makePassword(): string {
+  const raw = new Uint8Array(20);
+  window.crypto.getRandomValues(raw);
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+  return 'AkK!7' + Array.from(raw, byte => alphabet[byte % alphabet.length]).join('');
+}
 
-  const handleRunTests = async () => {
-    setIsRunning(true);
-    setProgress(10);
-    setCurrentRunningTitle('Menginisialisasi rangkaian pengujian E2E...');
-
-    try {
-      const summary = await E2ETestRunner.runAllTests((p, title) => {
-        setProgress(p);
-        setCurrentRunningTitle(title);
-      });
-      setTestSummary(summary);
-      setProgress(100);
-    } catch (e) {
-      console.error('[E2ETester] Failed to run tests:', e);
-    } finally {
-      setIsRunning(false);
-    }
-  };
-
-  const handleImpersonate = (user: UserProfile) => {
-    E2ETestRunner.impersonateUser(user);
-    setCurrentUser(user);
-
-    // If driver, navigate to driver mobile portal for convenience
-    if (user.role === 'driver' && onNavigate) {
-      onNavigate('driver_portal');
-    }
-  };
-
-  const handleResetToAdmin = () => {
-    const admin = allUsers.find(u => u.role === 'super_admin') || {
-      id: 'usr-001',
-      fullName: 'Administrator Sistem',
-      email: 'admin',
-      role: 'super_admin',
-      status: 'approved',
-      department: 'IT',
-      phone: '0812-1351-3590',
-      createdAt: ''
-    };
-    handleImpersonate(admin);
-  };
-
-  const handleDownloadReport = () => {
-    if (!testSummary) return;
-    const reportData = {
-      title: 'LAPORAN HASIL PENGUJIAN OTOMATIS E2E - PT ANUGRAH KEMASAN KREATIF',
-      generatedAt: new Date().toISOString(),
-      summary: {
-        totalScenarios: testSummary.total,
-        passed: testSummary.passed,
-        failed: testSummary.failed,
-        successRate: `${testSummary.successRate}%`,
-        durationMs: `${testSummary.durationMs} ms`
+function makeRolePermissions(role: 'driver' | 'crew_helper', branchId: string) {
+  const modules = getDefaultPermissionsForRole(role);
+  const disabledBranch = branchId === 'cab-sidoarjo' ? 'cab-banyuwangi' : 'cab-sidoarjo';
+  return {
+    modules,
+    branchPermissions: {
+      [branchId]: {
+        branchId, enabled: true, allAccess: false,
+        modules: { logistics: modules.logistics }
       },
-      scenarios: testSummary.results.map(r => ({
-        id: r.id,
-        title: r.title,
-        role: r.targetAccountRole,
-        account: r.targetAccountName,
-        status: r.status,
-        duration: `${r.durationMs}ms`,
-        assertions: r.assertions
-      }))
-    };
+      [disabledBranch]: {
+        branchId: disabledBranch, enabled: false, allAccess: false, modules: {}
+      }
+    }
+  };
+}
 
-    const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `e2e_test_audit_${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+const credentialsText = (account: TestAccount): string =>
+  `AKK ${account.role === 'driver' ? 'Driver' : 'Helper'} Uji\nEmail: ${account.email}\nPassword: ${account.password}\nLogin: ${window.location.origin}/portal-driver`;
+
+export const E2ETesterModule: React.FC<E2ETesterModuleProps> = ({ onNavigate }) => {
+  const [role, setRole] = useState<'driver' | 'helper'>('driver');
+  const [slots, setSlots] = useState<{ driver: string; helper: string }>({ driver: '', helper: '' });
+  const [claimOpen, setClaimOpen] = useState(false);
+  const [branchId, setBranchId] = useState('cab-sidoarjo');
+  const [accounts, setAccounts] = useState<TestAccount[]>([]);
+  const [createBusy, setCreateBusy] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [showPasswords, setShowPasswords] = useState(true);
+  const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
+  const [summary, setSummary] = useState<E2ESummary | null>(null);
+  const [testBusy, setTestBusy] = useState(false);
+  const [testProgress, setTestProgress] = useState('');
+  const [currentUser, setCurrentUser] = useState(logisticsStore.getCurrentUser());
+
+  useEffect(() => logisticsStore.subscribe(() => setCurrentUser(logisticsStore.getCurrentUser())), []);
+  const isAdmin = currentUser?.role === 'super_admin' && currentUser.status === 'approved';
+  const filled = Boolean(slots.driver && slots.helper);
+  const mine = role === 'driver' ? 'Akun Driver Uji' : 'Akun Helper Uji';
+  const assignedSlot: TestSlot | null = slots.driver === mine ? 'driver' : slots.helper === mine ? 'helper' : null;
+  const taskSlot: TestSlot = assignedSlot || (role === 'driver' ? 'driver' : 'helper');
+  const roleLabel = (slot: TestSlot) => slot === 'driver' ? 'Driver' : 'Helper';
+
+  const copy = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setNotice({ tone: 'ok', text: 'Berhasil disalin.' });
+    } catch {
+      setNotice({ tone: 'error', text: 'Salin manual melalui teks yang tampil di layar.' });
+    }
   };
 
-  const filteredResults = testSummary?.results.filter(r => {
-    if (selectedCategoryFilter === 'all') return true;
-    return r.category === selectedCategoryFilter;
-  }) || [];
+  const createTestAccounts = async () => {
+    if (!isAdmin || createBusy) return;
+    setCreateBusy(true);
+    setNotice(null);
+    const random = new Uint8Array(3);
+    window.crypto.getRandomValues(random);
+    const suffix = Date.now().toString(36) + Array.from(random, n => n.toString(16).padStart(2, '0')).join('');
+    const created: TestAccount[] = [];
+    try {
+      for (const roleName of ['driver', 'crew_helper'] as const) {
+        const isDriver = roleName === 'driver';
+        const email = `akk-qa-${isDriver ? 'driver' : 'helper'}-${suffix}@example.com`;
+        const password = makePassword();
+        const name = `AKK UJI ${isDriver ? 'DRIVER' : 'HELPER'} ${suffix.slice(-6).toUpperCase()}`;
+        const response = await fetch('/api/users', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fullName: name,
+            email,
+            password,
+            role: roleName,
+            department: 'Logistik',
+            status: 'approved',
+            permissions: makeRolePermissions(roleName, branchId),
+            notes: 'AKK_QA_TEST_ACCOUNT - akun sementara untuk pengujian, bukan kru operasional'
+          })
+        });
+        const json = await response.json().catch(() => ({}));
+        if (!response.ok || !json.success || !json.user?.id) {
+          throw new Error(json.error || `Gagal membuat akun ${isDriver ? 'Driver' : 'Helper'} (${response.status}).`);
+        }
+        const account: TestAccount = { id: String(json.user.id), email, password, name, role: roleName };
+        created.push(account);
+        setAccounts(prev => [...prev, account]);
+      }
+      setNotice({ tone: 'ok', text: 'Dua akun login asli berhasil dibuat. Salin data login sekarang; password tidak disimpan di halaman.' });
+    } catch (error) {
+      setNotice({ tone: 'error', text: `${(error as Error).message} ${created.length ? `${created.length} akun telah terbuat; jangan klik lagi sebelum diperiksa.` : ''}` });
+    } finally {
+      setCreateBusy(false);
+    }
+  };
+
+  const deleteTestAccounts = async () => {
+    if (!isAdmin || deleteBusy || accounts.length === 0) return;
+    if (!window.confirm(`Hapus ${accounts.length} akun uji yang baru dibuat? Tindakan ini tidak bisa dibatalkan.`)) return;
+    setDeleteBusy(true);
+    let removed = 0;
+    try {
+      for (const account of accounts) {
+        const response = await fetch(`/api/users/${encodeURIComponent(account.id)}`, { method: 'DELETE', credentials: 'same-origin' });
+        if (!response.ok) throw new Error(`Gagal menghapus ${account.email}.`);
+        removed += 1;
+        setAccounts(prev => prev.filter(a => a.id !== account.id));
+      }
+      setNotice({ tone: 'ok', text: `${removed} akun uji berhasil dihapus.` });
+    } catch (error) {
+      setNotice({ tone: 'error', text: (error as Error).message });
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
+
+  const runDiagnostics = async () => {
+    if (testBusy) return;
+    setTestBusy(true);
+    setTestProgress('Memeriksa sistem...');
+    setSummary(null);
+    try {
+      setSummary(await E2ETestRunner.runAllTests((_percent, message) => setTestProgress(message)));
+    } catch (error) {
+      setNotice({ tone: 'error', text: `Pengujian gagal: ${(error as Error).message}` });
+    } finally {
+      setTestBusy(false);
+      setTestProgress('');
+    }
+  };
 
   return (
-    <div className="p-4 lg:p-8 space-y-6 max-w-7xl mx-auto text-slate-100">
-      {/* ========================================================================= */}
-      {/* 1. HEADER SECTION                                                         */}
-      {/* ========================================================================= */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
-        <div>
-          <div className="flex items-center gap-2 text-xs text-slate-400 mb-1">
-            <span>Sistem Kualitas &amp; Audit</span>
-            <span aria-hidden="true">&bull;</span>
-            <span className="text-emerald-400 font-semibold">End-to-End Test Engine</span>
-            <span aria-hidden="true">&bull;</span>
-            <span>Zero-Defect Workflow</span>
-          </div>
-          <h1 className="text-xl lg:text-2xl font-black text-white tracking-tight flex items-center gap-2.5">
-            <ShieldCheck className="w-6 h-6 text-emerald-400" />
-            <span>Pusat Pengujian E2E &amp; Simulasi Akun Pengguna</span>
-          </h1>
-          <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
-            Menjalankan validasi otomatis alur kerja operasional antar peran (Super Admin, SPV Logistik, Driver, Helper, Sales) untuk memastikan tidak ada alur yang terlewat, izin RBAC bocor, atau gagal diproses sebelum dan sesudah dipublikasikan ke Hostinger / GitHub.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
-          <button
-            onClick={handleResetToAdmin}
-            className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-sm active:scale-95"
-            title="Kembalikan sesi aktif ke Super Admin"
-          >
-            <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
-            <span>Reset Sesi Super Admin</span>
-          </button>
-
-          <button
-            onClick={handleDownloadReport}
-            disabled={!testSummary}
-            className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-300 text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-sm active:scale-95"
-          >
-            <Download className="w-4 h-4" />
-            <span>Unduh Laporan Audit</span>
-          </button>
-
-          <button
-            onClick={handleRunTests}
-            disabled={isRunning}
-            className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 text-xs font-black transition flex items-center gap-2 cursor-pointer shadow-lg shadow-emerald-500/20 active:scale-95 disabled:opacity-50"
-          >
-            <Play className={`w-4 h-4 text-slate-950 ${isRunning ? 'animate-spin' : ''}`} />
-            <span>{isRunning ? 'Sedang Menguji...' : 'Jalankan Semua Skenario'}</span>
-          </button>
-        </div>
+    <div className="akk-crew-qa mx-auto w-full max-w-5xl p-4 sm:p-6 lg:p-8 space-y-5">
+      <div className="space-y-1">
+        <p className="akk-crew-eyebrow">PENGATURAN / UJI SISTEM</p>
+        <h1 className="text-2xl font-extrabold tracking-tight">Coba Driver &amp; Helper</h1>
+        <p className="text-sm text-slate-500 dark:text-slate-400">Tes tampilan dan login tanpa membuat portal baru.</p>
       </div>
 
-      {/* Active Impersonated Session Warning Banner */}
-      {currentUser.role !== 'super_admin' && (
-        <div className="p-3.5 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 flex items-center justify-between gap-3 text-xs animate-in fade-in">
-          <div className="flex items-center gap-2.5">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-            <span>
-              Anda sedang berada dalam <strong>Mode Simulasi Akun</strong> sebagai: <strong>{currentUser.fullName}</strong> ({currentUser.role.toUpperCase()}).
-            </span>
-          </div>
-          <button
-            onClick={handleResetToAdmin}
-            className="px-3 py-1 bg-amber-500 text-slate-950 font-bold rounded-lg text-[11px] hover:bg-amber-400 transition cursor-pointer"
-          >
-            Kembali ke Super Admin
-          </button>
+      {/* This preview is intentionally in-memory. No schedule, GPS, or MySQL writes. */}
+      <section className="akk-crew-panel space-y-4" aria-label="Simulasi tampilan Driver dan Helper">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="akk-crew-panel-title">Contoh tampilan</h2>
+          <span className="akk-crew-label">SIMULASI • TANPA SIMPAN</span>
         </div>
-      )}
-
-      {/* Progress Bar (Visible when tests are actively running) */}
-      {isRunning && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2 animate-in fade-in">
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-bold text-emerald-400 flex items-center gap-2">
-              <Clock className="w-3.5 h-3.5 animate-spin" />
-              <span>{currentRunningTitle}</span>
-            </span>
-            <span className="font-mono font-bold text-white">{progress}%</span>
+        <div className="akk-crew-switch" role="group" aria-label="Pilih akun simulasi">
+          <button type="button" className={role === 'driver' ? 'is-active' : ''} onClick={() => setRole('driver')}><Truck size={17} /> Akun Driver</button>
+          <button type="button" className={role === 'helper' ? 'is-active' : ''} onClick={() => setRole('helper')}><Users size={17} /> Akun Helper</button>
+        </div>
+        <div className="akk-crew-demo-trip">
+          <div className="flex items-center justify-between gap-2">
+            <strong>Kiriman Contoh</strong>
+            <span className={filled ? 'akk-crew-status good' : 'akk-crew-status'}>{filled ? 'Tim lengkap' : 'Menunggu kru'}</span>
           </div>
-          <div className="w-full bg-slate-950 h-2.5 rounded-full overflow-hidden border border-slate-800">
-            <div
-              className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full transition-all duration-300"
-              style={{ width: `${progress}%` }}
-            />
+          <div className="text-sm text-slate-500 dark:text-slate-400">Gudang → Toko Contoh · Truk N-08</div>
+          <div className="akk-crew-slots">
+            <div><Truck size={17} /><strong>Driver</strong><span>{slots.driver || 'Belum diambil'}</span></div>
+            <div><Users size={17} /><strong>Helper</strong><span>{slots.helper || 'Belum diambil'}</span></div>
           </div>
         </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 2. CORE TEST SUMMARY METRICS CARDS                                        */}
-      {/* ========================================================================= */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1 flex items-center justify-between">
-            <span>Total Skenario E2E</span>
-            <Layers className="w-4 h-4 text-cyan-400" />
+        {!filled && !claimOpen && !assignedSlot && (
+          <button type="button" className="akk-crew-primary" onClick={() => setClaimOpen(true)}>Ambil Kiriman <ArrowRight size={18} /></button>
+        )}
+        {!filled && claimOpen && !assignedSlot && (
+          <div className="akk-crew-claim space-y-2">
+            <strong className="text-sm">Pilih tugas untuk kiriman ini</strong>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {(['driver', 'helper'] as const).filter(slot => !slots[slot]).map(slot => (
+                <button type="button" key={slot} className="akk-crew-outline" onClick={() => {setSlots(prev => ({ ...prev, [slot]: mine })); setClaimOpen(false);}}>
+                  {slot === 'driver' ? <Truck size={17} /> : <Users size={17} />} Jadi {roleLabel(slot)}
+                </button>
+              ))}
+            </div>
+            <button type="button" className="akk-crew-quiet" onClick={() => setClaimOpen(false)}>Batal</button>
           </div>
-          <div className="text-2xl font-black text-white font-mono">
-            {testSummary?.total || 0} <span className="text-xs font-normal text-slate-400">Kasus Uji</span>
-          </div>
-          <div className="text-[11px] text-slate-400 mt-1">
-            Meliputi alur Dispatch, Mobile, POD, &amp; RBAC
-          </div>
+        )}
+        {assignedSlot && <p className="text-sm text-emerald-700 dark:text-emerald-400 font-semibold">Anda mengambil slot {assignedSlot === 'driver' ? 'Driver' : 'Helper'}.</p>}
+        <div className="akk-crew-task-list">
+          <strong>Tugas {taskSlot === 'driver' ? 'Driver' : 'Helper'}</strong>
+          {(taskSlot === 'driver'
+            ? ['Cek kendaraan', 'Catat KM & BBM', 'Berangkat / Pulang']
+            : ['Validasi Surat Jalan', 'Absen toko & retur', 'Isi Form Kirim']
+          ).map(item => <div key={item}><Check size={16} /> {item}</div>)}
         </div>
+        <button type="button" className="akk-crew-quiet inline-flex items-center gap-1.5" onClick={() => {setSlots({ driver: '', helper: '' }); setRole('driver'); setClaimOpen(false);}}>
+          <RotateCcw size={15} /> Ulangi simulasi
+        </button>
+      </section>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1 flex items-center justify-between">
-            <span>Tingkat Kelulusan</span>
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-          </div>
-          <div className="text-2xl font-black text-emerald-400 font-mono">
-            {testSummary?.successRate || 100}%
-          </div>
-          <div className="text-[11px] text-slate-400 mt-1">
-            {testSummary?.passed || 0} Lolos &bull; {testSummary?.failed || 0} Gagal
-          </div>
+      <section className="akk-crew-panel space-y-4" aria-label="Buat akun uji untuk login AKK">
+        <div className="space-y-1">
+          <h2 className="akk-crew-panel-title">Akun login uji</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Dua akun yang bisa login melalui halaman AKK biasa.</p>
         </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1 flex items-center justify-between">
-            <span>Durasi Pengujian</span>
-            <Clock className="w-4 h-4 text-amber-400" />
-          </div>
-          <div className="text-2xl font-black text-white font-mono">
-            {testSummary?.durationMs || 0} <span className="text-xs font-normal text-slate-400">ms</span>
-          </div>
-          <div className="text-[11px] text-slate-400 mt-1">
-            Respon instan in-memory test runner
-          </div>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1 flex items-center justify-between">
-            <span>Pertahanan Input &amp; DB</span>
-            <Lock className="w-4 h-4 text-teal-400" />
-          </div>
-          <div className="text-2xl font-black text-teal-300 font-mono">
-            AMAN (0 XSS)
-          </div>
-          <div className="text-[11px] text-slate-400 mt-1">
-            Filter sanitasi teks, SQL, &amp; XSS aktif
-          </div>
-        </div>
-      </div>
-
-      {/* ========================================================================= */}
-      {/* 3. ACCOUNT IMPERSONATOR (SIMULASI AKUN ORANG LAIN)                        */}
-      {/* ========================================================================= */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <Users className="w-4 h-4 text-cyan-400" />
-              <span>Simulasi Masuk Sebagai Akun Orang Lain (Account Impersonator)</span>
-            </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Pilih akun kru/rekan kerja di bawah untuk mensimulasikan antarmuka dan hak akses mereka secara langsung:
-            </p>
-          </div>
-          <span className="text-[10px] text-slate-500 font-mono">
-            Sesi saat ini: <strong className="text-white">{currentUser.fullName}</strong>
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {samplePersonas.map((persona) => {
-            const isActive = currentUser.email === persona.email;
-            return (
-              <div
-                key={persona.id}
-                className={`p-3.5 rounded-xl border transition ${
-                  isActive
-                    ? 'bg-amber-500/15 border-amber-500/60 shadow-md shadow-amber-500/10'
-                    : 'bg-slate-950 border-slate-800 hover:border-slate-700'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="font-bold text-white text-xs flex items-center gap-1.5">
-                      <span>{persona.fullName}</span>
-                      {isActive && (
-                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                      )}
-                    </div>
-                    <div className="text-[10px] text-slate-400 font-mono mt-0.5">{persona.email}</div>
-                    <div className="text-[11px] font-semibold text-cyan-300 mt-1">
-                      {persona.role === 'super_admin' ? 'Super Administrator' :
-                       persona.role === 'spv_logistik' ? 'SPV Logistik Operasional' :
-                       persona.role === 'driver' ? 'Pengemudi Armada (Driver)' : persona.role}
-                    </div>
-                  </div>
-                  <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400">
-                    {persona.department || 'AKK'}
-                  </span>
+        {!isAdmin ? (
+          <div className="akk-crew-alert"><LockKeyhole size={17} /><span>Masuk sebagai Super Admin untuk membuat akun uji.</span></div>
+        ) : (
+          <>
+            <label className="akk-crew-field">
+              <span>Cabang akun uji</span>
+              <select value={branchId} onChange={event => setBranchId(event.target.value)} disabled={createBusy}>
+                {BRANCHES.map(branch => <option value={branch.value} key={branch.value}>{branch.label}</option>)}
+              </select>
+            </label>
+            <button type="button" className="akk-crew-primary" onClick={createTestAccounts} disabled={createBusy}>
+              {createBusy ? <Loader2 className="animate-spin" size={18} /> : <Users size={18} />}
+              {createBusy ? 'Membuat akun...' : 'Buat 2 Akun Uji'}
+            </button>
+          </>
+        )}
+        {notice && <div role="status" className={`akk-crew-notice ${notice.tone}`}>
+          {notice.tone === 'ok' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
+          <span>{notice.text}</span>
+        </div>}
+        {accounts.length > 0 && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <strong className="text-sm">Data login (salin sekarang)</strong>
+              <button type="button" className="akk-crew-quiet" onClick={() => setShowPasswords(v => !v)}>{showPasswords ? 'Sembunyikan' : 'Tampilkan'} password</button>
+            </div>
+            {accounts.map(account => (
+              <div className="akk-crew-account" key={account.id}>
+                <div className="flex items-center justify-between">
+                  <strong>{account.role === 'driver' ? 'Akun Driver' : 'Akun Helper'}</strong>
+                  <span className="akk-crew-status good">Aktif</span>
                 </div>
-
-                <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between">
-                  <span className="text-[10px] text-slate-500">
-                    {isActive ? 'Sedang Aktif' : 'Tersedia'}
-                  </span>
-                  <button
-                    onClick={() => handleImpersonate(persona)}
-                    disabled={isActive}
-                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                      isActive
-                        ? 'bg-amber-500 text-slate-950 font-black cursor-default'
-                        : 'bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 hover:border-slate-600'
-                    }`}
-                  >
-                    <Eye className="w-3 h-3" />
-                    <span>{isActive ? 'Aktif' : 'Simulasikan Akun'}</span>
-                  </button>
-                </div>
+                <div className="akk-crew-value">{account.email}</div>
+                <div className="akk-crew-value">{showPasswords ? account.password : '••••••••••••••••'}</div>
+                <button type="button" className="akk-crew-outline" onClick={() => copy(credentialsText(account))}><Copy size={16} /> Salin Login</button>
               </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ========================================================================= */}
-      {/* 4. DETAILED AUTOMATED E2E SCENARIOS ACCORDION                             */}
-      {/* ========================================================================= */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl space-y-0">
-        <div className="p-4 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <Terminal className="w-4 h-4 text-emerald-400" />
-              <span>Daftar Skenario &amp; Diagnosa Pengujian Otomatis</span>
-            </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Setiap skenario menguji fungsi backend store, guard otorisasi RBAC, alur penugasan, hingga sanitasi keamanan.
-            </p>
-          </div>
-
-          {/* Filter Categories */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-            {(
-              [
-                { id: 'all', label: 'Semua Kasus' },
-                { id: 'AUTH_SESSION', label: 'Autentikasi' },
-                { id: 'DISPATCH_SCHEDULE', label: 'Jadwal & Penugasan' },
-                { id: 'DRIVER_MOBILE', label: 'Driver Mobile' },
-                { id: 'RBAC_SECURITY', label: 'RBAC' },
-                { id: 'INPUT_SANITATION', label: 'Keamanan Input' }
-              ] as const
-            ).map((cat) => (
-              <button
-                key={cat.id}
-                onClick={() => setSelectedCategoryFilter(cat.id)}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer shrink-0 ${
-                  selectedCategoryFilter === cat.id
-                    ? 'bg-emerald-500 text-slate-950 shadow-sm'
-                    : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
-                }`}
-              >
-                {cat.label}
-              </button>
             ))}
+            <p className="text-xs text-slate-500 dark:text-slate-400">Login masing-masing akun di jendela privat yang berbeda. Password hanya muncul selama halaman ini terbuka.</p>
+            <button type="button" className="akk-crew-danger" disabled={deleteBusy} onClick={deleteTestAccounts}>
+              {deleteBusy ? <Loader2 className="animate-spin" size={15} /> : <Trash2 size={15} />}
+              Hapus akun uji setelah selesai
+            </button>
           </div>
+        )}
+        <p className="text-xs text-amber-700 dark:text-amber-400">Akun uji dibuat di database AKK sungguhan. Jangan gunakan untuk kiriman nyata. Hapus setelah tes.</p>
+        <button type="button" className="akk-crew-outline" onClick={() => onNavigate ? onNavigate('driver_portal') : window.location.assign('/portal-driver')}>
+          Buka menu Driver / Helper <ExternalLink size={16} />
+        </button>
+      </section>
+
+      <section className="akk-crew-panel space-y-3" aria-label="Tes kesehatan sistem">
+        <div className="flex flex-wrap gap-3 items-center justify-between">
+          <div>
+            <h2 className="akk-crew-panel-title">Periksa sistem</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Tes otomatis yang sudah ada, hasil dibuat lebih ringkas.</p>
+          </div>
+          <button type="button" className="akk-crew-outline" disabled={testBusy} onClick={runDiagnostics}>
+            {testBusy ? <Loader2 className="animate-spin" size={16} /> : <Play size={16} />}
+            {testBusy ? 'Menguji...' : 'Jalankan Tes'}
+          </button>
         </div>
-
-        <div className="divide-y divide-slate-800/80">
-          {filteredResults.map((test, index) => {
-            const isExpanded = expandedTestId === test.id;
-            return (
-              <div key={test.id} className="p-4 hover:bg-slate-800/30 transition">
-                <div
-                  onClick={() => setExpandedTestId(isExpanded ? null : test.id)}
-                  className="flex items-center justify-between gap-3 cursor-pointer"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="w-6 h-6 rounded-lg bg-slate-950 border border-slate-800 text-[10px] font-mono font-bold flex items-center justify-center text-slate-400">
-                      {index + 1}
-                    </span>
-                    {test.status === 'passed' ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    ) : (
-                      <XCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                    )}
-                    <div>
-                      <div className="font-bold text-white text-xs flex items-center gap-2">
-                        <span>{test.title}</span>
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-slate-400">
-                          {test.targetAccountRole}
-                        </span>
-                      </div>
-                      <div className="text-[11px] text-slate-400 mt-0.5">
-                        Target Akun: <strong className="text-slate-300">{test.targetAccountName}</strong> &bull; {test.details}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3 shrink-0">
-                    <span className="text-[11px] font-mono text-slate-400">
-                      {test.durationMs} ms
-                    </span>
-                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                      test.status === 'passed'
-                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                        : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                    }`}>
-                      {test.status === 'passed' ? 'PASSED' : 'FAILED'}
-                    </span>
-                    {isExpanded ? (
-                      <ChevronDown className="w-4 h-4 text-slate-400" />
-                    ) : (
-                      <ChevronRight className="w-4 h-4 text-slate-400" />
-                    )}
-                  </div>
-                </div>
-
-                {/* Expanded Assertions Breakdown */}
-                {isExpanded && (
-                  <div className="mt-3 pl-9 pr-2 space-y-2 pt-3 border-t border-slate-800/60 animate-in fade-in duration-150">
-                    <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-                      Langkah Verifikasi (Assertions - {test.assertions.length} Poin):
-                    </div>
-                    <div className="space-y-1.5">
-                      {test.assertions.map((assertion, aIdx) => (
-                        <div
-                          key={aIdx}
-                          className="p-2.5 rounded-xl bg-slate-950 border border-slate-800/80 flex items-start gap-2.5 text-xs"
-                        >
-                          {assertion.passed ? (
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
-                          ) : (
-                            <XCircle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
-                          )}
-                          <div className="flex-1">
-                            <span className={assertion.passed ? 'text-slate-200' : 'text-rose-300 font-bold'}>
-                              {assertion.description}
-                            </span>
-                            {assertion.actual !== undefined && (
-                              <div className="text-[10px] font-mono text-slate-400 mt-0.5">
-                                Hasil Riil: <span className="text-cyan-300">{JSON.stringify(assertion.actual)}</span>
-                                {assertion.expected !== undefined && (
-                                  <span> &bull; Ekspektasi: <span className="text-emerald-300">{JSON.stringify(assertion.expected)}</span></span>
-                                )}
-                              </div>
-                            )}
-                            {assertion.error && (
-                              <div className="text-[10px] font-mono text-rose-400 mt-0.5">
-                                Error: {assertion.error}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ========================================================================= */}
-      {/* 5. HOSTINGER & GITHUB DEPLOYMENT SECURITY AUDIT CARD                      */}
-      {/* ========================================================================= */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
-        <h3 className="text-sm font-bold text-white flex items-center gap-2">
-          <Server className="w-4 h-4 text-cyan-400" />
-          <span>Status Kesiapan Publikasi Hostinger &amp; Repositori GitHub</span>
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1 text-xs">
-          <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
-            <div className="flex items-center gap-2 text-emerald-400 font-bold">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Hostinger Node 22 Terkonfigurasi</span>
+        {testProgress && <p className="text-sm text-slate-500">{testProgress}</p>}
+        {summary && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-3 text-sm">
+              <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><CheckCircle2 size={17} /> {summary.passed} lolos</span>
+              <span className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-400"><XCircle size={17} /> {summary.failed} gagal</span>
             </div>
-            <p className="text-[11px] text-slate-400">
-              Build command <code className="text-white">npm run build</code>, start command <code className="text-white">tsx server.ts</code>, dan Node <code className="text-white">22.x</code> aktif.
-            </p>
+            {summary.results.filter(result => result.status !== 'passed').map(result => (
+              <details className="akk-crew-error" key={result.id}>
+                <summary><AlertCircle size={16} /> {result.title}</summary>
+                <div className="text-xs space-y-1 pt-2">{result.assertions.filter(assertion => !assertion.passed).map((assertion, index) => <p key={index}>{assertion.description}</p>)}</div>
+              </details>
+            ))}
+            {summary.failed === 0 && <p className="text-sm text-emerald-600 dark:text-emerald-400"><ShieldCheck size={16} className="inline" /> Pemeriksaan otomatis lolos.</p>}
           </div>
-
-          <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
-            <div className="flex items-center gap-2 text-emerald-400 font-bold">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>HTTP Security Headers</span>
-            </div>
-            <p className="text-[11px] text-slate-400">
-              X-Content-Type-Options: nosniff, X-Frame-Options: SAMEORIGIN, dan Referrer-Policy tersemat otomatis.
-            </p>
-          </div>
-
-          <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
-            <div className="flex items-center gap-2 text-emerald-400 font-bold">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Kerahasiaan API Key Terjaga</span>
-            </div>
-            <p className="text-[11px] text-slate-400">
-              Kunci rahasia dipisah ke <code className="text-white">.env.example</code> tanpa token hardcoded pada source code.
-            </p>
-          </div>
-        </div>
-      </div>
+        )}
+      </section>
     </div>
   );
 };
+
+export default E2ETesterModule;

@@ -6,6 +6,7 @@ export interface DriverHelperReport {
   date?: string; // YYYY-MM-DD
   driverId: string;
   driverName: string;
+  reportedByName?: string;
   userRole?: string;
   helperName?: string;
   plateNumber: string;
@@ -108,6 +109,31 @@ export const getLocalDateStr = (input?: string | Date): string => {
     return fallbackNow();
   }
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+const sanitizeOperationalPlate = (plate?: string): string => {
+  const clean = String(plate || '').trim();
+  if (!clean || clean === '-') return '-';
+  if (/^FLT-\d+$/i.test(clean) || clean.toUpperCase().endsWith('AKK')) return '-';
+  return clean;
+};
+
+const stripHelperSelfDuplicate = (driverName?: string, helperName?: string, userRole?: string): string | undefined => {
+  const cleanHelper = String(helperName || '').trim();
+  if (!cleanHelper || cleanHelper === '-') return undefined;
+  const normCompact = (v?: string) => String(v || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  const driverCompact = normCompact(driverName);
+  const roleLower = String(userRole || '').toLowerCase();
+  // When userRole is Helper and both fields hold the same name (legacy report bug),
+  // keep helperName intact so the Helper isn't erased and confused with the Driver.
+  if (roleLower.includes('helper') && driverCompact && normCompact(cleanHelper) === driverCompact) {
+    return cleanHelper;
+  }
+  const filteredParts = cleanHelper
+    .split(/[,&/]+/)
+    .map(p => p.trim())
+    .filter(p => p && p !== '-' && (!driverCompact || normCompact(p) !== driverCompact));
+  return filteredParts.length > 0 ? filteredParts.join(', ') : undefined;
 };
 
 class DriverReportService {
@@ -359,9 +385,20 @@ class DriverReportService {
         finalGmapsUrl = precise.gmapsUrl;
       }
 
+      const helperSelfFixed =
+        String(r.userRole || '').toLowerCase().includes('helper') &&
+        r.helperName &&
+        r.driverName &&
+        r.helperName.trim().toLowerCase() === r.driverName.trim().toLowerCase()
+          ? { reportedByName: r.reportedByName || r.helperName.trim() }
+          : {};
+
       return {
         ...r,
+        ...helperSelfFixed,
         id: uniqueId,
+        plateNumber: sanitizeOperationalPlate(r.plateNumber),
+        helperName: stripHelperSelfDuplicate(r.driverName, r.helperName, r.userRole),
         photoUrl: r.photoUrl || photoUrls[0] || null,
         photoUrls,
         latitude: finalLat,
@@ -513,6 +550,8 @@ class DriverReportService {
       : [];
     const newReport: DriverHelperReport = {
       ...report,
+      plateNumber: sanitizeOperationalPlate(report.plateNumber),
+      helperName: stripHelperSelfDuplicate(report.driverName, report.helperName, report.userRole),
       id: uniqueId,
       photoUrl: report.photoUrl || photoUrls[0] || null,
       photoUrls,
@@ -552,9 +591,9 @@ class DriverReportService {
     const targetNameCompact = normCompact(params.driverName);
     const targetPlateNorm = normPlate(params.plateNumber);
 
+    const safePlate = sanitizeOperationalPlate(params.plateNumber);
     const resolveHelperText = (h?: string) => {
-      const clean = String(h || '').trim();
-      return clean && clean !== '-' ? clean : '';
+      return stripHelperSelfDuplicate(params.driverName, h, params.userRole) || '';
     };
 
     const matchesPersonOrShift = (r: DriverHelperReport) => {
@@ -579,7 +618,11 @@ class DriverReportService {
     if (existingIdx >= 0) {
       const existing = list[existingIdx];
       const mergedCheckout = params.checkoutTimeFormatted || existing.checkoutTimeFormatted;
-      const mergedHelperName = resolveHelperText(params.helperName) || resolveHelperText(existing.helperName) || undefined;
+      const nextRole = params.userRole || existing.userRole;
+      const isHelperRole = String(nextRole || '').toLowerCase().includes('helper');
+      const mergedHelperName = isHelperRole
+        ? undefined
+        : (resolveHelperText(params.helperName) || resolveHelperText(existing.helperName) || undefined);
       const helperSuffix = mergedHelperName ? ` | Helper: ${mergedHelperName}` : '';
       const mergedPin = '****';
       const updatedNotes = mergedCheckout
@@ -589,9 +632,9 @@ class DriverReportService {
       list[existingIdx] = {
         ...existing,
         driverName: params.driverName || existing.driverName,
-        userRole: params.userRole || existing.userRole,
+        userRole: nextRole,
         helperName: mergedHelperName,
-        plateNumber: params.plateNumber || existing.plateNumber,
+        plateNumber: safePlate !== '-' ? safePlate : sanitizeOperationalPlate(existing.plateNumber),
         areaName: params.areaName || existing.areaName,
         checkoutTimeFormatted: mergedCheckout,
         securityPin: mergedPin,
@@ -610,7 +653,8 @@ class DriverReportService {
       return list[existingIdx];
     }
 
-    const cleanHelper = resolveHelperText(params.helperName) || undefined;
+    const isHelperRole = String(params.userRole || '').toLowerCase().includes('helper');
+    const cleanHelper = isHelperRole ? undefined : (resolveHelperText(params.helperName) || undefined);
     const helperSuffix = cleanHelper ? ` | Helper: ${cleanHelper}` : '';
     const pinStr = '****';
     const initialNotes = params.checkoutTimeFormatted
@@ -622,7 +666,7 @@ class DriverReportService {
       driverName: params.driverName,
       userRole: params.userRole || 'Driver',
       helperName: cleanHelper,
-      plateNumber: params.plateNumber || '-',
+      plateNumber: safePlate,
       category: 'presensi_shift',
       areaName: params.areaName || 'Presensi Operasional DC',
       notes: initialNotes,
@@ -1126,13 +1170,27 @@ class DriverReportService {
     const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
     const outlet = params.customerOutletName || params.areaName || 'Customer / Toko Tujuan';
 
-    const existingIdx = list.findIndex(
-      r =>
-        r.category === 'kendala_jalan' &&
-        r.date === today &&
-        r.customerQueueStatus === 'sedang_mengantri' &&
-        (r.driverId === params.driverId || r.driverName.toLowerCase() === params.driverName.toLowerCase())
-    );
+    const normalizeQueueKey = (value?: string) => (value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+    const requestAreaKey = normalizeQueueKey(params.areaName);
+    const requestPlateKey = normalizeQueueKey(params.plateNumber);
+    const existingIdx = list.findIndex(r => {
+      if (
+        r.category !== 'kendala_jalan' ||
+        r.date !== today ||
+        r.customerQueueStatus !== 'sedang_mengantri' ||
+        !(r.driverId === params.driverId || r.driverName.toLowerCase() === params.driverName.toLowerCase())
+      ) return false;
+      // ID schedule is authoritative. Never overwrite a different route's queue report
+      // merely because the same driver/helper or truck appears on both trips.
+      if (params.deliveryId) return r.deliveryId === params.deliveryId;
+      if (r.deliveryId) return false;
+      return normalizeQueueKey(r.areaName) === requestAreaKey &&
+        normalizeQueueKey(r.plateNumber) === requestPlateKey;
+    });
 
     const queueNote = params.notes?.trim()
       ? `[ANTRI DI CUSTOMER: ${outlet}] Mulai Mengantri: ${timeStr} (Status: Sedang Mengantri di Customer) — ${params.notes.trim()}`
@@ -1185,6 +1243,7 @@ class DriverReportService {
    */
   public completeCustomerQueueExit(params: {
     reportId?: string;
+    deliveryId?: string;
     driverId?: string;
     driverName?: string;
     simulatedExtraMinutes?: number;
@@ -1197,13 +1256,22 @@ class DriverReportService {
     if (params.reportId) {
       targetIdx = list.findIndex(r => r.id === params.reportId);
     }
-    if (targetIdx < 0) {
+    if (targetIdx < 0 && params.deliveryId) {
       targetIdx = list.findIndex(
-        r =>
+        r => r.customerQueueStatus === 'sedang_mengantri' && r.deliveryId === params.deliveryId
+      );
+    }
+    if (targetIdx < 0 && !params.deliveryId) {
+      const candidates = list
+        .map((r, index) => ({ r, index }))
+        .filter(({ r }) =>
           r.customerQueueStatus === 'sedang_mengantri' &&
+          !r.deliveryId &&
           ((params.driverId && r.driverId === params.driverId) ||
             (params.driverName && r.driverName.toLowerCase() === params.driverName.toLowerCase()))
-      );
+        );
+      // Do not close an arbitrary queue report if the same crew has multiple active trips.
+      if (candidates.length === 1) targetIdx = candidates[0].index;
     }
 
     if (targetIdx < 0) return null;

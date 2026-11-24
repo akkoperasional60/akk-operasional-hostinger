@@ -1,9 +1,9 @@
 {
-  "versionCode": 10047,
-  "versionName": "1.0.47",
-  "updatedAt": "2026-11-22T18:10:00.000000",
-  "changelog": "Penyederhanaan UI/UX Portal Driver Mobile dan optimasi sinkronisasi Fetch/XHR & Console.",
+  "versionCode": 10049,
+  "versionName": "1.0.49",
+  "updatedAt": "2026-11-23T14:30:00+07:00",
+  "changelog": "Perbaikan pemulihan Portal Driver, diagnostik runtime React, validasi aset build Hostinger, dan sanitasi data akun/kru kosong.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V59: Resolusi Otomatis Foreign Key Armada (resolveOrEnsureMysqlFleetId) & Simpan/Edit/Hapus Async Langsung Log BBM ke MySQL, Sinkronisasi Ketat Daftar Driver/Helper dengan Status Akun User Aktif (Otomatis Hilang Saat Dinonaktifkan), serta Paginasi 10 Baris, Custom Popover Filter & Navigasi Keyboard Panah/Enter pada Modul Efisiensi BBM."
+  "releaseNotes": "Update V60: Pemulihan Kata Sandi (Lupa Password) dengan OTP Langsung ke WhatsApp User (Fonnte/Wablas/Meta/Webhook), Migrasi Penuh State Operasional (BranchConfig, Surat Jalan, Area Mapping, WMS, Finance, Simulasi Rute & Jobdesk Sales) dari localStorage ke MySQL, Pembersihan Sinkron Track Kamera pada 4 Modal Kamera, serta Sanitasi Duplikasi Nama Helper & Plat Phantom.; Perbaikan Portal Driver: ErrorBoundary tidak lagi menghapus cache operasional atau melakukan reload berulang; detail error runtime dapat disalin; build Hostinger dipaksa memakai dist; aset JS/CSS yang hilang menghasilkan 404 eksplisit; data identitas user/kru kosong dinormalisasi aman."
 }

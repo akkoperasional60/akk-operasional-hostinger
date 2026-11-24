@@ -44,6 +44,56 @@ export interface NewAreaPayload {
 const STORAGE_KEY_CUSTOM_AREAS = 'akk_custom_registered_areas_v1';
 const STORAGE_KEY_SAVED_MAPPINGS = 'akk_saved_spreadsheet_area_mappings_v1';
 
+let memoryCustomAreas: OfficialAreaItem[] = [];
+let memorySavedMappings: Record<string, string> = {};
+let areaMapperLoaded = false;
+
+const getMapperAuthHeaders = (): Record<string, string> => {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  try {
+    const token =
+      (typeof localStorage !== 'undefined'
+        ? localStorage.getItem('akk_session_token') || localStorage.getItem('session_token')
+        : null) ||
+      (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('akk_session_token') : null) ||
+      '';
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+      headers['x-akk-session-token'] = token;
+    }
+  } catch {}
+  return headers;
+};
+
+const clearLegacyAreaMapperStorage = () => {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.removeItem(STORAGE_KEY_CUSTOM_AREAS);
+    localStorage.removeItem(STORAGE_KEY_SAVED_MAPPINGS);
+  } catch {}
+};
+
+const syncAreaMappingsFromServer = () => {
+  if (areaMapperLoaded || typeof window === 'undefined' || typeof fetch === 'undefined') return;
+  areaMapperLoaded = true;
+  clearLegacyAreaMapperStorage();
+  void fetch('/api/area-mappings', {
+    credentials: 'same-origin',
+    headers: getMapperAuthHeaders()
+  })
+    .then(r => (r.ok ? r.json() : null))
+    .then(json => {
+      if (!json) return;
+      if (Array.isArray(json.customAreas)) {
+        memoryCustomAreas = json.customAreas;
+      }
+      if (json.savedMappings && typeof json.savedMappings === 'object') {
+        memorySavedMappings = json.savedMappings;
+      }
+    })
+    .catch(() => {});
+};
+
 // Known abbreviation dictionary for Indonesian logistics
 const LOGISTICS_ALIAS_DICTIONARY: Record<string, string> = {
   'DPS': 'DENPASAR',
@@ -160,19 +210,16 @@ export const areaAutoMapper = {
       }
     });
 
-    // 2. From custom saved delivery areas in localStorage
+    // 2. From custom saved delivery areas synced from MySQL
+    syncAreaMappingsFromServer();
     try {
-      const savedCustom = localStorage.getItem(STORAGE_KEY_CUSTOM_AREAS);
-      if (savedCustom) {
-        const customItems = JSON.parse(savedCustom) as OfficialAreaItem[];
-        customItems.forEach(item => {
-          const upper = item.name.trim().toUpperCase();
-          if (!seenNames.has(upper)) {
-            seenNames.add(upper);
-            list.push(item);
-          }
-        });
-      }
+      memoryCustomAreas.forEach(item => {
+        const upper = String(item?.name || '').trim().toUpperCase();
+        if (upper && !seenNames.has(upper)) {
+          seenNames.add(upper);
+          list.push(item);
+        }
+      });
     } catch {
       // ignore
     }
@@ -185,30 +232,27 @@ export const areaAutoMapper = {
    * dengan daftar area yang ada di tabel 'Jadwal Pengiriman & Muat'
    */
   matchRawArea(rawArea: string, officialList?: OfficialAreaItem[]): AreaMappingEntry {
+    syncAreaMappingsFromServer();
     const catalog = officialList || this.getOfficialAreaList();
     const cleanRaw = (rawArea || '').trim();
     const upperRaw = cleanRaw.toUpperCase();
 
-    // Check user-saved custom mapping dictionary first
+    // Check user-saved custom mapping dictionary synced from MySQL first
     try {
-      const savedMappings = localStorage.getItem(STORAGE_KEY_SAVED_MAPPINGS);
-      if (savedMappings) {
-        const map = JSON.parse(savedMappings) as Record<string, string>;
-        if (map[cleanRaw] || map[upperRaw]) {
-          const targetName = map[cleanRaw] || map[upperRaw];
-          const found = catalog.find(c => c.name.toUpperCase() === targetName.toUpperCase());
-          if (found) {
-            return {
-              rawArea: cleanRaw,
-              occurrenceCount: 1,
-              matchedOfficialArea: found.name,
-              matchedStoreId: found.storeId || found.id,
-              confidence: 'exact',
-              confidenceScore: 100,
-              similarityReason: 'Dicocokkan berdasarkan riwayat pemetaan pengguna sebelumnya',
-              isUserOverridden: true
-            };
-          }
+      const targetName = memorySavedMappings[cleanRaw] || memorySavedMappings[upperRaw];
+      if (targetName) {
+        const found = catalog.find(c => c.name.toUpperCase() === targetName.toUpperCase());
+        if (found) {
+          return {
+            rawArea: cleanRaw,
+            occurrenceCount: 1,
+            matchedOfficialArea: found.name,
+            matchedStoreId: found.storeId || found.id,
+            confidence: 'exact',
+            confidenceScore: 100,
+            similarityReason: 'Dicocokkan berdasarkan riwayat pemetaan pengguna sebelumnya',
+            isUserOverridden: true
+          };
         }
       }
     } catch {
@@ -395,16 +439,18 @@ export const areaAutoMapper = {
       source: 'custom_created'
     };
 
-    // Save to persistent custom areas cache
-    try {
-      const existing = localStorage.getItem(STORAGE_KEY_CUSTOM_AREAS);
-      const list: OfficialAreaItem[] = existing ? JSON.parse(existing) : [];
-      if (!list.some(i => i.name.toUpperCase() === cleanName)) {
-        list.push(officialItem);
-        localStorage.setItem(STORAGE_KEY_CUSTOM_AREAS, JSON.stringify(list));
+    // Save to memory & Hostinger MySQL (/api/area-mappings)
+    if (!memoryCustomAreas.some(i => i.name.toUpperCase() === cleanName)) {
+      memoryCustomAreas = [...memoryCustomAreas, officialItem];
+      clearLegacyAreaMapperStorage();
+      if (typeof fetch !== 'undefined') {
+        void fetch('/api/area-mappings', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: getMapperAuthHeaders(),
+          body: JSON.stringify({ customAreas: [officialItem] })
+        }).catch(() => {});
       }
-    } catch {
-      // ignore
     }
 
     logisticsStore.emitNotification(
@@ -421,13 +467,15 @@ export const areaAutoMapper = {
    * Simpan preferensi pemetaan pengguna agar dapat diingat pada impor berikutnya
    */
   saveUserMappingPreference(rawArea: string, targetOfficialArea: string): void {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_SAVED_MAPPINGS);
-      const map: Record<string, string> = saved ? JSON.parse(saved) : {};
-      map[rawArea] = targetOfficialArea;
-      localStorage.setItem(STORAGE_KEY_SAVED_MAPPINGS, JSON.stringify(map));
-    } catch {
-      // ignore
+    memorySavedMappings[rawArea] = targetOfficialArea;
+    clearLegacyAreaMapperStorage();
+    if (typeof fetch !== 'undefined') {
+      void fetch('/api/area-mappings', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: getMapperAuthHeaders(),
+        body: JSON.stringify({ savedMappings: { [rawArea]: targetOfficialArea } })
+      }).catch(() => {});
     }
   }
 };

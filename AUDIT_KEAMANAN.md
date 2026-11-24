@@ -59,35 +59,3 @@ Catatan perilaku: request besar tanpa sesi valid dijawab 401 (bukan 413) agar an
 Pengujian: logika sesi & rate-limit diuji dengan 14 skenario memakai kode asli dari `server.ts` dan DB tiruan (semua lulus). Belum diuji terhadap MySQL Hostinger sungguhan.
 
 Tidak dikerjakan (tidak diperlukan di shared hosting yang menjalankan satu proses): migrasi penyimpanan in-memory ke MySQL untuk skenario multi-instance. Bila suatu saat pindah ke VPS/Cloud dengan banyak instance, kerjakan sesuai saran tahap sebelumnya.
-
-## E. Audit ulang pada versi terbaru (zip kedua)
-
-Zip kedua berisi fitur baru (Form Kirim sopir/finance, `tabLoaders`, dsb.) dan `server.ts` yang telah diedit ulang sehingga **sebagian besar perbaikan keamanan tahap 1 hilang** (body 35 MB tanpa login, secret default, `db-status` bocor, endpoint terbuka, dll.). Semuanya diterapkan ulang di versi ini. Implementasi sesi MySQL (tabel `sessions`) dan rate-limit buatan Anda dipertahankan, lalu dikoreksi:
-
-| Tingkat | Temuan | Perbaikan |
-|---------|--------|-----------|
-| Kritis | Route baru `/api/form-kirim` (baca/tulis/PATCH driver & finance) tanpa autentikasi: siapa pun bisa mengubah nominal pembayaran, tanda tangan, dan validasi Finance | Wajib login. `PATCH .../finance` hanya Super Admin, `finance_tax_admin`, atau akun dengan akses penuh menu Validasi Form Kirim |
-| Tinggi | `POST /api/form-kirim` (simpan massal) bisa memalsukan flag validasi Finance | Field `finance*` dibuang dari kiriman user non-Finance |
-| Tinggi | Rate-limit memakai header `X-Forwarded-For` mentah → bisa dilewati dengan header palsu | Memakai `req.ip` + `trust proxy` (`TRUST_PROXY_HOPS`, default 1) |
-| Tinggi | Tidak ada batas per-akun lintas IP; peta rate-limit tidak pernah dibersihkan (bisa membengkak) | Batas 40 gagal/akun dari semua IP; pembersihan berkala + plafon ukuran |
-| Sedang | Bug: "logout semua perangkat, pertahankan yang ini" justru ikut membatalkan sesi yang dipertahankan | Diperbaiki (terbukti lewat uji) |
-| Sedang | XSS tersimpan pada popup/tooltip peta toko (`LeafletMap`: nama toko, catatan, telepon, dll. ditulis via `innerHTML`) | Semua nilai di-escape; nomor telepon pada `tel:` disaring |
-| Sedang | Pendaftaran tanpa batas, pesan error DB bocor, status akun diungkap sebelum password, tidak ada penanganan error/`unhandledRejection` | Diperbaiki seperti tahap 1 |
-
-Route `/api` yang sengaja tetap publik: `auth/login|register|me|logout`, `db-status` (versi minimal), `download-schedule-template`, `models/*` (dibutuhkan deteksi di browser), `downloads/:file`, `dev-boot-id`.
-
-Pengujian: 11 skenario pada kode sesi & rate-limit asli (semua lulus), sintaks 172 file lolos, validator baseline Hostinger lolos. Belum diuji terhadap MySQL Hostinger sungguhan dan `npm run build` belum dijalankan.
-
-Catatan: model `best.onnx` dapat diunduh tanpa login. Itu perlu agar deteksi browser bekerja; bila model dianggap aset rahasia, batasi lewat login (uji dulu pemuatan ONNX di browser).
-
-## F. Zip ketiga: perubahan baru & penggabungan ulang
-
-Zip ketiga memakai `server.ts`/`LeafletMap.tsx` **sebelum** patch bagian E (patch tidak terbawa). Semua patch E digabungkan kembali. Perubahan baru Anda di `FormKirimSystem.tsx` dan `AdminSchedulesTab.tsx` diperiksa:
-
-| Tingkat | Temuan | Perbaikan |
-|---------|--------|-----------|
-| Tinggi | `AdminSchedulesTab`: bila `GET /api/admin-schedules` gagal (sesi habis, error DB, rate-limit) atau kosong, kode mengirim jadwal **contoh** (MUHAMMAD SHOIM, ISTI, IZZUL, FATA) ke server dan **menimpa jadwal asli**. Jadwal contoh juga tampil sebagai nilai awal | Nilai awal kosong; respons gagal → pakai cache lokal tanpa menulis ke server; database kosong → tampil kosong |
-
-Tidak ada pola berbahaya baru (innerHTML, document.write, dsb.) pada `FormKirimSystem.tsx`.
-
-Saran alur kerja: jangan menyunting `server.ts` di dua tempat (mis. AI Studio dan GitHub). Setiap kali versi lama menimpa file, patch keamanan hilang. Lakukan *pull* dari GitHub sebelum menyunting, dan jalankan `npm run lint` + `npm run build` sebelum push.

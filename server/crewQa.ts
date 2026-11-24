@@ -1,0 +1,157 @@
+import type { Express } from 'express';
+import crypto from 'crypto';
+import { getDbPool, isDatabaseConfigured } from './db';
+
+const QA_KEY = 'akk_qa_kiriman_server_v65';
+const json = (raw: any) => {
+  if (!raw) return null;
+  if (typeof raw === 'object') return raw;
+  try { return JSON.parse(String(raw)); } catch { return null; }
+};
+const str = (raw: any) => String(raw ?? '').trim();
+const isQa = (u: any) => u && u.status === 'approved' && ['driver','crew_helper'].includes(u.role) &&
+  /^akk-qa-(driver|helper)-[a-z0-9-]+@example\.com$/i.test(str(u.email)) &&
+  str(u.notes).includes('AKK_QA_TEST_ACCOUNT');
+const isAdmin = (u: any) => u && u.status === 'approved' && u.role === 'super_admin';
+const permitted = (u: any, branchId: string) => {
+  if (isAdmin(u)) return true;
+  const perms = json(u.permissions_json) || json(u.permissions) || {};
+  return Boolean(perms.branchPermissions?.[branchId]?.enabled &&
+    perms.branchPermissions?.[branchId]?.modules?.logistics?.enabled);
+};
+const same = (a: any, b: any) => {
+  const aa=str(a).toLowerCase().replace(/^(?:(?:crw|usr)-)+/, '');
+  const bb=str(b).toLowerCase().replace(/^(?:(?:crw|usr)-)+/, '');
+  return Boolean(aa && bb && aa===bb);
+};
+const roleOf = (trip: any, u: any): 'driver' | 'helper' | null => same(trip.driver?.id, u.id) ? 'driver' : same(trip.helper?.id, u.id) ? 'helper' : null;
+const err = (message: string, status = 400) => Object.assign(new Error(message), { status });
+const getRows = async (conn: any, lock = false): Promise<any[]> => {
+  const [rows] = await conn.execute(`SELECT state_json FROM app_state WHERE state_key=? LIMIT 1 ${lock?'FOR UPDATE':''}`, [QA_KEY]);
+  const parsed = json(rows?.[0]?.state_json);
+  return Array.isArray(parsed?.schedules) ? parsed.schedules.slice(0, 150) : [];
+};
+const storeRows = async (conn: any, schedules: any[]) => {
+  await conn.execute('INSERT INTO app_state(state_key,state_json,updated_at) VALUES(?,?,NOW()) ON DUPLICATE KEY UPDATE state_json=VALUES(state_json),updated_at=NOW()',
+    [QA_KEY, JSON.stringify({version:65,updatedAt:new Date().toISOString(),schedules:schedules.slice(0,150)})]);
+};
+const check = (req: any, res: any): any | null => {
+  const u = req.authUser;
+  if (!isAdmin(u) && !isQa(u)) { res.status(403).json({success:false,error:'Hanya akun uji atau Super Admin.'}); return null; }
+  if (!isDatabaseConfigured()) {res.status(503).json({success:false,error:'Database tidak tersedia.'});return null;}
+  return u;
+};
+const mutate = async (u: any, id: string, fn: (t: any) => void) => {
+  let conn: any;
+  try {
+    conn = await getDbPool().getConnection();
+    await conn.execute('INSERT IGNORE INTO app_state(state_key,state_json,updated_at) VALUES(?,?,NOW())', [QA_KEY, JSON.stringify({version:65,schedules:[]})]);
+    await conn.beginTransaction();
+    const list = await getRows(conn, true);
+    const row = list.find(t => t.id === id);
+    if (!row) throw err('Kiriman uji tidak ditemukan.',404);
+    if (!permitted(u,row.branchId)) throw err('Cabang tidak sesuai akses akun.',403);
+    fn(row);
+    await storeRows(conn,list);
+    await conn.commit();
+    return row;
+  } catch (e) { if(conn)try{await conn.rollback()}catch{};throw e; }
+  finally {if(conn)conn.release();}
+};
+
+export function registerCrewQaRoutes(app: Express, requireAuth: any) {
+  const errorResponse = (res: any, e: any) => res.status(Number(e?.status)||503).json({success:false,error:e?.message||'Penyimpanan uji gagal.'});
+  app.get('/api/crew-qa/trips', requireAuth, async (req: any, res: any) => {
+    const u = check(req,res); if(!u)return;
+    try {
+      const [rows] = await getDbPool().execute('SELECT state_json FROM app_state WHERE state_key=? LIMIT 1',[QA_KEY]);
+      const data = json((rows as any[])[0]?.state_json);
+      const list = Array.isArray(data?.schedules) ? data.schedules : [];
+      return res.json({success:true,trips:list.filter((t:any)=>permitted(u,t.branchId))});
+    } catch(e) {return errorResponse(res,e);}
+  });
+  app.post('/api/crew-qa/trips', requireAuth, async (req: any, res: any) => {
+    const u = check(req,res); if(!u)return;
+    if(!isAdmin(u))return res.status(403).json({success:false,error:'Hanya Admin yang boleh membuat kiriman uji.'});
+    const {branchId,area,fleetLabel,date,departureTime} = req.body||{};
+    if(!['cab-sidoarjo','cab-banyuwangi'].includes(branchId)||str(area).length<3||str(area).length>100||
+      !/^\d{4}-\d{2}-\d{2}$/.test(str(date))||!/^\d{2}:\d{2}$/.test(str(departureTime)))
+      return res.status(400).json({success:false,error:'Cabang, tanggal, jam atau area belum valid.'});
+    const trip = {id:`qa-v65-${crypto.randomUUID()}`,branchId,area:str(area),fleetLabel:str(fleetLabel)||'Armada Uji',date,departureTime,
+      driver:null,helper:null,createdAt:new Date().toISOString(),phase:'waiting',reports:[]};
+    let conn: any;
+    try {
+      conn=await getDbPool().getConnection();
+      await conn.execute('INSERT IGNORE INTO app_state(state_key,state_json,updated_at) VALUES(?,?,NOW())', [QA_KEY, JSON.stringify({version:65,schedules:[]})]);
+      await conn.beginTransaction();
+      const rows=await getRows(conn,true);
+      await storeRows(conn,[trip,...rows].slice(0,150));
+      await conn.commit();return res.json({success:true,trip});
+    } catch(e){if(conn)try{await conn.rollback()}catch{};return errorResponse(res,e)}finally{if(conn)conn.release()}
+  });
+  app.delete('/api/crew-qa/trips/:id', requireAuth, async (req:any,res:any)=>{
+    const u=check(req,res);if(!u)return;
+    if(!isAdmin(u))return res.status(403).json({success:false,error:'Hanya Admin yang dapat menghapus uji.'});
+    let conn: any;
+    try{conn=await getDbPool().getConnection();
+      await conn.execute('INSERT IGNORE INTO app_state(state_key,state_json,updated_at) VALUES(?,?,NOW())', [QA_KEY, JSON.stringify({version:65,schedules:[]})]);
+      await conn.beginTransaction();const rows=await getRows(conn,true);await storeRows(conn,rows.filter(t=>t.id!==req.params.id));await conn.commit();return res.json({success:true})}
+    catch(e){if(conn)try{await conn.rollback()}catch{};return errorResponse(res,e)}finally{if(conn)conn.release()}
+  });
+  app.post('/api/crew-qa/trips/:id/claim',requireAuth,async(req:any,res:any)=>{
+    const u=check(req,res);if(!u)return;
+    if(!isQa(u))return res.status(403).json({success:false,error:'Hanya akun kru uji yang dapat mengambil slot.'});
+    const slot=req.body?.slot;
+    if(slot!=='driver'&&slot!=='helper')return res.status(400).json({success:false,error:'Posisi tidak dikenal.'});
+    try{
+      const trip=await mutate(u,req.params.id,t=>{
+        if(t.phase!=='waiting')throw err('Kiriman sudah berjalan.',409);
+        if(t.driver?.id && same(t.driver.id,u.id)||t.helper?.id&&same(t.helper.id,u.id))throw err('Sudah mengambil posisi lain.',409);
+        if(t[slot])throw err('Slot sudah diambil orang lain.',409);
+        t[slot]={id:`crw-${u.id}`,name:str(u.full_name)};
+        t.updatedAt=new Date().toISOString();
+      });
+      return res.json({success:true,trip});
+    }catch(e){return errorResponse(res,e)}
+  });
+  app.post('/api/crew-qa/trips/:id/action',requireAuth,async(req:any,res:any)=>{
+    const u=check(req,res);if(!u)return;
+    if(!isQa(u))return res.status(403).json({success:false,error:'Aksi hanya untuk kru uji.'});
+    const action=str(req.body?.action);
+    if(!['km','inspection','waybill','depart','arrive','report'].includes(action))return res.status(400).json({success:false,error:'Aksi tidak dikenal.'});
+    try{
+      const trip=await mutate(u,req.params.id,t=>{
+        const slot=roleOf(t,u);
+        if(!slot)throw err('Belum mengambil posisi pada kiriman ini.',403);
+        if(action==='km'){
+          if(slot!=='driver')throw err('KM hanya untuk Driver.',403);
+          const km=Number(req.body?.value);
+          if(!Number.isFinite(km)||km<=0||km>99999999)throw err('KM tidak valid.');
+          t.odometerStart=String(km);
+        }else if(action==='inspection'){
+          if(slot!=='driver')throw err('Checklist armada hanya untuk Driver.',403);
+          t.inspectionDone=true;
+        }else if(action==='waybill'){
+          if(slot!=='helper')throw err('Validasi SJ hanya untuk Helper.',403);
+          t.waybillValidated=true;
+        }else if(action==='depart'){
+          if(!t.driver||!t.helper)throw err('Tim belum lengkap.',409);
+          if(t.phase!=='waiting')throw err('Kiriman sudah berangkat.',409);
+          if(!t.odometerStart||!t.inspectionDone||!t.waybillValidated)throw err('Isi KM, checklist dan validasi SJ dahulu.',409);
+          t.phase='going';t.departedAt=new Date().toISOString();
+        }else if(action==='arrive'){
+          if(t.phase!=='going')throw err('Kiriman belum berangkat.',409);
+          t.phase='returned';t.returnedAt=new Date().toISOString();
+        }else if(action==='report'){
+          const type=str(req.body?.kind),note=str(req.body?.note);
+          if(!['bbm','kendala','toko','retur','form_kirim'].includes(type)||note.length<3||note.length>1200)throw err('Laporan tidak valid.');
+          if(slot==='driver'&&['toko','retur','form_kirim'].includes(type)||slot==='helper'&&type==='bbm')throw err('Jenis laporan bukan tugas posisi ini.',403);
+          const rows=Array.isArray(t.reports)?t.reports:[];
+          t.reports=[...rows.slice(-99),{id:`qa-report-${crypto.randomUUID()}`,type,note,by:str(u.full_name),at:new Date().toISOString(),photoAttached:Boolean(req.body?.photoAttached)}];
+        }
+        t.updatedAt=new Date().toISOString();
+      });
+      return res.json({success:true,trip});
+    }catch(e){return errorResponse(res,e)}
+  });
+}

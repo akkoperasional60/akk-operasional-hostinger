@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { driverReportService, DriverHelperReport, getLocalDateStr } from '../services/driverReportService';
 import { logisticsStore } from '../services/store';
+import { Schedule } from '../types';
 import { useToast } from '../context/ToastContext';
 import { resolvePreciseCustomerGps } from '../utils/preciseCustomerGps';
 
@@ -67,6 +68,12 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
   }, [currentUser]);
 
   const [reports, setReports] = useState<DriverHelperReport[]>([]);
+  const [storeTick, setStoreTick] = useState(0);
+
+  useEffect(() => {
+    const unsubscribe = logisticsStore.subscribe(() => setStoreTick(tick => tick + 1));
+    return unsubscribe;
+  }, []);
   const [statusFilter, setStatusFilter] = useState<'all' | 'verified' | 'pending'>('all');
   const [dateFilterMode, setDateFilterMode] = useState<'single_date' | 'all'>('all');
   const [selectedDate, setSelectedDate] = useState<string>(() => getLocalDateStr());
@@ -94,8 +101,8 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
   const [formPhotoDataUrl, setFormPhotoDataUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const crews = useMemo(() => logisticsStore.getCrews(), []);
-  const fleets = useMemo(() => logisticsStore.getFleets(), []);
+  const crews = useMemo(() => logisticsStore.getCrews(), [storeTick]);
+  const fleets = useMemo(() => logisticsStore.getFleets(), [storeTick]);
 
   const resetAddForm = () => {
     const defaultDriver = crews.find(c => c.role.includes('Driver'))?.name || crews[0]?.name || '';
@@ -198,42 +205,119 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
   );
 
   const [selectedAreaFilter, setSelectedAreaFilter] = useState<string>('all');
-  const schedules = useMemo(() => logisticsStore.getSchedules(), [reports]);
+  const schedules = useMemo(() => logisticsStore.getSchedules(), [storeTick]);
 
-  // Helper untuk mencocokkan laporan absen ke jadwal pengiriman & Nama Area Kirim resmi
+  const normalizePersonCompact = (v?: string) => (v || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  const resolveCrewDisplayForReport = (rep: DriverHelperReport, matchedSchedule?: Schedule) => {
+    const isHelperReporter = String(rep.userRole || '').toLowerCase().includes('helper');
+    const schDriver = (matchedSchedule?.crew?.name || '').trim();
+    const schHelpers = [matchedSchedule?.crewHelper?.name, matchedSchedule?.crewHelper2?.name]
+      .map(s => (s || '').trim())
+      .filter(s => s && s !== '-');
+
+    const repHelper = (rep.helperName || '').trim();
+    const repReporter = (rep.reportedByName || '').trim();
+    const repDriverRaw = (rep.driverName || '').trim();
+
+    let resolvedHelper = '';
+    if (schHelpers.length > 0) {
+      resolvedHelper = schHelpers.join(', ');
+    } else if (repHelper && repHelper !== '-') {
+      resolvedHelper = repHelper;
+    } else if (isHelperReporter) {
+      resolvedHelper = repReporter || repDriverRaw;
+    }
+
+    const helperCompact = normalizePersonCompact(resolvedHelper);
+    let resolvedDriver = '';
+    if (schDriver && schDriver !== '-') {
+      resolvedDriver = schDriver;
+    } else if (repDriverRaw && repDriverRaw !== '-' && (!isHelperReporter || normalizePersonCompact(repDriverRaw) !== helperCompact)) {
+      resolvedDriver = repDriverRaw;
+    }
+
+    if (resolvedDriver && helperCompact && normalizePersonCompact(resolvedDriver) === helperCompact) {
+      resolvedDriver = schDriver && normalizePersonCompact(schDriver) !== helperCompact ? schDriver : '-';
+    }
+
+    if (isHelperReporter && resolvedHelper && schDriver && normalizePersonCompact(resolvedHelper) === normalizePersonCompact(schDriver)) {
+      resolvedHelper = schHelpers[0] || repHelper || repReporter || '-';
+    }
+
+    return {
+      driverName: resolvedDriver || '-',
+      helperName: resolvedHelper || '-',
+      reportedByName: repReporter || (isHelperReporter ? (resolvedHelper !== '-' ? resolvedHelper : repDriverRaw) : resolvedDriver)
+    };
+  };
+
+  // Area pada laporan adalah snapshot saat bukti dikirim. Jadwal hanya dipakai untuk
+  // melengkapi metadata kru/armada, bukan untuk menimpa area historis ketika jadwal diedit.
   const resolveScheduleAndArea = (rep: DriverHelperReport) => {
     const rDate = getLocalDateStr(rep.date || rep.timestamp);
     const repPlateClean = (rep.plateNumber || '').replace(/\s+/g, '').toUpperCase();
-    const repDriverClean = (rep.driverName || '').trim().toLowerCase();
+    const repDriverClean = normalizePersonCompact(rep.driverName);
+    const repHelperClean = normalizePersonCompact(rep.helperName);
+    const repReporterClean = normalizePersonCompact(rep.reportedByName);
+    const normalizeArea = (value?: string) => (value || '').replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
+    const reportArea = (rep.areaName || '').trim();
+    const hasReportAreaSnapshot = Boolean(
+      reportArea &&
+      reportArea !== '-' &&
+      !/^(area kirim umum|area pengiriman|rute pengiriman aktif|rute pengiriman dc)$/i.test(reportArea)
+    );
 
-    let matchedSchedule = schedules.find(s => rep.deliveryId && s.id === rep.deliveryId);
+    // A schedule ID is the only unambiguous link. Legacy fallback checks operational window
+    // and matching vehicle + any assigned crew member (Driver, Helper 1/2, or Backup).
+    let matchedSchedule = rep.deliveryId
+      ? schedules.find(s => s.id === rep.deliveryId)
+      : undefined;
+
     if (!matchedSchedule) {
-      matchedSchedule = schedules.find(s => {
+      const sameDayCandidates = schedules.filter(s => {
+        const depDate = getLocalDateStr(s.deliveryDate || s.departureDate);
+        const returnDate = getLocalDateStr(s.returnDate || s.estimatedArrival);
+        const minDate = depDate <= returnDate ? depDate : returnDate;
+        const maxDate = returnDate >= depDate ? returnDate : depDate;
+        if (rDate < minDate || rDate > maxDate) return false;
+
         const sPlate = (s.fleet?.plateNumber || '').replace(/\s+/g, '').toUpperCase();
-        const sDriver = (s.crew?.name || '').trim().toLowerCase();
-        const sDate = getLocalDateStr(s.departureDate);
-        return sDate === rDate && ((repPlateClean && sPlate === repPlateClean) || (repDriverClean && sDriver === repDriverClean));
+        const plateMatches = !repPlateClean || !sPlate || sPlate === repPlateClean;
+        if (!plateMatches) return false;
+
+        const scheduleCrewNames = [
+          s.crew?.name,
+          s.crewHelper?.name,
+          s.crewHelper2?.name,
+          s.backupCrewName
+        ]
+          .map(normalizePersonCompact)
+          .filter(Boolean);
+
+        const reportPersons = [repDriverClean, repHelperClean, repReporterClean].filter(Boolean);
+        const crewMatches =
+          scheduleCrewNames.length === 0 ||
+          reportPersons.length === 0 ||
+          reportPersons.some(p => scheduleCrewNames.some(sc => sc === p || sc.includes(p) || p.includes(sc)));
+
+        return Boolean(repPlateClean || reportPersons.length > 0) && crewMatches;
       });
-    }
-    if (!matchedSchedule && rep.areaName) {
-      const cleanRepArea = rep.areaName.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
-      matchedSchedule = schedules.find(
-        s => (s.areaName || s.store?.storeName || '').trim().toLowerCase() === cleanRepArea
-      );
+      const exactAreaCandidates = hasReportAreaSnapshot
+        ? sameDayCandidates.filter(s => normalizeArea(s.areaName || s.store?.storeName) === normalizeArea(reportArea))
+        : sameDayCandidates;
+      if (exactAreaCandidates.length === 1) matchedSchedule = exactAreaCandidates[0];
+      else if (exactAreaCandidates.length > 1) matchedSchedule = exactAreaCandidates[0];
+      else if (!hasReportAreaSnapshot && sameDayCandidates.length === 1) matchedSchedule = sameDayCandidates[0];
     }
 
     const scheduledAreaName = (
-      matchedSchedule?.areaName ||
-      matchedSchedule?.store?.storeName ||
-      rep.areaName ||
-      'Area Kirim Umum'
+      hasReportAreaSnapshot
+        ? reportArea
+        : matchedSchedule?.areaName || matchedSchedule?.store?.storeName || reportArea || 'Area Kirim Umum'
     ).trim();
 
-    return {
-      scheduledAreaName,
-      matchedSchedule,
-      rDate
-    };
+    return { scheduledAreaName, matchedSchedule, rDate };
   };
 
   // Daftar Nama Area Kirim unik (disesuaikan dengan jadwal)
@@ -303,22 +387,37 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
       const scheduleDate = getLocalDateStr(rawDateCandidate);
       const groupKey = `${scheduledAreaName.toUpperCase()}__${scheduleDate}`;
 
+      const reportPlate = (rep.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+      const schedulePlate = (matchedSchedule?.fleet?.plateNumber || '').replace(/\s+/g, '').toUpperCase();
       const matchedFleetObj = fleets.find(
-        f => f.plateNumber.replace(/\s+/g, '').toUpperCase() === (matchedSchedule?.fleet?.plateNumber || rep.plateNumber || '').replace(/\s+/g, '').toUpperCase()
+        f => f.plateNumber.replace(/\s+/g, '').toUpperCase() === (reportPlate || schedulePlate)
       );
+
+      const resolvedCrew = resolveCrewDisplayForReport(rep, matchedSchedule);
 
       if (!groupsMap.has(groupKey)) {
         groupsMap.set(groupKey, {
           groupKey,
           areaName: scheduledAreaName,
           scheduleDate,
-          driverName: matchedSchedule?.crew?.name || rep.driverName || '-',
-          helperName: matchedSchedule?.crewHelper?.name || rep.helperName || '-',
-          plateNumber: matchedSchedule?.fleet?.plateNumber || rep.plateNumber || '-',
-          fleetInitial: matchedFleetObj?.initialCode || matchedSchedule?.fleet?.initialCode,
+          driverName: resolvedCrew.driverName,
+          helperName: resolvedCrew.helperName,
+          plateNumber: rep.plateNumber || matchedSchedule?.fleet?.plateNumber || '-',
+          fleetInitial: matchedFleetObj?.initialCode || (reportPlate ? undefined : matchedSchedule?.fleet?.initialCode),
           trackingNumber: matchedSchedule?.trackingNumber,
           items: []
         });
+      } else {
+        const existingGroup = groupsMap.get(groupKey)!;
+        if ((existingGroup.driverName === '-' || !existingGroup.driverName) && resolvedCrew.driverName !== '-') {
+          existingGroup.driverName = resolvedCrew.driverName;
+        }
+        if ((existingGroup.helperName === '-' || !existingGroup.helperName) && resolvedCrew.helperName !== '-') {
+          existingGroup.helperName = resolvedCrew.helperName;
+        }
+        if ((existingGroup.plateNumber === '-' || !existingGroup.plateNumber) && (rep.plateNumber || matchedSchedule?.fleet?.plateNumber)) {
+          existingGroup.plateNumber = rep.plateNumber || matchedSchedule?.fleet?.plateNumber || '-';
+        }
       }
       groupsMap.get(groupKey)!.items.push(rep);
     });
@@ -1058,16 +1157,39 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                             </td>
 
                             {/* Kru & Armada */}
-                            <td className="py-2 px-2.5 align-middle">
-                              <div className="font-bold text-slate-900 dark:text-white text-[11px] leading-snug">
-                                {item.driverName}
-                                {item.helperName && item.helperName !== '-' ? ` & ${item.helperName}` : ''}
-                              </div>
-                              <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
-                                {item.plateNumber}
-                                {itemFleetObj?.initialCode ? ` (${itemFleetObj.initialCode})` : ''}
-                              </div>
-                            </td>
+                            {(() => {
+                              const itemMatchedSch = resolveScheduleAndArea(item).matchedSchedule;
+                              const itemCrew = resolveCrewDisplayForReport(item, itemMatchedSch);
+                              const isHelperSub = String(item.userRole || '').toLowerCase().includes('helper');
+                              const distinctHelper =
+                                itemCrew.helperName &&
+                                itemCrew.helperName !== '-' &&
+                                normalizePersonCompact(itemCrew.helperName) !== normalizePersonCompact(itemCrew.driverName)
+                                  ? itemCrew.helperName
+                                  : '';
+                              return (
+                                <td className="py-2 px-2.5 align-middle">
+                                  <div className="font-bold text-slate-900 dark:text-white text-[11px] leading-snug flex flex-wrap items-center gap-1">
+                                    <span>
+                                      {itemCrew.driverName !== '-'
+                                        ? `${itemCrew.driverName}${distinctHelper ? ` • Helper: ${distinctHelper}` : ''}`
+                                        : distinctHelper
+                                        ? `Helper: ${distinctHelper}`
+                                        : item.driverName}
+                                    </span>
+                                    {isHelperSub && (
+                                      <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30">
+                                        Input Helper
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                                    {item.plateNumber}
+                                    {itemFleetObj?.initialCode ? ` (${itemFleetObj.initialCode})` : ''}
+                                  </div>
+                                </td>
+                              );
+                            })()}
 
                             {/* Titik Lokasi GPS Presisi per Toko Pelanggan */}
                             <td className="py-2 px-2.5 align-middle">

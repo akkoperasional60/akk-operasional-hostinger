@@ -137,13 +137,19 @@ export const DriverReportsManagement: React.FC = () => {
     return r === 'superadmin';
   }, [currentUser]);
 
-  const fleets = useMemo(() => logisticsStore.getFleets(), []);
-  const schedules = useMemo(() => logisticsStore.getSchedules(), []);
+  const [storeTick, setStoreTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setStoreTick(t => t + 1);
+    return logisticsStore.subscribe(bump);
+  }, []);
+
+  const fleets = useMemo(() => logisticsStore.getFleets(), [storeTick]);
+  const schedules = useMemo(() => logisticsStore.getSchedules(), [storeTick]);
 
   // Helper untuk menampilkan Plat Nomor beserta Nama Inisial Armada (contoh: P 8711 UW (N21 / NL2))
   const formatPlateWithInitial = (plateRaw?: string): string => {
     const raw = (plateRaw || '-').trim();
-    if (!raw || raw === '-') return '-';
+    if (!raw || raw === '-' || /^FLT-\d+$/i.test(raw) || raw.toUpperCase().endsWith('AKK')) return '-';
     if (raw.includes('(') && raw.includes(')')) return raw;
     const cleanPlate = raw.replace(/\s+/g, '').toUpperCase();
     const matchedFleet = fleets.find(
@@ -1102,21 +1108,33 @@ export const DriverReportsManagement: React.FC = () => {
           (!cleanPlate || (s.plateNumber || '').replace(/\s+/g, '').toUpperCase() === cleanPlate))
       );
 
-      let helperName = (base.helperName || '').trim();
-      if (!helperName && matchedShift) {
+      const isHelperRow = String(base.userRole || '').toLowerCase().includes('helper');
+      const rawSanitizedPlate =
+        !base.plateNumber || /^FLT-\d+$/i.test(base.plateNumber.trim()) || base.plateNumber.trim().toUpperCase().endsWith('AKK')
+          ? '-'
+          : base.plateNumber.trim();
+
+      let helperName = isHelperRow ? '' : (base.helperName || '').trim();
+      if (!isHelperRow && helperName && helperName.toLowerCase() === lowerDriver) {
+        helperName = '';
+      }
+      if (!isHelperRow && !helperName && matchedShift) {
         const hParts = [matchedShift.helper1Name, matchedShift.helper2Name]
           .map(v => (v || '').trim())
           .filter(v => v && v !== '-' && v.toLowerCase() !== lowerDriver);
         if (hParts.length > 0) helperName = hParts.join(', ');
       }
-      if (!helperName && matchedSchedule) {
+      if (!isHelperRow && !helperName && matchedSchedule) {
         const schHelpers = [resolveCrewName(matchedSchedule.crewHelper), resolveCrewName(matchedSchedule.crewHelper2)]
           .map(v => v.trim())
           .filter(v => v && v !== '-' && v.toLowerCase() !== lowerDriver);
         if (schHelpers.length > 0) helperName = schHelpers.join(', ');
       }
-      if (!helperName) {
-        helperName = extractHelperFromNotes(base.notes);
+      if (!isHelperRow && !helperName) {
+        const extracted = extractHelperFromNotes(base.notes);
+        if (extracted && extracted.trim().toLowerCase() !== lowerDriver) {
+          helperName = extracted;
+        }
       }
 
       // Target departure & return from matched Schedule or SOP Area Timing
@@ -1142,6 +1160,7 @@ export const DriverReportsManagement: React.FC = () => {
 
       return {
         ...base,
+        plateNumber: rawSanitizedPlate,
         helperName: helperName || '-',
         targetDepartureLabel,
         targetReturnLabel,
@@ -1174,7 +1193,17 @@ export const DriverReportsManagement: React.FC = () => {
     shiftRecords.forEach(s => {
       const key = s.id || `${s.driverName.toLowerCase()}-${s.date}`;
       const existing = combinedMap.get(key);
-      const shiftHelperCombined = [s.helper1Name, s.helper2Name].map(v => (v || '').trim()).filter(v => v && v !== '-').join(', ');
+      const isExistingHelperRow = String(existing?.userRole || '').toLowerCase().includes('helper');
+      const filteredHelperCombined = isExistingHelperRow
+        ? ''
+        : [s.helper1Name, s.helper2Name]
+            .map(v => (v || '').trim())
+            .filter(v => {
+              if (!v || v === '-') return false;
+              const ownerName = (existing?.driverName || s.driverName || '').trim().toLowerCase();
+              return !ownerName || v.toLowerCase() !== ownerName;
+            })
+            .join(', ');
       if (existing) {
         let needsRebuild = false;
         if ((!existing.checkoutTime || existing.checkoutTime === '-') && s.checkoutTimeFormatted) {
@@ -1182,13 +1211,20 @@ export const DriverReportsManagement: React.FC = () => {
           existing.status = 'selesai_shift';
           needsRebuild = true;
         }
-        if ((!existing.helperName || existing.helperName === '-') && shiftHelperCombined) {
-          existing.helperName = shiftHelperCombined;
+        if (isExistingHelperRow) {
+          if (existing.helperName && existing.helperName !== '-') {
+            existing.helperName = '-';
+            needsRebuild = true;
+          }
+        } else if ((!existing.helperName || existing.helperName === '-') && filteredHelperCombined) {
+          existing.helperName = filteredHelperCombined;
+          needsRebuild = true;
         }
         if (needsRebuild) {
           combinedMap.set(key, buildRecord(existing));
         }
       } else {
+        const isHelperShift = s.checkinRole === 'helper';
         combinedMap.set(
           key,
           buildRecord({
@@ -1196,8 +1232,8 @@ export const DriverReportsManagement: React.FC = () => {
             shiftId: s.id,
             date: s.date,
             driverName: s.driverName,
-            helperName: shiftHelperCombined,
-            userRole: s.checkinRole === 'helper' ? 'Helper' : 'Driver',
+            helperName: isHelperShift ? '-' : filteredHelperCombined || '-',
+            userRole: isHelperShift ? 'Helper' : 'Driver',
             plateNumber: s.plateNumber || '-',
             areaName: s.selectedArea || s.locationName || 'DC Banyuwangi',
             checkinTime: s.checkinTimeFormatted || '-',
@@ -1585,11 +1621,14 @@ export const DriverReportsManagement: React.FC = () => {
                               {item.userRole}
                             </span>
                           </div>
-                          {item.helperName && item.helperName !== '-' && (
-                            <div className="text-[10px] text-amber-700 dark:text-amber-300 mt-0.5 font-semibold">
-                              Helper: {item.helperName}
-                            </div>
-                          )}
+                          {item.helperName &&
+                            item.helperName !== '-' &&
+                            !String(item.userRole || '').toLowerCase().includes('helper') &&
+                            item.helperName.trim().toLowerCase() !== (item.driverName || '').trim().toLowerCase() && (
+                              <div className="text-[10px] text-amber-700 dark:text-amber-300 mt-0.5 font-semibold">
+                                Helper: {item.helperName}
+                              </div>
+                            )}
                         </td>
                         <td className="py-3 px-4">
                           <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-mono font-bold text-slate-800 dark:text-slate-200">
@@ -2239,11 +2278,13 @@ export const DriverReportsManagement: React.FC = () => {
                             <div className="font-black text-slate-900 dark:text-white truncate">
                               {row.driverName}
                             </div>
-                            {row.helperName && (
-                              <div className="text-[11px] text-slate-500 truncate">
-                                Helper: <strong className="text-slate-700 dark:text-slate-300">{row.helperName}</strong>
-                              </div>
-                            )}
+                            {row.helperName &&
+                              row.helperName !== '-' &&
+                              row.helperName.trim().toLowerCase() !== (row.driverName || '').trim().toLowerCase() && (
+                                <div className="text-[11px] text-slate-500 truncate">
+                                  Helper: <strong className="text-slate-700 dark:text-slate-300">{row.helperName}</strong>
+                                </div>
+                              )}
                             <div className="mt-1 flex flex-wrap items-center gap-1">
                               <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-mono font-bold text-[10px] text-slate-800 dark:text-amber-300 truncate max-w-full">
                                 {formatPlateWithInitial(row.plateNumber)}
@@ -2816,24 +2857,43 @@ export const DriverReportsManagement: React.FC = () => {
                           </td>
 
                           {/* 2. Kru */}
-                          <td className="py-2.5 px-3 align-middle whitespace-nowrap">
-                            <div className="font-bold text-white flex items-center gap-1.5">
-                              <User className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                              <span>{item.driverName}</span>
-                              <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold border ${
-                                (item.userRole || '').toLowerCase().includes('helper')
-                                  ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
-                                  : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                              }`}>
-                                {item.userRole || 'Driver'}
-                              </span>
-                            </div>
-                            {item.helperName && (
-                              <div className="text-[10px] text-slate-400 mt-0.5 pl-5">
-                                Helper: <strong className="text-slate-300">{item.helperName}</strong>
-                              </div>
-                            )}
-                          </td>
+                          {(() => {
+                            const isHelperSub = String(item.userRole || '').toLowerCase().includes('helper');
+                            const helperVal = item.helperName && item.helperName !== '-' ? item.helperName.trim() : '';
+                            const driverVal = item.driverName && item.driverName !== '-' ? item.driverName.trim() : '';
+                            const primaryName =
+                              (item.reportedByName && item.reportedByName.trim()) ||
+                              (isHelperSub ? (helperVal || driverVal) : (driverVal || helperVal));
+                            const primaryNorm = primaryName.toLowerCase().replace(/[^a-z0-9]/g, '');
+                            const companionLine = isHelperSub
+                              ? (driverVal && driverVal.toLowerCase().replace(/[^a-z0-9]/g, '') !== primaryNorm
+                                  ? `Driver: ${driverVal}`
+                                  : '')
+                              : (helperVal && helperVal.toLowerCase().replace(/[^a-z0-9]/g, '') !== primaryNorm
+                                  ? `Helper: ${helperVal}`
+                                  : '');
+
+                            return (
+                              <td className="py-2.5 px-3 align-middle whitespace-nowrap">
+                                <div className="font-bold text-white flex items-center gap-1.5">
+                                  <User className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                                  <span>{primaryName || '-'}</span>
+                                  <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold border ${
+                                    isHelperSub
+                                      ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
+                                      : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                  }`}>
+                                    {item.userRole || 'Driver'}
+                                  </span>
+                                </div>
+                                {companionLine && (
+                                  <div className="text-[10px] text-slate-400 mt-0.5 pl-5">
+                                    <strong className="text-slate-300">{companionLine}</strong>
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          })()}
 
                           {/* 3. Armada (Beserta Nama Inisial Armada) */}
                           <td className="py-2.5 px-3 align-middle whitespace-nowrap">

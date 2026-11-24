@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   Calendar,
@@ -161,6 +161,12 @@ export const LiveTripsMonitorPanel: React.FC<LiveTripsMonitorPanelProps> = ({
   });
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedTripId, setSelectedTripId] = useState<string>('');
+  const [selectedTripPoints, setSelectedTripPoints] = useState<{ tripId: string; points: LiveGpsTripPoint[] }>({
+    tripId: '',
+    points: []
+  });
+  const lastTripsFetchAtRef = useRef<number>(0);
+  const tripsFetchInFlightRef = useRef<boolean>(false);
 
   const currentUserProfile = logisticsStore.getCurrentUser();
   const accessibleBranches = useMemo(
@@ -194,9 +200,18 @@ export const LiveTripsMonitorPanel: React.FC<LiveTripsMonitorPanelProps> = ({
   }, []);
 
   const fetchTrips = async (silent = false) => {
+    // Event dari GPS dan timer tidak boleh membuat request bertumpuk.
+    // Refresh manual tetap dapat dijalankan kapan saja.
+    if (tripsFetchInFlightRef.current) return;
+    if (silent && Date.now() - lastTripsFetchAtRef.current < 25000) return;
+    tripsFetchInFlightRef.current = true;
+    lastTripsFetchAtRef.current = Date.now();
     if (!silent) setIsLoading(true);
     try {
-      const res = await fetch('/api/gps-trips', { credentials: 'include' });
+      const query = new URLSearchParams({ summary: '1' });
+      if (mode === 'history' && selectedDate) query.set('date', selectedDate);
+      const res = await fetch(`/api/gps-trips?${query.toString()}`, { credentials: 'include' });
+      if (!res.ok) throw new Error(`GPS Trips HTTP ${res.status}`);
       const data = await res.json().catch(() => ({}));
       const serverTrips: LiveGpsTripRecord[] = Array.isArray(data?.trips) ? data.trips : [];
 
@@ -266,6 +281,7 @@ export const LiveTripsMonitorPanel: React.FC<LiveTripsMonitorPanelProps> = ({
     } catch {
       // keep existing trips on transient network failure
     } finally {
+      tripsFetchInFlightRef.current = false;
       setIsLoading(false);
     }
   };
@@ -275,14 +291,14 @@ export const LiveTripsMonitorPanel: React.FC<LiveTripsMonitorPanelProps> = ({
     const timer = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       void fetchTrips(true);
-    }, mode === 'live' ? 10000 : 20000);
+    }, mode === 'live' ? 30000 : 60000);
     const onTripUpdated = () => void fetchTrips(true);
     window.addEventListener('gps-trip-updated', onTripUpdated);
     return () => {
       clearInterval(timer);
       window.removeEventListener('gps-trip-updated', onTripUpdated);
     };
-  }, [mode]);
+  }, [mode, selectedDate]);
 
   // Trips strictly isolated by user-accessible & selected branch
   const branchScopedTrips = useMemo(() => {
@@ -318,10 +334,59 @@ export const LiveTripsMonitorPanel: React.FC<LiveTripsMonitorPanelProps> = ({
     return filteredTrips.find(t => t.id === selectedTripId) || filteredTrips[0] || null;
   }, [filteredTrips, selectedTripId]);
 
+  // Ambil detail rute hanya untuk armada terpilih. Polling list tetap ringan,
+  // sedangkan playback menyusul dengan delta titik GPS terbaru saja.
+  useEffect(() => {
+    const trip = activeSelectedTrip;
+    if (!trip || typeof trip.pointCount !== 'number') {
+      if (trip) setSelectedTripPoints({ tripId: trip.id, points: trip.points || [] });
+      return;
+    }
+
+    const hasSameTrip = selectedTripPoints.tripId === trip.id;
+    const existingPoints = hasSameTrip ? selectedTripPoints.points : [];
+    const lastPointTimestamp = existingPoints[existingPoints.length - 1]?.timestamp;
+    const detailUrl = `/api/gps-trips/${encodeURIComponent(trip.id)}${lastPointTimestamp ? `?after=${encodeURIComponent(lastPointTimestamp)}` : ''}`;
+    let cancelled = false;
+
+    void fetch(detailUrl, { credentials: 'include' })
+      .then(async response => {
+        if (!response.ok) throw new Error(`GPS Trip Detail HTTP ${response.status}`);
+        return response.json();
+      })
+      .then(data => {
+        if (cancelled || !data?.success || !data?.trip) return;
+        const incomingPoints: LiveGpsTripPoint[] = Array.isArray(data.trip.points) ? data.trip.points : [];
+        setSelectedTripPoints(previous => {
+          const previousPoints = previous.tripId === trip.id ? previous.points : [];
+          // Tanpa parameter after (atau setelah fallback server), respons adalah
+          // snapshot penuh. Dengan after, respons hanya berisi titik baru.
+          const isDelta = data.pointsMode === 'delta';
+          const mergedPoints = isDelta
+            ? [...previousPoints, ...incomingPoints].slice(-500)
+            : incomingPoints;
+          return { tripId: trip.id, points: mergedPoints };
+        });
+      })
+      .catch(() => {
+        // Data ringkasan tetap tampil saat jaringan sedang tidak stabil.
+      });
+
+    return () => { cancelled = true; };
+  }, [activeSelectedTrip?.id, activeSelectedTrip?.pointCount, activeSelectedTrip?.updatedAt]);
+
+  const selectedTripForMap = useMemo(() => {
+    if (!activeSelectedTrip) return null;
+    const points = selectedTripPoints.tripId === activeSelectedTrip.id
+      ? selectedTripPoints.points
+      : (activeSelectedTrip.points || []);
+    return { ...activeSelectedTrip, points };
+  }, [activeSelectedTrip, selectedTripPoints]);
+
   const mapLegs = useMemo(() => {
-    if (!activeSelectedTrip) return [];
-    return buildLegsFromTrip(activeSelectedTrip, registeredStores);
-  }, [activeSelectedTrip, registeredStores]);
+    if (!selectedTripForMap) return [];
+    return buildLegsFromTrip(selectedTripForMap, registeredStores);
+  }, [selectedTripForMap, registeredStores]);
 
   const activeCount = branchScopedTrips.filter(t => t.status === 'active').length;
   const completedCount = branchScopedTrips.filter(t => t.status === 'completed').length;
@@ -340,6 +405,9 @@ export const LiveTripsMonitorPanel: React.FC<LiveTripsMonitorPanelProps> = ({
             </h2>
             <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
               Pantau armada secara real-time serta putar ulang (playback) riwayat rute perjalanan yang terekam otomatis dari GPS aplikasi Driver &amp; Helper.
+            </p>
+            <p className="text-[10px] text-emerald-700 dark:text-emerald-400 mt-1 font-semibold">
+              Mode hemat data aktif · daftar diperbarui 30–60 detik · detail rute dimuat bertahap
             </p>
           </div>
         </div>
@@ -509,7 +577,7 @@ export const LiveTripsMonitorPanel: React.FC<LiveTripsMonitorPanelProps> = ({
                     </span>
                     <span className="flex items-center gap-1 font-bold text-blue-600 dark:text-blue-400">
                       <Play className="w-3 h-3" />
-                      <span>{trip.points?.length || 1} Titik Rute</span>
+                      <span>{trip.pointCount ?? trip.points?.length ?? 1} Titik Rute</span>
                     </span>
                   </div>
                 </button>

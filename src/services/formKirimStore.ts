@@ -767,7 +767,7 @@ const INITIAL_FORM_KIRIM: FormKirimRecord[] = [
     storeName: 'AREA GROSIR 4 (8 Pelanggan • 3 COD • 17 TEMPO)',
     storeAddress: 'Rute Distribusi Grosir 4 (Rogojampi, Benculuk, Jajag, Pedotan, Pesanggaran)',
     storePhone: '-',
-    fleetId: 'flt-11',
+    fleetId: 'fl-ds4',
     plateNumber: 'W 8229 US',
     armadaInitial: 'DS4/NMR',
     vehicleType: 'Double STD',

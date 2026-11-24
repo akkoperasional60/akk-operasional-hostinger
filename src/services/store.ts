@@ -189,6 +189,9 @@ const MYSQL_BACKED_STORAGE_KEYS = new Set<string>([
   STORAGE_KEYS.IMAGES,
   STORAGE_KEYS.SECURITY_LOGS,
   STORAGE_KEYS.SCHEDULE_CHANGE_LOGS,
+  STORAGE_KEYS.DEVICES,
+  STORAGE_KEYS.MESSAGES,
+  'akk_offline_sync_queue',
   'akk_system_activities_v1',
   'akk_admin_schedule_weeks_cache',
   'akk_last_admin_schedule_sync_time',
@@ -1779,8 +1782,23 @@ class LogisticsStore {
       Number((boxCapacityM3 * (boxInnerMultiplierPercent / 100)).toFixed(2));
 
     const resolvedId = pickStr(f.id, localRef?.id, canonical?.id) || f.id;
-    const resolvedPlate = pickStr(f.plateNumber, localRef?.plateNumber, canonical?.plateNumber) || f.plateNumber;
-    const resolvedInitial = pickExplicitStr(f.initialCode, localRef?.initialCode, canonical?.initialCode);
+    const rawPlate = pickStr(canonical?.plateNumber, f.plateNumber, localRef?.plateNumber) || f.plateNumber;
+    const resolvedPlate = String(rawPlate || '').trim().replace(/\s+/g, ' ').toUpperCase();
+    const rawInitial = pickExplicitStr(f.initialCode, localRef?.initialCode, canonical?.initialCode);
+    const normalizeCompactToken = (val?: string) =>
+      String(val || '').toUpperCase().replace(/[\s\-_/()]+/g, '');
+    const canonInitParts = canonical?.initialCode
+      ? canonical.initialCode.split(/[/]+/).map(p => normalizeCompactToken(p)).filter(Boolean)
+      : [];
+    const rawInitCompact = normalizeCompactToken(rawInitial);
+    // Standardize legacy single-alias or formatting variants (e.g. "DS2", "N23", "N23/DS2") to canonical "N23 / DS2"
+    const resolvedInitial =
+      canonical?.initialCode &&
+      (!rawInitCompact ||
+        normalizeCompactToken(canonical.initialCode) === rawInitCompact ||
+        canonInitParts.includes(rawInitCompact))
+        ? canonical.initialCode
+        : rawInitial;
     const explicitBranch = pickStr(f.branchId, localRef?.branchId, canonical?.branchId);
     const resolvedBranchId = branchStore.getFleetBranchId(resolvedId, resolvedPlate, resolvedInitial, explicitBranch);
     branchStore.syncFleetBranchIdSilent(resolvedId, resolvedBranchId);
@@ -1940,19 +1958,16 @@ class LogisticsStore {
     if (normalizedStatus !== 'approved' || (u as any).isActive === false) return false;
     const cleanEmail = (u.email || '').trim().toLowerCase();
     const cleanName = (u.fullName || '').trim().toLowerCase();
-    // Kecualikan akun sistem/manajemen/non-lapangan
+    // Kecualikan akun sistem pusat / super admin / manajemen eksekutif non-lapangan
     if (
       u.role === 'super_admin' ||
-      u.role === 'spv_logistik' ||
-      u.role === 'operasional' ||
-      u.role === 'koordinator_driver' ||
-      u.role === 'dispatcher' ||
-      String(u.role) === 'pengiriman' ||
       cleanName === 'super admin' ||
       cleanName === 'tamu / belum login' ||
       cleanEmail === 'akkoperasional60@gmail.com' ||
       cleanEmail === 'hendri123@gmail.com' ||
       cleanEmail === 'hendri.st@gmail.com' ||
+      cleanEmail === 'bahri@gmail.com' ||
+      cleanEmail === 'bayun791@gmail.com' ||
       u.id === 'usr-hendri' ||
       u.id === 'usr-operasional' ||
       u.id === 'usr-bahri'
@@ -1977,16 +1992,14 @@ class LogisticsStore {
       return dpVal === 'full_access';
     };
 
+    if (targetBranchId && targetBranchId !== 'ALL') {
+      return hasBranchPortalFullAccess(branchPerms[targetBranchId]);
+    }
+
     const anyBranchHasPortalFullAccess = Object.values(branchPerms).some(bEntry =>
       hasBranchPortalFullAccess(bEntry)
     );
-    if (!anyBranchHasPortalFullAccess) return false;
-
-    if (targetBranchId && targetBranchId !== 'ALL') {
-      return this.getCrewUserPrimaryBranchId(u) === targetBranchId;
-    }
-
-    return true;
+    return anyBranchHasPortalFullAccess;
   }
 
   public getCrewUserPrimaryBranchId(u: UserProfile): string {
@@ -2035,16 +2048,27 @@ class LogisticsStore {
       const cleanName = (u.fullName || '').trim();
       if (!cleanName) continue;
       const lowerName = cleanName.toLowerCase();
+      const normalizeIdentityName = (value: string) => value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '');
+      const exactNameKey = normalizeIdentityName(cleanName);
       if (lowerName === 'super admin' || lowerName === 'tamu / belum login' || seenNames.has(lowerName)) continue;
-      if (syncedCrews.some(sc => this.isSameCrewPersonName(sc.name, cleanName))) continue;
+      // User accounts are separate identities. Do not merge accounts just because one
+      // person's short name is contained in another person's full name (e.g. Nur Hadi
+      // vs Muhammad Nurhadi Muqorrobin).
+      if (syncedCrews.some(sc => normalizeIdentityName(sc.name) === exactNameKey)) continue;
 
-      const existingInStore = (this.crews || []).find(
-        c => c && c.name && (c.id === `crw-${u.id}` || this.isSameCrewPersonName(c.name, cleanName))
+      const existingAccountCrew = (this.crews || []).find(c => c && c.id === `crw-${u.id}`);
+      const existingExactNameCrew = (this.crews || []).find(
+        c => c && c.name && normalizeIdentityName(c.name) === exactNameKey
       );
+      const existingInStore = existingAccountCrew || existingExactNameCrew;
       const existingInInitial = INITIAL_CREWS.find(
-        c => this.isSameCrewPersonName(c.name, cleanName)
+        c => normalizeIdentityName(c.name) === exactNameKey
       );
-      const refCrew = existingInStore || existingInInitial;
+      const refCrew = existingAccountCrew || existingExactNameCrew || existingInInitial;
 
       const crewId = refCrew?.id || `crw-${u.id}`;
       const crewRole: Crew['role'] = u.role !== 'crew_helper'
@@ -2103,7 +2127,7 @@ class LogisticsStore {
     this.cachedCrews = syncedCrews;
     this.cachedSchedules = null;
     try {
-      safeSetItem(STORAGE_KEYS.CREWS, JSON.stringify(this.crews));
+      if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEYS.CREWS);
     } catch {}
     return syncedCrews;
   }
@@ -3026,6 +3050,7 @@ class LogisticsStore {
 
       this.users = this.deduplicateSuperAdmins(mappedUsers);
       this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+      branchStore.hydrateUserBranchPermissionsFromUsers(this.users);
 
       // Pastikan currentUser tetap mengacu pada ID & email akun yang sedang login (tidak tertukar dengan super_admin lain)
       if (this.currentUser && this.currentUser.id !== 'usr-guest') {
@@ -3348,14 +3373,19 @@ class LogisticsStore {
           }).catch(() => {});
         });
       }
-    } else if (data.fullName && data.fullName !== oldName) {
+    } else if ((data.fullName && data.fullName !== oldName) || data.phone !== undefined) {
       // Direct synchronization: If name or phone changed on an active crew, sync with crew pool & active schedules
-      const newName = data.fullName;
+      const newName = data.fullName || oldName;
+      const newPhone = data.phone !== undefined ? data.phone : existing.phone;
       let crewsUpdated = false;
       this.crews = this.crews.map(c => {
-        if (this.isSameCrewPersonName(c.name, oldName) || (c.phone && existing.phone && c.phone === existing.phone)) {
+        if (
+          c.id === `crw-${userId}` ||
+          this.isSameCrewPersonName(c.name, oldName) ||
+          (c.phone && existing.phone && c.phone === existing.phone)
+        ) {
           crewsUpdated = true;
-          return { ...c, name: newName, phone: data.phone || c.phone };
+          return { ...c, name: newName, phone: newPhone || c.phone };
         }
         return c;
       });
@@ -3440,6 +3470,7 @@ class LogisticsStore {
   }
 
   public registerUser(data: {
+    id?: string;
     fullName: string;
     email: string;
     role?: UserRole;
@@ -3448,22 +3479,27 @@ class LogisticsStore {
     notes?: string;
     password?: string;
     status?: UserApprovalStatus;
+    permissions?: UserPermissions;
   }): UserProfile {
     const resolvedRole: UserRole = data.role || 'unassigned';
+    const cleanPhone = String(data.phone || '').trim();
     const newUser: UserProfile = {
-      id: 'usr-' + Math.random().toString(36).substring(2, 8),
+      id: data.id || ('usr-' + Math.random().toString(36).substring(2, 8)),
       fullName: data.fullName,
       email: data.email,
       role: resolvedRole,
       department: data.department || 'Logistik & Pengiriman',
-      phone: data.phone || '0812-3456-7890',
+      phone: cleanPhone,
       password: undefined,
       status: data.status || 'pending',
       createdAt: new Date().toISOString(),
       notes: data.notes || 'Pendaftaran mandiri melalui portal AKK - Menunggu persetujuan (acc) Super Admin',
-      permissions: normalizeUserPermissions(resolvedRole, {
-        modules: getDefaultPermissionsForRole(resolvedRole)
-      })
+      permissions: normalizeUserPermissions(
+        resolvedRole,
+        data.permissions || {
+          modules: getDefaultPermissionsForRole(resolvedRole)
+        }
+      )
     };
 
     this.users = [newUser, ...this.users];
@@ -3911,31 +3947,53 @@ class LogisticsStore {
           );
           const isPhantomPlate = (plate?: string): boolean =>
             /^FLT-\d+$/i.test(String(plate || '').trim()) || String(plate || '').trim().toUpperCase().endsWith('AKK');
-          const baseFleets = (this.fleets && this.fleets.length > 0 ? this.fleets : INITIAL_FLEETS).filter(bf => {
+          const isMysqlSource = fleetPayload?.source === 'hostinger_mysql';
+          const fallbackPool = isMysqlSource ? this.fleets : (this.fleets && this.fleets.length > 0 ? this.fleets : INITIAL_FLEETS);
+          const baseFleets = (fallbackPool || []).filter(bf => {
             const cleanP = String(bf.plateNumber || '').replace(/\s+/g, '').toUpperCase();
             return cleanP && !isPhantomPlate(bf.plateNumber) && !deletedIdSet.has(bf.id) && !deletedPlateSet.has(cleanP);
           });
 
           if (fleetPayload.data.length > 0) {
-            const mergedMap = new Map<string, Fleet>();
+            const getCanonDedupKey = (flt: Partial<Fleet>) => {
+              const canon = resolveCanonicalFleetMeta(flt);
+              if (canon?.id) return canon.id.toLowerCase();
+              return String(flt.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+            };
+            const localByPlate = new Map<string, Fleet>();
             baseFleets.forEach(bf => {
-              const cleanP = String(bf.plateNumber || '').replace(/\s+/g, '').toUpperCase();
-              if (cleanP && !mergedMap.has(cleanP)) mergedMap.set(cleanP, bf);
+              const cleanP = getCanonDedupKey(bf);
+              if (cleanP && !localByPlate.has(cleanP)) localByPlate.set(cleanP, bf);
             });
+            const mergedMap = new Map<string, Fleet>();
+            if (!isMysqlSource) {
+              baseFleets.forEach(bf => {
+                const cleanP = getCanonDedupKey(bf);
+                if (cleanP && !mergedMap.has(cleanP)) mergedMap.set(cleanP, bf);
+              });
+            }
             fleetPayload.data.forEach((remoteF: Fleet) => {
               const cleanRemotePlate = String(remoteF.plateNumber || '').replace(/\s+/g, '').toUpperCase();
               if (!cleanRemotePlate || isPhantomPlate(remoteF.plateNumber)) return;
               if (deletedIdSet.has(remoteF.id) || deletedPlateSet.has(cleanRemotePlate)) return;
-              const matchExisting = mergedMap.get(cleanRemotePlate);
-              // WAJIB pertahankan remoteF.id asli dari Hostinger MySQL (mis. flt-r2kmuc, flt-catnp6)
-              // agar relasi FOREIGN KEY (fleet_id -> fleets.id) di tabel fuel_logs MySQL selalu cocok!
-              const canonicalId = (remoteF.id && String(remoteF.id).trim()) || matchExisting?.id || remoteF.id;
-              mergedMap.set(cleanRemotePlate, this.enrichFleetItem({ ...remoteF, id: canonicalId }, matchExisting));
+              const dedupKey = getCanonDedupKey(remoteF);
+              const matchExisting = localByPlate.get(dedupKey);
+              const existingMerged = mergedMap.get(dedupKey);
+              const canonicalMatch = resolveCanonicalFleetMeta(remoteF);
+              const canonicalId =
+                canonicalMatch?.id ||
+                (remoteF.id && String(remoteF.id).trim()) ||
+                matchExisting?.id ||
+                remoteF.id;
+              const candidate = this.enrichFleetItem({ ...remoteF, id: canonicalId }, existingMerged || matchExisting);
+              if (!existingMerged || /^flt-\d+$/i.test(candidate.id)) {
+                mergedMap.set(dedupKey, candidate);
+              }
             });
             this.fleets = sortFleetsByCanonicalOrder(Array.from(mergedMap.values()));
             this.cachedFleets = null;
             this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets, true);
-          } else {
+          } else if (!isMysqlSource) {
             this.fleets = sortFleetsByCanonicalOrder(baseFleets);
             this.cachedFleets = null;
             this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets, true);
@@ -4126,7 +4184,9 @@ class LogisticsStore {
         notes: remote.notes ?? existing?.notes,
         permissions: normalizeUserPermissions(
           role,
-          (remote.permissions && remote.permissions.modules) ? remote.permissions : existing?.permissions
+          (remote.permissions && (remote.permissions.modules || remote.permissions.branchPermissions))
+            ? remote.permissions
+            : existing?.permissions
         ),
         password: undefined
       } as UserProfile;
@@ -4142,6 +4202,7 @@ class LogisticsStore {
       }
       this.users = this.deduplicateSuperAdmins(this.users);
       this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+      branchStore.hydrateUserBranchPermissionsFromUsers(this.users);
       this.setCurrentUser(user);
       void this.hydrateOperationalDataFromHostinger();
       void this.refreshUsersFromHostinger();
@@ -4344,17 +4405,15 @@ class LogisticsStore {
     const expectedCrewId = `crw-${user?.id || 'usr'}`;
 
     // 1. Cari kru yang cocok berdasarkan ID atau kata nama lengkap (mencegah 'Budi' menimpa 'Budiono')
-    let matchedCrew = this.crews.find(c => {
-      if (c.id === expectedCrewId) return true;
-      const cName = (c.name || '').trim().toLowerCase();
-      if (cName === lowerName) return true;
-      const cTokens = cName.split(/[\s,/&.-]+/).filter(w => w.length >= 3);
-      const uTokens = lowerName.split(/[\s,/&.-]+/).filter(w => w.length >= 3);
-      if (cTokens.length > 0 && uTokens.length > 0) {
-        return cTokens.every(t => uTokens.includes(t)) || uTokens.every(t => cTokens.includes(t));
-      }
-      return false;
-    });
+    // Account ID is the primary identity. Only use an exact full-name match if the
+    // account-linked crew record does not exist.
+    const normalizeIdentityName = (value: string) => value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+    let matchedCrew = this.crews.find(c => c.id === expectedCrewId) ||
+      this.crews.find(c => normalizeIdentityName(c.name || '') === normalizeIdentityName(cleanUserName));
 
     if (matchedCrew) {
       let changed = false;
@@ -4389,12 +4448,12 @@ class LogisticsStore {
         this.crews.push(matchedCrew);
       }
       try {
-        safeSetItem(STORAGE_KEYS.CREWS, JSON.stringify(this.crews));
+        if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEYS.CREWS);
       } catch {}
     }
 
     try {
-      localStorage.setItem('akk_driver_auth_session', JSON.stringify(matchedCrew));
+      if (typeof localStorage !== 'undefined') localStorage.removeItem('akk_driver_auth_session');
     } catch {}
 
     return matchedCrew;
@@ -4615,14 +4674,29 @@ class LogisticsStore {
           merged.fleet ||
           this.fleets.find(f => f.id === merged.fleetId);
 
+        // Prefer an explicitly supplied crew snapshot when it belongs to the selected ID.
+        // This prevents a stale cached crew object from silently replacing a newly selected
+        // account (for example, Nur Hadi) with a similarly named legacy crew.
+        const explicitCrew = updatedSchedule.crew &&
+          (!updatedSchedule.crewId || updatedSchedule.crew.id === updatedSchedule.crewId)
+          ? updatedSchedule.crew
+          : undefined;
+        const explicitHelper = updatedSchedule.crewHelper &&
+          (!updatedSchedule.crewHelperId || updatedSchedule.crewHelper.id === updatedSchedule.crewHelperId)
+          ? updatedSchedule.crewHelper
+          : undefined;
+        const explicitHelper2 = updatedSchedule.crewHelper2 &&
+          (!updatedSchedule.crewHelper2Id || updatedSchedule.crewHelper2.id === updatedSchedule.crewHelper2Id)
+          ? updatedSchedule.crewHelper2
+          : undefined;
         const hydrated: Schedule = {
           ...merged,
           fleetId: resolvedFleet?.id || merged.fleetId,
           fleet: resolvedFleet,
           armada: updatedSchedule.armada || resolvedFleet?.initialCode || merged.armada || resolvedFleet?.plateNumber,
-          crew: this.crews.find(c => c.id === merged.crewId) || merged.crew,
-          crewHelper: merged.crewHelperId ? (this.crews.find(c => c.id === merged.crewHelperId) || merged.crewHelper) : undefined,
-          crewHelper2: merged.crewHelper2Id ? (this.crews.find(c => c.id === merged.crewHelper2Id) || merged.crewHelper2) : undefined
+          crew: explicitCrew || this.crews.find(c => c.id === merged.crewId) || merged.crew,
+          crewHelper: merged.crewHelperId ? (explicitHelper || this.crews.find(c => c.id === merged.crewHelperId) || merged.crewHelper) : undefined,
+          crewHelper2: merged.crewHelper2Id ? (explicitHelper2 || this.crews.find(c => c.id === merged.crewHelper2Id) || merged.crewHelper2) : undefined
         };
         newSch = hydrated;
         const isAutoRebalance = String(updatedSchedule.notes || '').includes('[Auto-Rebalanced:');
@@ -5626,23 +5700,10 @@ class LogisticsStore {
         ? (tomorrowDateSch.areaName || tomorrowDateSch.store?.storeName || null)
         : null;
 
-    // Cek juga dari data Check-In shift aktif hari ini jika belum ada di jadwal
-    if (!resolvedArea && typeof localStorage !== 'undefined') {
+    // Bersihkan cache shift lama dari localStorage bila masih tersisa
+    if (typeof localStorage !== 'undefined') {
       try {
-        const rawShifts = localStorage.getItem('akk_driver_shifts_v2');
-        if (rawShifts) {
-          const shifts: any[] = JSON.parse(rawShifts);
-          const activeShift = shifts.find(
-            s =>
-              s.date === targetIso &&
-              s.status !== 'checked_out' &&
-              (s.fleetId === fleet.id ||
-                (s.plateNumber && s.plateNumber.trim().toUpperCase() === cleanPlate))
-          );
-          if (activeShift) {
-            resolvedDriver = resolvedDriver || activeShift.driverName || null;
-          }
-        }
+        localStorage.removeItem('akk_driver_shifts_v2');
       } catch {}
     }
 
@@ -5767,13 +5828,23 @@ class LogisticsStore {
 
   public deleteFleet(id: string) {
     const deletedFleet = this.fleets.find(f => f.id === id);
-    this.fleets = this.fleets.filter(f => f.id !== id);
+    const remainingFleets = this.fleets.filter(f => f.id !== id);
+    const cleanDeletedPlate = String(deletedFleet?.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+    const hasSiblingPlate = Boolean(
+      cleanDeletedPlate &&
+      remainingFleets.some(f => String(f.plateNumber || '').replace(/\s+/g, '').toUpperCase() === cleanDeletedPlate)
+    );
+
+    this.fleets = remainingFleets;
+    this.cachedFleets = null;
     this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
     if (deletedFleet) {
-      this.logActivity('Hapus Armada', deletedFleet.plateNumber, `Menghapus armada ${deletedFleet.plateNumber} (${deletedFleet.vehicleType})`);
-      
-      // Asynchronous backend integration with Supabase
-      deleteFleetInSupabase(id, deletedFleet.plateNumber).catch(err => console.warn('[Supabase Fleet Delete Sync Note]', err));
+      this.logActivity('Hapus Armada', deletedFleet.plateNumber, `Menghapus armada ${deletedFleet.plateNumber} (${deletedFleet.initialCode || deletedFleet.vehicleType})`);
+
+      // Asynchronous backend integration: only blacklist plate if no sibling canonical row uses it
+      deleteFleetInSupabase(id, deletedFleet.plateNumber, hasSiblingPlate).catch(err =>
+        console.warn('[Supabase Fleet Delete Sync Note]', err)
+      );
 
       this.dispatchMiddleware({
         entityType: 'fleet',
@@ -5784,6 +5855,178 @@ class LogisticsStore {
       });
     }
     this.notify();
+  }
+
+  public findDuplicateFleetGroups(): Array<{
+    key: string;
+    primary: Fleet;
+    duplicates: Fleet[];
+    reason: string;
+  }> {
+    const currentFleets = this.getFleets();
+    const normPlate = (p?: string) => String(p || '').replace(/\s+/g, '').toUpperCase();
+    const extractInitTokens = (init?: string) =>
+      String(init || '')
+        .toUpperCase()
+        .split(/[\s\/\-_,()]+/)
+        .map(t => t.trim())
+        .filter(t => t.length >= 2 && !['TRUK', 'BOX', 'UNIT', 'MOBIL', 'ARMADA'].includes(t));
+
+    // Union-Find clustering across normalized plate, canonical identity, and overlapping initial tokens
+    const parent = currentFleets.map((_, idx) => idx);
+    const reasons = new Map<string, string>();
+    const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+    const union = (i: number, j: number, reason: string) => {
+      const ri = find(i);
+      const rj = find(j);
+      if (ri !== rj) {
+        parent[rj] = ri;
+        reasons.set(`${Math.min(ri, rj)}_${Math.max(ri, rj)}`, reason);
+      }
+    };
+
+    for (let i = 0; i < currentFleets.length; i++) {
+      for (let j = i + 1; j < currentFleets.length; j++) {
+        const a = currentFleets[i];
+        const b = currentFleets[j];
+        const pa = normPlate(a.plateNumber);
+        const pb = normPlate(b.plateNumber);
+        if (pa && pb && pa !== '-' && pa === pb) {
+          const sameInit = String(a.initialCode || '').trim().toUpperCase() === String(b.initialCode || '').trim().toUpperCase();
+          union(i, j, sameInit ? 'Plat nomor sama persis' : 'Plat sama dengan inisial berbeda');
+          continue;
+        }
+        const ca = resolveCanonicalFleetMeta(a);
+        const cb = resolveCanonicalFleetMeta(b);
+        if (ca && cb && ca.id === cb.id) {
+          union(i, j, `Mengacu pada unit standar ${ca.plateNumber} (${ca.initialCode})`);
+          continue;
+        }
+        const tokA = extractInitTokens(a.initialCode);
+        const tokB = extractInitTokens(b.initialCode);
+        if (tokA.length > 0 && tokB.length > 0 && tokA.some(t => tokB.includes(t))) {
+          union(i, j, 'Inisial unit saling bertumpuk');
+        }
+      }
+    }
+
+    const clusters = new Map<number, number[]>();
+    for (let i = 0; i < currentFleets.length; i++) {
+      const root = find(i);
+      if (!clusters.has(root)) clusters.set(root, []);
+      clusters.get(root)!.push(i);
+    }
+
+    const groups: Array<{ key: string; primary: Fleet; duplicates: Fleet[]; reason: string }> = [];
+    clusters.forEach((idxs, root) => {
+      if (idxs.length <= 1) return;
+      const members = idxs.map(idx => currentFleets[idx]);
+      const scoreFleet = (f: Fleet) => {
+        let score = 0;
+        if (/^flt-\d+$/i.test(f.id)) score += 100;
+        const canon = resolveCanonicalFleetMeta(f);
+        if (canon && canon.id === f.id) score += 80;
+        if (f.initialCode && f.initialCode.includes('/')) score += 40;
+        if (canon && canon.initialCode === f.initialCode) score += 30;
+        if (this.schedules.some(s => s.fleetId === f.id)) score += 20;
+        if (this.crews.some(c => c.currentFleetId === f.id)) score += 15;
+        return score;
+      };
+      const sorted = [...members].sort((a, b) => scoreFleet(b) - scoreFleet(a));
+      const [primary, ...duplicates] = sorted;
+      let reason = 'Data ganda armada terdeteksi';
+      for (const [k, r] of reasons.entries()) {
+        if (k.startsWith(`${root}_`) || k.endsWith(`_${root}`) || idxs.some(x => k.includes(String(x)))) {
+          reason = r;
+          break;
+        }
+      }
+      groups.push({
+        key: primary.id,
+        primary,
+        duplicates,
+        reason
+      });
+    });
+
+    return groups;
+  }
+
+  public deduplicateAndCleanupFleets(): { removedCount: number; cleanedPlates: string[] } {
+    const groups = this.findDuplicateFleetGroups();
+    if (groups.length === 0) return { removedCount: 0, cleanedPlates: [] };
+
+    const idsToRemove = new Set<string>();
+    const cleanedPlates: string[] = [];
+
+    groups.forEach(group => {
+      const canonicalMeta = resolveCanonicalFleetMeta(group.primary);
+      const mergedPrimary = this.enrichFleetItem(
+        {
+          ...group.primary,
+          plateNumber: canonicalMeta?.plateNumber || group.primary.plateNumber,
+          initialCode: canonicalMeta?.initialCode || group.primary.initialCode
+        },
+        group.primary
+      );
+
+      const dupIds = new Set(group.duplicates.map(d => d.id));
+      dupIds.forEach(dId => idsToRemove.add(dId));
+      cleanedPlates.push(`${mergedPrimary.plateNumber} (${mergedPrimary.initialCode || '-'})`);
+
+      // Reassign crews referencing any duplicate ID to primary fleet
+      let crewsModified = false;
+      this.crews = this.crews.map(c => {
+        if (c.currentFleetId && dupIds.has(c.currentFleetId)) {
+          crewsModified = true;
+          return { ...c, currentFleetId: mergedPrimary.id };
+        }
+        return c;
+      });
+      if (crewsModified) {
+        this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
+      }
+
+      // Reassign schedules referencing any duplicate ID to primary fleet
+      let schedulesModified = false;
+      this.schedules = this.schedules.map(s => {
+        if (dupIds.has(s.fleetId) || (s.fleet?.id && dupIds.has(s.fleet.id))) {
+          schedulesModified = true;
+          return {
+            ...s,
+            fleetId: mergedPrimary.id,
+            fleet: mergedPrimary,
+            armada: mergedPrimary.initialCode || mergedPrimary.plateNumber
+          };
+        }
+        return s;
+      });
+      if (schedulesModified) {
+        this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
+      }
+
+      // Update surviving primary record
+      this.fleets = this.fleets.map(f => (f.id === group.primary.id ? mergedPrimary : f));
+
+      // Remove duplicate IDs from backend while explicitly preserving the sibling canonical plate
+      group.duplicates.forEach(dup => {
+        deleteFleetInSupabase(dup.id, dup.plateNumber, true).catch(err =>
+          console.warn('[Store Deduplicate Fleet Delete Warning]', err)
+        );
+      });
+    });
+
+    this.fleets = sortFleetsByCanonicalOrder(this.fleets.filter(f => !idsToRemove.has(f.id)));
+    this.cachedFleets = null;
+    this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
+    this.logActivity(
+      'Bersihkan Data Double Armada',
+      `${idsToRemove.size} data ganda`,
+      `Membersihkan ${idsToRemove.size} data armada ganda dengan aman (${cleanedPlates.join(', ')})`
+    );
+    this.notify();
+
+    return { removedCount: idsToRemove.size, cleanedPlates };
   }
 
   public addCrew(crew: Omit<Crew, 'id' | 'tripsCompleted' | 'rating'>): Crew {
@@ -7389,4 +7632,3 @@ class LogisticsStore {
 }
 
 export const logisticsStore = new LogisticsStore();
-

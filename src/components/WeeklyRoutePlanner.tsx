@@ -88,26 +88,53 @@ export const WeeklyRoutePlanner: React.FC<WeeklyRoutePlannerProps> = ({
     sameDayRoute?: DailyScheduleRoute;
   } | null>(null);
 
-  // 4-Week Schedule State loaded from store/localStorage
-  const [allWeeksData, setAllWeeksData] = useState<Record<number, DailyScheduleRoute[]>>(() => {
+  const getPlannerAuthHeaders = () => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     try {
-      const saved = localStorage.getItem('akk_simulasi_weeks_v2');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed[1] && parsed[2] && parsed[3] && parsed[4]) {
-          return parsed;
-        }
+      const token =
+        (typeof localStorage !== 'undefined'
+          ? localStorage.getItem('akk_session_token') || localStorage.getItem('session_token')
+          : null) ||
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('akk_session_token') : null) ||
+        '';
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['x-akk-session-token'] = token;
       }
-    } catch {
-      // fallback
-    }
-    return {
-      1: buildWeekSchedule(1, crews, fleets),
-      2: buildWeekSchedule(2, crews, fleets),
-      3: buildWeekSchedule(3, crews, fleets),
-      4: buildWeekSchedule(4, crews, fleets)
+    } catch {}
+    return headers;
+  };
+
+  // 4-Week Schedule State loaded from MySQL (/api/app-state)
+  const [allWeeksData, setAllWeeksData] = useState<Record<number, DailyScheduleRoute[]>>(() => ({
+    1: buildWeekSchedule(1, crews, fleets),
+    2: buildWeekSchedule(2, crews, fleets),
+    3: buildWeekSchedule(3, crews, fleets),
+    4: buildWeekSchedule(4, crews, fleets)
+  }));
+
+  useEffect(() => {
+    try {
+      if (typeof localStorage !== 'undefined') localStorage.removeItem('akk_simulasi_weeks_v2');
+    } catch {}
+    let active = true;
+    fetch('/api/app-state?keys=akk_simulasi_weeks_v2', {
+      credentials: 'same-origin',
+      headers: getPlannerAuthHeaders()
+    })
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        if (!active || !data?.entries?.akk_simulasi_weeks_v2) return;
+        const parsed = data.entries.akk_simulasi_weeks_v2;
+        if (parsed[1] && parsed[2] && parsed[3] && parsed[4]) {
+          setAllWeeksData(parsed);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
     };
-  });
+  }, []);
 
   // Current active week routes
   const currentWeekRoutes = useMemo(() => {
@@ -180,14 +207,15 @@ export const WeeklyRoutePlanner: React.FC<WeeklyRoutePlannerProps> = ({
     return crews.filter(c => c.role === 'Kernet / Helper');
   }, [crews]);
 
-  // Save changes to localStorage and optionally sync to store
+  // Save changes to MySQL (/api/app-state)
   const saveWeeksData = (newData: Record<number, DailyScheduleRoute[]>) => {
     setAllWeeksData(newData);
-    try {
-      localStorage.setItem('akk_simulasi_weeks_v2', JSON.stringify(newData));
-    } catch {
-      // ignore
-    }
+    void fetch('/api/app-state', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: getPlannerAuthHeaders(),
+      body: JSON.stringify({ entries: { akk_simulasi_weeks_v2: newData } })
+    }).catch(() => {});
   };
 
   // Helper to execute driver reassignment

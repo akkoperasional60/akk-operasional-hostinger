@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X,
   Camera,
@@ -57,6 +58,9 @@ interface DriverGmapsShareModalProps {
   isOpen: boolean;
   onClose: () => void;
   deliveries: Schedule[];
+  preferredDeliveryId?: string;
+  preferredAreaName?: string;
+  reporterName?: string;
   driverName?: string;
   plateNumber?: string;
   driverId?: string;
@@ -82,7 +86,10 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   isOpen,
   onClose,
   deliveries,
-  driverName = 'Supir AKK',
+  preferredDeliveryId,
+  preferredAreaName,
+  reporterName,
+  driverName = '',
   plateNumber = '',
   driverId,
   userJobdeskRole = 'driver',
@@ -134,9 +141,16 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   const [cameraCaptureFlash, setCameraCaptureFlash] = useState<boolean>(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const isOpenRef = useRef<boolean>(isOpen);
+  const cameraSeqRef = useRef<number>(0);
+
+  useEffect(() => {
+    isOpenRef.current = isOpen;
+  }, [isOpen]);
 
   // Otomatis terisi nomor kendaraan sesuai data checklist
   const [autoPlateNumber, setAutoPlateNumber] = useState<string>(plateNumber);
+  const [selectedDeliveryId, setSelectedDeliveryId] = useState<string>('');
 
   // Lookup inisial armada dari master data (hanya jika plat sudah terisi dari check-in & checklist)
   const fleets = logisticsStore.getFleets();
@@ -235,16 +249,108 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       .slice(0, 80);
   }, [dbBarangItems, barangSearchQuery]);
 
-  // Otomatis pilih jadwal / Surat Jalan Keluar yang sedang aktif hari ini
+  const normCompactStr = (v?: string) =>
+    String(v || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+
+  const actualReporterName = (reporterName || driverName || 'Kru Pengiriman').trim();
+
+  // Sinkronkan pilihan ritase default ke jadwal aktif user saat modal dibuka
+  useEffect(() => {
+    if (!isOpen) return;
+    setSelectedDeliveryId(preferredDeliveryId || '');
+  }, [isOpen, preferredDeliveryId]);
+
+  // Otomatis pilih jadwal / Surat Jalan Keluar yang paling tepat untuk kru pelapor
   const todayStr = new Date().toISOString().split('T')[0];
   const activeDelivery: Schedule | null = React.useMemo(() => {
     if (!deliveries || deliveries.length === 0) return null;
+    if (selectedDeliveryId) {
+      const manuallySelected = deliveries.find(d => d.id === selectedDeliveryId);
+      if (manuallySelected) return manuallySelected;
+    }
+    if (preferredDeliveryId) {
+      const preferred = deliveries.find(d => d.id === preferredDeliveryId);
+      if (preferred) return preferred;
+    }
+    const openTrips = deliveries.filter(d => d.status !== 'delivered');
+    const candidatePool = openTrips.length > 0 ? openTrips : deliveries;
+
+    if (preferredAreaName && preferredAreaName.trim() && preferredAreaName.trim() !== '-') {
+      const prefAreaNorm = normCompactStr(preferredAreaName);
+      const areaMatch = candidatePool.find(d => {
+        const dArea = normCompactStr(d.areaName || d.store?.storeName);
+        return dArea && (dArea === prefAreaNorm || dArea.includes(prefAreaNorm) || prefAreaNorm.includes(dArea));
+      });
+      if (areaMatch) return areaMatch;
+    }
+
+    const reporterNorm = normCompactStr(actualReporterName);
+    const crewInTransitMatch = candidatePool.find(d => {
+      if (d.status !== 'in_transit' && d.status !== 'picked_up') return false;
+      if (!reporterNorm) return true;
+      return [d.crew?.name, d.crewHelper?.name, d.crewHelper2?.name, d.backupCrewName]
+        .map(normCompactStr)
+        .some(n => n && (n === reporterNorm || n.includes(reporterNorm) || reporterNorm.includes(n)));
+    });
+    if (crewInTransitMatch) return crewInTransitMatch;
+
+    const crewOpenMatch = reporterNorm
+      ? candidatePool.find(d =>
+          [d.crew?.name, d.crewHelper?.name, d.crewHelper2?.name, d.backupCrewName]
+            .map(normCompactStr)
+            .some(n => n && (n === reporterNorm || n.includes(reporterNorm) || reporterNorm.includes(n)))
+        )
+      : undefined;
+    if (crewOpenMatch) return crewOpenMatch;
+
     const inTransit = deliveries.find(d => d.status === 'in_transit' || d.status === 'picked_up');
     if (inTransit) return inTransit;
     const todayMatch = deliveries.find(d => d.departureDate <= todayStr && d.status !== 'delivered');
     if (todayMatch) return todayMatch;
     return deliveries[0];
-  }, [deliveries, todayStr]);
+  }, [deliveries, todayStr, selectedDeliveryId, preferredDeliveryId, preferredAreaName, actualReporterName]);
+
+  // Driver & Helper identitas terpisah agar nama Helper tidak menggantikan nama Driver
+  const isHelperJobdesk = userJobdeskRole === 'helper';
+  const resolvedTripDriverName = React.useMemo(() => {
+    const schedDriver = (activeDelivery?.crew?.name || '').trim();
+    if (schedDriver && schedDriver !== '-') return schedDriver;
+    const propDriver = (driverName || '').trim();
+    if (propDriver && propDriver !== '-' && (!isHelperJobdesk || normCompactStr(propDriver) !== normCompactStr(actualReporterName))) {
+      return propDriver;
+    }
+    return isHelperJobdesk ? '-' : actualReporterName;
+  }, [activeDelivery?.crew?.name, driverName, isHelperJobdesk, actualReporterName]);
+
+  const resolvedTripHelperName = React.useMemo(() => {
+    const driverNorm = normCompactStr(resolvedTripDriverName);
+    const helpers = [activeDelivery?.crewHelper?.name, activeDelivery?.crewHelper2?.name]
+      .map(s => (s || '').trim())
+      .filter(s => s && s !== '-' && (!driverNorm || normCompactStr(s) !== driverNorm));
+    if (isHelperJobdesk && actualReporterName && (!driverNorm || normCompactStr(actualReporterName) !== driverNorm)) {
+      if (!helpers.some(h => normCompactStr(h) === normCompactStr(actualReporterName))) {
+        helpers.unshift(actualReporterName);
+      }
+    }
+    return helpers.join(', ');
+  }, [activeDelivery?.crewHelper?.name, activeDelivery?.crewHelper2?.name, isHelperJobdesk, actualReporterName, resolvedTripDriverName]);
+
+  const selectableDeliveries = React.useMemo(() => {
+    const openTrips = deliveries.filter(d => d.status !== 'delivered');
+    return openTrips.length > 0 ? openTrips : deliveries;
+  }, [deliveries]);
+
+  useEffect(() => {
+    if (!isOpen || !activeDelivery) return;
+    const selectedPlate = selectedDeliveryId
+      ? (activeDelivery.fleet?.plateNumber || activeDelivery.armada || '')
+      : (plateNumber || activeDelivery.fleet?.plateNumber || activeDelivery.armada || '');
+    if (selectedPlate) setAutoPlateNumber(selectedPlate);
+  }, [isOpen, activeDelivery?.id, selectedDeliveryId, plateNumber]);
 
   const activeWaybill = React.useMemo(() => {
     if (!activeDelivery) return null;
@@ -286,16 +392,46 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
 
   const currentWaybillNo = activeWaybill?.waybillNumber || activeDelivery?.trackingNumber || 'SJ-OUT/AKK/AKTIF';
 
-  // Cek apakah ada antrean customer yang sedang aktif untuk kru ini
+  // Cari antrean berdasarkan ID ritase. Kru/armada yang sama dapat memiliki
+  // beberapa jadwal area dalam sehari, jadi nama atau plat saja tidak cukup.
   const refreshActiveQueue = () => {
     const allReports = driverReportService.getReports();
-    const found = allReports.find(
-      r =>
-        r.customerQueueStatus === 'sedang_mengantri' &&
-        ((driverId && r.driverId === driverId) ||
-          r.driverName.toLowerCase() === (driverName || '').toLowerCase() ||
-          r.plateNumber === autoPlateNumber)
-    );
+    const active = activeDelivery;
+    const normalizeKey = (value?: string) => (value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+    const activeCrewNames = active
+      ? [
+          active.crew?.name,
+          active.crewHelper?.name,
+          active.crewHelper2?.name,
+          active.backupCrewName,
+          active.backupTargetName
+        ].map(normalizeKey).filter(Boolean)
+      : [];
+    const activeArea = normalizeKey(active?.areaName || active?.store?.storeName || currentAreaName);
+    const activeDriverKey = normalizeKey(driverName);
+    const matchesActiveCrew = (report: DriverHelperReport) => {
+      const reportNames = [report.driverName, report.helperName].map(normalizeKey).filter(Boolean);
+      return reportNames.some(name => activeCrewNames.includes(name) || name === activeDriverKey);
+    };
+    const found = active
+      ? allReports.find(r =>
+          r.customerQueueStatus === 'sedang_mengantri' &&
+          r.deliveryId === active.id &&
+          matchesActiveCrew(r)
+        ) ||
+        allReports.find(r => {
+          if (r.customerQueueStatus !== 'sedang_mengantri' || r.deliveryId) return false;
+          const reportArea = normalizeKey(r.areaName);
+          return Boolean(
+            activeArea && (reportArea === activeArea || reportArea.startsWith(activeArea) || activeArea.startsWith(reportArea)) &&
+            matchesActiveCrew(r)
+          );
+        })
+      : undefined;
     setActiveQueueReport(found || null);
     if (found && found.customerOutletName) {
       setCustomerOutletInput(found.customerOutletName);
@@ -320,9 +456,8 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       resetFormFields();
       setQueueCompletedToast(null);
       setCategory(initialCategory || 'isi_bbm');
+      setSelectedDeliveryId('');
       setAutoPlateNumber(plateNumber ? plateNumber.trim() : '');
-
-      refreshActiveQueue();
       requestFreshGpsLocation();
 
       if (typeof navigator !== 'undefined' && navigator.geolocation) {
@@ -361,6 +496,10 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     };
   }, [isOpen, driverId, plateNumber, userJobdeskRole, initialCategory]);
 
+  useEffect(() => {
+    if (isOpen) refreshActiveQueue();
+  }, [isOpen, activeDelivery?.id]);
+
   // Timer detikan real-time selama kru sedang mengantri di customer
   useEffect(() => {
     if (!activeQueueReport) {
@@ -391,8 +530,23 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     }
   }, [isCameraActive]);
 
+  const stopLiveCamera = () => {
+    cameraSeqRef.current += 1;
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => {
+        try { t.stop(); } catch {}
+      });
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      try { videoRef.current.srcObject = null; } catch {}
+    }
+    setIsCameraActive(false);
+  };
+
   const startLiveCamera = async (mode: 'environment' | 'user' = facingMode) => {
     stopLiveCamera();
+    const requestSeq = ++cameraSeqRef.current;
     setCameraError(null);
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -415,7 +569,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
         lastErr = e1;
       }
 
-      if (!stream) {
+      if (!stream && isOpenRef.current && cameraSeqRef.current === requestSeq) {
         try {
           stream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: mode },
@@ -426,7 +580,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
         }
       }
 
-      if (!stream) {
+      if (!stream && isOpenRef.current && cameraSeqRef.current === requestSeq) {
         try {
           stream = await navigator.mediaDevices.getUserMedia({
             video: true,
@@ -437,6 +591,15 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
         }
       }
 
+      if (!isOpenRef.current || cameraSeqRef.current !== requestSeq) {
+        if (stream) {
+          stream.getTracks().forEach(t => {
+            try { t.stop(); } catch {}
+          });
+        }
+        return;
+      }
+
       if (!stream) {
         throw lastErr || new Error('Tidak dapat membuka stream video.');
       }
@@ -445,6 +608,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       setIsCameraActive(true);
       setCameraError(null);
     } catch (err: unknown) {
+      if (!isOpenRef.current || cameraSeqRef.current !== requestSeq) return;
       const errName = err instanceof Error ? err.name : '';
       const msg = err instanceof Error ? err.message : String(err);
 
@@ -458,10 +622,14 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
         // ignore
       }
 
-      if (cameraInputRef.current) {
-        cameraInputRef.current.click();
+      if (errName === 'NotReadableError' || errName === 'TrackStartError') {
+        setCameraError('Kamera sedang dipakai aplikasi lain. Tutup aplikasi lain atau tap "Kamera Bawaan HP" di bawah.');
+      } else if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError') {
+        setCameraError('Perangkat kamera tidak ditemukan di browser. Silakan tap "Kamera Bawaan HP" di bawah.');
+      } else if (msg === 'NOT_SUPPORTED') {
+        setCameraError('Browser tidak mendukung kamera langsung. Silakan tap "Kamera Bawaan HP" di bawah untuk memotret.');
       } else {
-        setCameraError('Akses kamera terkendala izin perangkat. Silakan izinkan akses kamera pada browser Anda.');
+        setCameraError('Akses kamera langsung browser diblokir / terkendala izin. Tap "Kamera Bawaan HP" atau izinkan kamera di browser.');
       }
     }
   };
@@ -469,15 +637,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   const handleFlipCamera = () => {
     const nextMode = facingMode === 'environment' ? 'user' : 'environment';
     setFacingMode(nextMode);
-    startLiveCamera(nextMode);
-  };
-
-  const stopLiveCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
-    }
-    setIsCameraActive(false);
+    void startLiveCamera(nextMode);
   };
 
   const effectivePreciseGps = React.useMemo(() => {
@@ -571,7 +731,10 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
         : category === 'isi_bbm'
         ? `Lokasi BBM: ${fuelLocation}`
         : `Area: ${currentAreaName}`;
-    ctx.fillText(`${targetCustomerLabel} | Driver: ${driverName} [${autoPlateNumber}${initialText}]`, 16, bannerY + 12 + fontSize);
+    const crewWatermarkText = isHelperJobdesk
+      ? `Helper: ${actualReporterName}${resolvedTripDriverName && resolvedTripDriverName !== '-' ? ` | Driver: ${resolvedTripDriverName}` : ''}`
+      : `Driver: ${resolvedTripDriverName}${resolvedTripHelperName ? ` | Helper: ${resolvedTripHelperName}` : ''}`;
+    ctx.fillText(`${targetCustomerLabel} | ${crewWatermarkText} [${autoPlateNumber}${initialText}]`, 16, bannerY + 12 + fontSize);
 
     ctx.fillStyle = '#cbd5e1';
     ctx.font = `bold ${fontSize - 2}px monospace`;
@@ -590,8 +753,12 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   const captureLivePhoto = (closeAfterCapture: boolean = false) => {
     if (!videoRef.current) return;
     const video = videoRef.current;
-    const rawW = video.videoWidth || 800;
-    const rawH = video.videoHeight || 450;
+    if (video.videoWidth === 0 || video.videoHeight === 0 || video.readyState < 2) {
+      setCameraError('Kamera masih memuat gambar. Tunggu 1 detik atau gunakan Kamera Bawaan HP.');
+      return;
+    }
+    const rawW = video.videoWidth;
+    const rawH = video.videoHeight;
     const maxDim = 800;
     let w = rawW;
     let h = rawH;
@@ -610,7 +777,14 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    if (facingMode === 'user') {
+      ctx.translate(w, 0);
+      ctx.scale(-1, 1);
+    }
     ctx.drawImage(video, 0, 0, w, h);
+    if (facingMode === 'user') {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
     setCameraCaptureFlash(true);
     setTimeout(() => setCameraCaptureFlash(false), 180);
 
@@ -626,45 +800,59 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     if (!files || files.length === 0) return;
 
     setIsCapturing(true);
+    setCameraError(null);
     const fileArray = Array.from(files);
     let processedCount = 0;
+    const markProcessed = () => {
+      processedCount += 1;
+      if (processedCount >= fileArray.length) {
+        setIsCapturing(false);
+      }
+    };
 
     fileArray.forEach(file => {
-      extractExifFromFile(file).then(exifMeta => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const img = new Image();
-          img.onload = () => {
-            const canvas = document.createElement('canvas');
-            const maxDim = 800;
-            let w = img.width;
-            let h = img.height;
-            if (w > maxDim || h > maxDim) {
-              if (w > h) {
-                h = Math.round((h * maxDim) / w);
-                w = maxDim;
-              } else {
-                w = Math.round((w * maxDim) / h);
-                h = maxDim;
-              }
-            }
-            canvas.width = w;
-            canvas.height = h;
-
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-              ctx.drawImage(img, 0, 0, w, h);
-              applyWatermarkToCanvas(canvas, exifMeta);
-            }
-            processedCount += 1;
-            if (processedCount >= fileArray.length) {
-              setIsCapturing(false);
-            }
+      extractExifFromFile(file)
+        .catch(() => createExifMetadataFromDate(new Date(), 'CAMERA_CAPTURE_SENSOR'))
+        .then(exifMeta => {
+          const reader = new FileReader();
+          reader.onerror = () => {
+            setCameraError('Gagal membaca file foto dari perangkat.');
+            markProcessed();
           };
-          img.src = reader.result as string;
-        };
-        reader.readAsDataURL(file);
-      });
+          reader.onload = () => {
+            const img = new Image();
+            img.onerror = () => {
+              setCameraError('Format gambar tidak dapat diproses oleh browser.');
+              markProcessed();
+            };
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              const maxDim = 800;
+              let w = img.width || 800;
+              let h = img.height || 600;
+              if (w > maxDim || h > maxDim) {
+                if (w > h) {
+                  h = Math.round((h * maxDim) / w);
+                  w = maxDim;
+                } else {
+                  w = Math.round((w * maxDim) / h);
+                  h = maxDim;
+                }
+              }
+              canvas.width = w;
+              canvas.height = h;
+
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                ctx.drawImage(img, 0, 0, w, h);
+                applyWatermarkToCanvas(canvas, exifMeta);
+              }
+              markProcessed();
+            };
+            img.src = reader.result as string;
+          };
+          reader.readAsDataURL(file);
+        });
     });
 
     e.target.value = '';
@@ -703,7 +891,9 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
 
     return encodeURIComponent(
       `*${categoryLabel}*\n` +
-      `*Driver:* ${driverName}\n` +
+      (isHelperJobdesk
+        ? `*Helper (Pelapor):* ${actualReporterName}\n${resolvedTripDriverName && resolvedTripDriverName !== '-' ? `*Driver:* ${resolvedTripDriverName}\n` : ''}`
+        : `*Driver:* ${resolvedTripDriverName}\n${resolvedTripHelperName ? `*Helper:* ${resolvedTripHelperName}\n` : ''}`) +
       `*Armada:* ${autoPlateNumber}${fleetInitial ? ` [Inisial: ${fleetInitial}]` : ''}\n` +
       `*Area Kirim (Surat Jalan):* ${currentAreaName}\n` +
       customerLine +
@@ -800,8 +990,10 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
 
     driverReportService.addReport({
       driverId: driverId || 'crew-driver',
-      driverName: driverName,
-      userRole: userJobdeskRole === 'helper' ? 'Helper' : 'Driver',
+      driverName: resolvedTripDriverName,
+      helperName: resolvedTripHelperName || undefined,
+      reportedByName: actualReporterName,
+      userRole: isHelperJobdesk ? 'Helper' : 'Driver',
       plateNumber: autoPlateNumber || '-',
       category,
       areaName: category === 'isi_bbm' ? `SPBU ${fuelLocation} (${currentAreaName})` : currentAreaName,
@@ -844,7 +1036,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     onClose();
   };
 
-  if (!isOpen) return null;
+  if (!isOpen || typeof document === 'undefined') return null;
 
   const cameraCategoryTitle =
     category === 'kendala_jalan' && reportSubMode === 'antri_customer'
@@ -865,7 +1057,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       ? 'AKHIR KIRIMAN'
       : 'ABSEN PELANGGAN';
 
-  return (
+  return createPortal(
     <>
       {/* LIVE CAMERA OVERLAY WHEN TAKING PHOTO (High-Contrast Header & Bottom Bar + Multi-Photo Support) */}
       {isCameraActive && (
@@ -1701,6 +1893,28 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
               </div>
             </div>
 
+            {selectableDeliveries.length > 0 && (
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Ritase / Area Kirim yang Dilaporkan
+                </label>
+                <select
+                  value={activeDelivery?.id || ''}
+                  onChange={e => setSelectedDeliveryId(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+                >
+                  {selectableDeliveries.map(delivery => (
+                    <option key={delivery.id} value={delivery.id}>
+                      {(delivery.areaName || delivery.store?.storeName || delivery.trackingNumber)} • {(delivery.fleet?.plateNumber || delivery.armada || '-')}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-slate-500">
+                  Pastikan area kiriman sesuai jadwal Anda (Driver: {resolvedTripDriverName}{resolvedTripHelperName ? ` • Helper: ${resolvedTripHelperName}` : ''}).
+                </p>
+              </div>
+            )}
+
             {/* NAMA AREA KIRIM */}
             <div className="space-y-1">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
@@ -1764,24 +1978,26 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                 )}
               </div>
 
-              {/* Hidden Native Device Camera Trigger */}
+              {/* Accessible Native Device Camera Trigger */}
               <input
+                id="gmaps-native-camera-input"
                 type="file"
                 ref={cameraInputRef}
                 accept="image/*"
                 capture="environment"
                 onChange={handlePhotoUpload}
-                className="hidden"
+                className="sr-only"
               />
 
-              {/* Hidden Gallery / File Picker (Multiple Supported) */}
+              {/* Accessible Gallery / File Picker (Multiple Supported) */}
               <input
+                id="gmaps-gallery-input"
                 type="file"
                 ref={fileInputRef}
                 accept="image/*"
                 multiple
                 onChange={handlePhotoUpload}
-                className="hidden"
+                className="sr-only"
               />
 
               {/* ERROR ALERT IF CAMERA PERMISSION DENIED */}
@@ -1795,13 +2011,20 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-800">
+                    <label
+                      htmlFor="gmaps-native-camera-input"
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center gap-1.5 cursor-pointer active:scale-95 transition"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>Kamera Bawaan HP</span>
+                    </label>
                     <button
                       type="button"
                       onClick={() => startLiveCamera()}
                       className="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-bold text-[11px] flex items-center gap-1.5 cursor-pointer hover:bg-blue-500 active:scale-95 transition"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
-                      <span>Buka Kamera</span>
+                      <span>Coba Live Camera</span>
                     </button>
                   </div>
                 </div>
@@ -1873,38 +2096,35 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                         </div>
                       ))}
 
-                      {/* Tombol Cepat + Tambah Foto di dalam Galeri */}
-                      <button
-                        type="button"
-                        onClick={() => startLiveCamera()}
+                      {/* Tombol Cepat + Ambil Foto di dalam Galeri */}
+                      <label
+                        htmlFor="gmaps-native-camera-input"
                         className="w-16 h-16 rounded-xl border-2 border-dashed border-blue-500/50 hover:border-blue-500 bg-blue-500/10 text-blue-500 flex flex-col items-center justify-center gap-0.5 shrink-0 cursor-pointer transition"
-                        title="Tambah Foto Kamera"
+                        title="Ambil Foto"
                       >
-                        <Plus className="w-4 h-4" />
-                        <span className="text-[9px] font-black">Kamera</span>
-                      </button>
+                        <Camera className="w-4 h-4" />
+                        <span className="text-[9px] font-black text-center leading-tight">Ambil Foto</span>
+                      </label>
                     </div>
                   </div>
 
-                  {/* Baris Bawah Kiri: Tombol Tambah Foto (Kamera / Galeri) */}
+                  {/* Baris Bawah Kiri: Tombol Tambah Foto (Upload Foto / Ambil Foto) */}
                   <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => startLiveCamera()}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <label
+                        htmlFor="gmaps-gallery-input"
                         className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] flex items-center gap-1.5 cursor-pointer shadow-2xs"
                       >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>Tambah Foto Kamera</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Upload Foto</span>
+                      </label>
+                      <label
+                        htmlFor="gmaps-native-camera-input"
                         className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-400 font-bold text-[11px] border border-slate-700 flex items-center gap-1.5 cursor-pointer"
                       >
-                        <Upload className="w-3.5 h-3.5" />
-                        <span>Tambah dari Galeri</span>
-                      </button>
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>Ambil Foto</span>
+                      </label>
                     </div>
 
                     <button
@@ -1918,18 +2138,33 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => startLiveCamera()}
-                    disabled={isCapturing}
+                  <label
+                    htmlFor="gmaps-gallery-input"
                     className="w-full p-4 rounded-2xl border-2 border-dashed border-slate-700 hover:border-blue-500 bg-slate-950 hover:bg-slate-900 flex items-center justify-center gap-3 cursor-pointer transition text-center group active:scale-95"
                   >
                     <div className="w-11 h-11 rounded-full bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-400 group-hover:scale-105 transition shrink-0">
+                      <Upload className="w-5 h-5" />
+                    </div>
+                    <div className="text-left">
+                      <div className="font-black text-white text-sm">
+                        Upload Foto
+                      </div>
+                      <div className="text-[11px] text-slate-400 font-medium mt-0.5">
+                        Pilih 1 atau beberapa foto galeri
+                      </div>
+                    </div>
+                  </label>
+
+                  <label
+                    htmlFor="gmaps-native-camera-input"
+                    className="w-full p-4 rounded-2xl border-2 border-dashed border-slate-700 hover:border-amber-500 bg-slate-950 hover:bg-slate-900 flex items-center justify-center gap-3 cursor-pointer transition text-center group active:scale-95"
+                  >
+                    <div className="w-11 h-11 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 group-hover:scale-105 transition shrink-0">
                       <Camera className="w-5 h-5" />
                     </div>
                     <div className="text-left">
                       <div className="font-black text-white text-sm">
-                        Buka Kamera
+                        Ambil Foto
                       </div>
                       <div className="text-[11px] text-slate-400 font-medium mt-0.5">
                         {category === 'istirahat'
@@ -1947,26 +2182,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                           : 'Ambil foto bukti kamera (bisa >1 foto)'}
                       </div>
                     </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isCapturing}
-                    className="w-full p-4 rounded-2xl border-2 border-dashed border-slate-700 hover:border-amber-500 bg-slate-950 hover:bg-slate-900 flex items-center justify-center gap-3 cursor-pointer transition text-center group active:scale-95"
-                  >
-                    <div className="w-11 h-11 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 group-hover:scale-105 transition shrink-0">
-                      <Upload className="w-5 h-5" />
-                    </div>
-                    <div className="text-left">
-                      <div className="font-black text-white text-sm">
-                        Upload Foto
-                      </div>
-                      <div className="text-[11px] text-slate-400 font-medium mt-0.5">
-                        Pilih 1 atau beberapa foto galeri
-                      </div>
-                    </div>
-                  </button>
+                  </label>
                 </div>
               )}
             </div>
@@ -2046,6 +2262,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
 
         </div>
       </div>
-    </>
+    </>,
+    document.body
   );
 };

@@ -1296,11 +1296,16 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
 
     const chosenRole: UserRole = newUser.role || 'unassigned';
     const isCrewRole = chosenRole === 'driver' || chosenRole === 'crew_helper';
+    const preGeneratedId = 'usr-' + Math.random().toString(36).substring(2, 8);
+    const initialBranchPerms = branchStore.getUserBranchPermissions(preGeneratedId, chosenRole);
+    branchStore.saveUserBranchPermissions(preGeneratedId, initialBranchPerms);
+    const mergedNewMods = computeMergedModulesFromBranches(initialBranchPerms, chosenRole);
 
     const created = logisticsStore.registerUser({
+      id: preGeneratedId,
       fullName: newUser.fullName || 'Pengguna Baru',
       email: newUser.email,
-      phone: newUser.phone || '0812-3456-7890',
+      phone: (newUser.phone || '').trim(),
       role: chosenRole,
       department: newUser.department || 'Logistik & Pengiriman',
       password: newUser.password,
@@ -1309,17 +1314,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
         ? `Akun ${chosenRole === 'driver' ? 'Driver' : 'Helper'} aktif`
         : chosenRole !== 'unassigned'
         ? `Akun aktif untuk role ${ROLE_LABELS[chosenRole] || chosenRole}`
-        : 'Akun baru terdaftar — Role perlu diisi oleh Super Admin'
-    });
-
-    const initialBranchPerms = branchStore.getUserBranchPermissions(
-      created.id,
-      chosenRole,
-      created.permissions?.modules
-    );
-    branchStore.saveUserBranchPermissions(created.id, initialBranchPerms);
-    const mergedNewMods = computeMergedModulesFromBranches(initialBranchPerms, chosenRole);
-    logisticsStore.updateUserProfile(created.id, {
+        : 'Akun baru terdaftar — Role perlu diisi oleh Super Admin',
       permissions: {
         modules: mergedNewMods,
         branchPermissions: initialBranchPerms
@@ -1811,6 +1806,35 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                           <Building className="w-3.5 h-3.5 text-blue-400" />
                           <span>{selectedUser.department || 'Perlu Diisi'}</span>
                         </span>
+                        {(() => {
+                          const rawPhone = String(selectedUser.phone || '').trim();
+                          const digits = rawPhone.replace(/\D/g, '');
+                          const isPlaceholder =
+                            !digits ||
+                            digits.length < 9 ||
+                            digits === '081234567890' ||
+                            digits === '6281234567890' ||
+                            digits === '081200000000' ||
+                            digits === '6281200000000';
+                          return (
+                            <span
+                              className="flex items-center gap-1.5"
+                              title="Nomor WhatsApp ini terhubung langsung ke fitur Lupa Password OTP WhatsApp"
+                            >
+                              <Phone className={`w-3.5 h-3.5 ${isPlaceholder ? 'text-slate-500' : 'text-emerald-400'}`} />
+                              {isPlaceholder ? (
+                                <span className="text-amber-400/90 font-semibold">No. WA belum diisi</span>
+                              ) : (
+                                <>
+                                  <span className="text-slate-200 font-mono font-semibold">{rawPhone}</span>
+                                  <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold">
+                                    OTP WA Aktif
+                                  </span>
+                                </>
+                              )}
+                            </span>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>
@@ -2608,11 +2632,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                   <label className="text-slate-300 font-bold block mb-1">No. WhatsApp</label>
                   <input
                     type="text"
-                    placeholder="0812-xxxx-xxxx"
+                    placeholder="0878xxxxxxxx"
                     value={newUser.phone}
                     onChange={(e) => setNewUser({ ...newUser, phone: e.target.value })}
                     className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-amber-500"
                   />
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Terhubung ke pengiriman OTP Lupa Password via WhatsApp.
+                  </p>
                 </div>
               </div>
 
@@ -2748,10 +2775,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                   </label>
                   <input
                     type="text"
+                    placeholder="0878xxxxxxxx"
                     value={editFormData.phone}
                     onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
                     className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
                   />
+                  <p className="text-[10px] text-emerald-400/90 font-medium">
+                    Nomor ini menjadi tujuan otomatis kode OTP Lupa Password WhatsApp.
+                  </p>
                 </div>
 
                 <div className="space-y-1">

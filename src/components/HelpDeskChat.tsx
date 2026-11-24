@@ -421,13 +421,47 @@ export const HelpDeskChat: React.FC<HelpDeskChatProps> = ({ activeTab, user }) =
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [recentQueries, setRecentQueries] = useState<string[]>([]);
-  const [faqList, setFaqList] = useState<FAQItem[]>(() => {
+  const [faqList, setFaqList] = useState<FAQItem[]>(DEFAULT_FAQ_ITEMS);
+
+  const getHelpDeskAuthHeaders = () => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     try {
-      const saved = localStorage.getItem('akk_faq_answers_custom');
-      if (saved) return JSON.parse(saved);
+      const token =
+        (typeof localStorage !== 'undefined'
+          ? localStorage.getItem('akk_session_token') || localStorage.getItem('session_token')
+          : null) ||
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('akk_session_token') : null) ||
+        '';
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['x-akk-session-token'] = token;
+      }
     } catch {}
-    return DEFAULT_FAQ_ITEMS;
-  });
+    return headers;
+  };
+
+  useEffect(() => {
+    try {
+      if (typeof localStorage !== 'undefined') localStorage.removeItem('akk_faq_answers_custom');
+    } catch {}
+    let active = true;
+    fetch('/api/app-state?keys=akk_faq_answers_custom', {
+      credentials: 'same-origin',
+      headers: getHelpDeskAuthHeaders()
+    })
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        if (!active) return;
+        const remote = data?.entries?.akk_faq_answers_custom;
+        if (Array.isArray(remote) && remote.length > 0) {
+          setFaqList(remote);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -462,11 +496,12 @@ export const HelpDeskChat: React.FC<HelpDeskChatProps> = ({ activeTab, user }) =
 
   const handleSaveFAQ = (newList: FAQItem[]) => {
     setFaqList(newList);
-    try {
-      localStorage.setItem('akk_faq_answers_custom', JSON.stringify(newList));
-    } catch (e) {
-      console.error('Failed to save custom FAQ to localStorage:', e);
-    }
+    void fetch('/api/app-state', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: getHelpDeskAuthHeaders(),
+      body: JSON.stringify({ entries: { akk_faq_answers_custom: newList } })
+    }).catch(() => {});
   };
 
   // Contextual Smart Quick Replies based on the active tab and latest assistant message

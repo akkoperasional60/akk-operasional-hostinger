@@ -15,6 +15,8 @@ import {
   Lock,
   ArrowLeft,
   Send,
+  RefreshCw,
+  ShieldCheck,
   X
 } from 'lucide-react';
 import { UserRole, UserProfile } from '../types';
@@ -52,13 +54,19 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     confirmPassword: ''
   });
 
-  // Forgot Password / Recovery State
+  // Forgot Password / Recovery State (WhatsApp OTP)
   const [recoveryInput, setRecoveryInput] = useState('');
   const [recoveryStep, setRecoveryStep] = useState<'request' | 'verify'>('request');
   const [recoveryCode, setRecoveryCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
-  const [targetRecoveryUser, setTargetRecoveryUser] = useState<UserProfile | null>(null);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [recoveryMaskedPhone, setRecoveryMaskedPhone] = useState('');
+  const [recoveryAccountName, setRecoveryAccountName] = useState('');
+  const [recoveryExpiresIn, setRecoveryExpiresIn] = useState<number>(0);
+  const [recoveryResendCooldown, setRecoveryResendCooldown] = useState<number>(0);
+  const [isSendingRecovery, setIsSendingRecovery] = useState(false);
+  const [isVerifyingRecovery, setIsVerifyingRecovery] = useState(false);
 
   // Rate Limiting
   const [failedAttempts, setFailedAttempts] = useState<number>(() => {
@@ -110,6 +118,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     const timer = setInterval(updateCountdown, 1000);
     return () => clearInterval(timer);
   }, [lockoutUntil]);
+
+  // Countdown masa berlaku OTP & cooldown kirim ulang WhatsApp
+  useEffect(() => {
+    if (recoveryExpiresIn <= 0 && recoveryResendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setRecoveryExpiresIn(prev => (prev > 0 ? prev - 1 : 0));
+      setRecoveryResendCooldown(prev => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [recoveryExpiresIn > 0, recoveryResendCooldown > 0]);
 
   const trimmedInput = loginEmail.trim();
   const isLocked = countdown > 0;
@@ -212,23 +230,119 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     setTimeout(() => setTab('login'), 1800);
   };
 
-  const handleRequestRecovery = (e: React.FormEvent) => {
+  const formatMmSs = (totalSec: number) => {
+    const mins = Math.floor(Math.max(0, totalSec) / 60);
+    const secs = Math.max(0, totalSec) % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
+
+  const requestWhatsAppOtp = async (identifierValue: string) => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    const cleanId = identifierValue.trim();
+    if (!cleanId) {
+      setErrorMsg('Silakan masukkan Email, Username, atau Nomor WhatsApp akun Anda.');
+      return;
+    }
+
+    setIsSendingRecovery(true);
+    try {
+      const response = await fetch('/api/auth/forgot-password/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: cleanId })
+      });
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok || !data?.success) {
+        if (data?.retryAfterSec) {
+          setRecoveryResendCooldown(Number(data.retryAfterSec) || 60);
+        }
+        if (data?.maskedPhone) {
+          setRecoveryMaskedPhone(String(data.maskedPhone));
+        }
+        setErrorMsg(data?.error || 'Gagal mengirim kode verifikasi ke WhatsApp pengguna.');
+        return;
+      }
+
+      setRecoveryMaskedPhone(String(data.maskedPhone || ''));
+      setRecoveryAccountName(String(data.accountName || ''));
+      setRecoveryExpiresIn(Number(data.expiresInSeconds) || 600);
+      setRecoveryResendCooldown(Number(data.cooldownSeconds) || 60);
+      setRecoveryCode('');
+      setRecoveryStep('verify');
+      setSuccessMsg(
+        data.message || `Kode verifikasi 6-digit telah dikirim langsung ke WhatsApp ${data.maskedPhone || 'terdaftar Anda'}.`
+      );
+    } catch {
+      setErrorMsg('Tidak dapat menghubungi server untuk mengirim kode verifikasi WhatsApp.');
+    } finally {
+      setIsSendingRecovery(false);
+    }
+  };
+
+  const handleRequestRecovery = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await requestWhatsAppOtp(recoveryInput);
+  };
+
+  const handleVerifyRecovery = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
-    if (!recoveryInput.trim()) {
-      setErrorMsg('Silakan masukkan Email atau Username akun Anda.');
+
+    const cleanCode = recoveryCode.replace(/\D/g, '').trim();
+    if (cleanCode.length !== 6) {
+      setErrorMsg('Masukkan 6 digit kode verifikasi yang diterima di WhatsApp Anda.');
       return;
     }
-    setRecoveryStep('request');
-    setTargetRecoveryUser(null);
-    setRecoveryCode('');
-    setSuccessMsg('Reset password mandiri dinonaktifkan demi keamanan. Hubungi Super Admin untuk verifikasi identitas dan reset password dari User Management.');
-  };
+    if (!newPassword || newPassword.length < 8) {
+      setErrorMsg('Password baru minimal 8 karakter.');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setErrorMsg('Konfirmasi password baru tidak cocok.');
+      return;
+    }
 
-  const handleVerifyRecovery = (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg('Reset password dengan kode simulasi sudah dinonaktifkan. Hubungi Super Admin.');
+    setIsVerifyingRecovery(true);
+    try {
+      const response = await fetch('/api/auth/forgot-password/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identifier: recoveryInput.trim(),
+          code: cleanCode,
+          newPassword
+        })
+      });
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok || !data?.success) {
+        setErrorMsg(data?.error || 'Kode verifikasi tidak valid atau gagal memperbarui kata sandi.');
+        return;
+      }
+
+      const savedIdentifier = recoveryInput.trim();
+      setRecoveryStep('request');
+      setRecoveryCode('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setRecoveryMaskedPhone('');
+      setRecoveryAccountName('');
+      setRecoveryExpiresIn(0);
+      setRecoveryResendCooldown(0);
+      setLoginEmail(savedIdentifier);
+      setLoginPassword('');
+      setTab('login');
+      setSuccessMsg(
+        data.message || 'Kata sandi baru berhasil disimpan melalui verifikasi WhatsApp. Silakan masuk dengan password baru Anda.'
+      );
+    } catch {
+      setErrorMsg('Gagal menghubungi server untuk memverifikasi kode WhatsApp.');
+    } finally {
+      setIsVerifyingRecovery(false);
+    }
   };
 
 
@@ -255,7 +369,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             <div className="flex items-center justify-between mt-5 max-w-xs mx-auto px-1">
               <button
                 type="button"
-                onClick={() => { setTab('login'); setErrorMsg(''); setSuccessMsg(''); }}
+                onClick={() => {
+                  setTab('login');
+                  setRecoveryStep('request');
+                  setErrorMsg('');
+                  setSuccessMsg('');
+                }}
                 className="inline-flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-white font-semibold transition-colors cursor-pointer group"
               >
                 <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
@@ -356,7 +475,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Password</label>
                   <button
                     type="button"
-                    onClick={() => { setTab('forgot'); setErrorMsg(''); setSuccessMsg(''); }}
+                    onClick={() => {
+                      setTab('forgot');
+                      setRecoveryStep('request');
+                      if (trimmedInput) setRecoveryInput(trimmedInput);
+                      setErrorMsg('');
+                      setSuccessMsg('');
+                    }}
                     className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 font-semibold transition cursor-pointer"
                   >
                     Lupa Password?
@@ -513,74 +638,130 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             </form>
           ) : (
             /* ======================================================== */
-            /* TAB 3: LUPA PASSWORD                                      */
+            /* TAB 3: LUPA PASSWORD (OTP LANGSUNG KE WHATSAPP USER)      */
             /* ======================================================== */
             <div className="space-y-4">
               {recoveryStep === 'request' ? (
                 <form onSubmit={handleRequestRecovery} className="space-y-4">
-                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 text-xs leading-relaxed">
-                    Masukkan <strong>Email</strong> atau <strong>Username</strong> akun terdaftar. Sistem akan mengirimkan kode verifikasi pemulihan kata sandi.
+                  <div className="p-3.5 rounded-xl bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 text-slate-700 dark:text-slate-200 text-xs leading-relaxed flex items-start gap-2.5">
+                    <Phone className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="block text-emerald-800 dark:text-emerald-300 font-bold mb-0.5">
+                        Verifikasi Langsung via WhatsApp Terdaftar
+                      </strong>
+                      Masukkan <strong>Email</strong>, <strong>Username</strong>, atau <strong>No. WhatsApp</strong> akun terdaftar. Kode OTP 6-digit akan dikirim langsung ke WhatsApp user Anda.
+                    </div>
                   </div>
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                      Email / Username Akun
+                      Email / Username / No. WhatsApp Akun
                     </label>
                     <input
                       type="text"
                       required
-                      placeholder="Masukkan email atau nama akun Anda"
+                      disabled={isSendingRecovery}
+                      placeholder="Contoh: Pipit Istiani atau 0812..."
                       value={recoveryInput}
-                      onChange={(e) => setRecoveryInput(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white text-xs focus:outline-none focus:bg-white focus:border-blue-500"
+                      onChange={(e) => {
+                        setRecoveryInput(e.target.value);
+                        if (errorMsg) setErrorMsg('');
+                        if (successMsg) setSuccessMsg('');
+                      }}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white text-xs focus:outline-none focus:bg-white focus:border-blue-500 disabled:opacity-50"
                     />
                   </div>
 
                   <button
                     type="submit"
-                    className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/20 flex items-center justify-center gap-2 transition cursor-pointer"
+                    disabled={isSendingRecovery}
+                    className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/20 flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    <Send className="w-4 h-4" />
-                    <span>Kirim Kode Verifikasi</span>
+                    {isSendingRecovery ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Mengirim Kode ke WhatsApp...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-4 h-4" />
+                        <span>Kirim Kode Verifikasi ke WhatsApp</span>
+                      </>
+                    )}
                   </button>
                 </form>
               ) : (
                 <form onSubmit={handleVerifyRecovery} className="space-y-3.5">
+                  <div className="p-3.5 rounded-xl bg-emerald-50/90 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 font-bold text-emerald-800 dark:text-emerald-300">
+                        <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                        <span>Terkirim ke WhatsApp User</span>
+                      </span>
+                      <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200">
+                        {recoveryExpiresIn > 0 ? `Berlaku ${formatMmSs(recoveryExpiresIn)}` : 'Kedaluwarsa'}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center justify-between">
+                      <span>Akun: <strong>{recoveryAccountName || recoveryInput}</strong></span>
+                      <span className="font-mono font-bold text-slate-800 dark:text-white">{recoveryMaskedPhone || '-'}</span>
+                    </div>
+                  </div>
+
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                      Kode Verifikasi 6-Digit
+                      Kode Verifikasi WhatsApp (6 Digit)
                     </label>
                     <input
                       type="text"
+                      inputMode="numeric"
                       required
-                      placeholder="123456"
+                      maxLength={6}
+                      disabled={isVerifyingRecovery}
+                      placeholder="Masukkan 6 digit OTP dari WA"
                       value={recoveryCode}
-                      onChange={(e) => setRecoveryCode(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white text-xs font-mono font-bold tracking-widest text-center focus:outline-none focus:bg-white focus:border-blue-500"
+                      onChange={(e) => {
+                        setRecoveryCode(e.target.value.replace(/\D/g, '').slice(0, 6));
+                        if (errorMsg) setErrorMsg('');
+                      }}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-sm font-mono font-bold tracking-[0.35em] text-center focus:outline-none focus:bg-white focus:border-blue-500"
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                         Password Baru
                       </label>
-                      <input
-                        type="password"
-                        required
-                        placeholder="Minimal 4 karakter"
-                        value={newPassword}
-                        onChange={(e) => setNewPassword(e.target.value)}
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white text-xs focus:outline-none focus:bg-white focus:border-blue-500"
-                      />
+                      <div className="relative">
+                        <input
+                          type={showNewPassword ? 'text' : 'password'}
+                          required
+                          minLength={8}
+                          disabled={isVerifyingRecovery}
+                          placeholder="Minimal 8 karakter"
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          className="w-full pl-3.5 pr-9 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white text-xs focus:outline-none focus:bg-white focus:border-blue-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowNewPassword(!showNewPassword)}
+                          className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer p-0.5"
+                        >
+                          {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
                     </div>
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                         Ulangi Password
                       </label>
                       <input
-                        type="password"
+                        type={showNewPassword ? 'text' : 'password'}
                         required
+                        minLength={8}
+                        disabled={isVerifyingRecovery}
                         placeholder="Konfirmasi password"
                         value={confirmNewPassword}
                         onChange={(e) => setConfirmNewPassword(e.target.value)}
@@ -589,12 +770,35 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     </div>
                   </div>
 
-                  <button
-                    type="submit"
-                    className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/20 flex items-center justify-center gap-2 transition cursor-pointer"
-                  >
-                    <span>Simpan Kata Sandi Baru</span>
-                  </button>
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={isSendingRecovery || recoveryResendCooldown > 0}
+                      onClick={() => requestWhatsAppOtp(recoveryInput)}
+                      className="px-3 py-3 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 font-bold text-xs transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                    >
+                      {recoveryResendCooldown > 0
+                        ? `Kirim Ulang (${recoveryResendCooldown}s)`
+                        : 'Kirim Ulang WA'}
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isVerifyingRecovery}
+                      className="flex-1 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/20 flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-60"
+                    >
+                      {isVerifyingRecovery ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Memverifikasi...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>Simpan Kata Sandi Baru</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </form>
               )}
             </div>

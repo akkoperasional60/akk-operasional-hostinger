@@ -52,6 +52,7 @@ export interface GoogleSheetsSyncConfig {
 }
 
 const STORAGE_KEY = 'akk_google_sheets_schedule_sync_config';
+let memoryGoogleSheetsConfig: GoogleSheetsSyncConfig | null = null;
 
 export const googleSheetsApiService = {
   /**
@@ -73,15 +74,13 @@ export const googleSheetsApiService = {
    * Get default or stored configuration
    */
   getConfig(): GoogleSheetsSyncConfig {
-    try {
-      if (typeof localStorage !== 'undefined') {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          return JSON.parse(stored);
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to load Google Sheets config:', e);
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch {}
+    }
+    if (memoryGoogleSheetsConfig) {
+      return memoryGoogleSheetsConfig;
     }
 
     return {
@@ -102,10 +101,11 @@ export const googleSheetsApiService = {
    * Save configuration
    */
   saveConfig(config: GoogleSheetsSyncConfig): void {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-    } catch (e) {
-      console.error('Failed to save Google Sheets config:', e);
+    memoryGoogleSheetsConfig = config;
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch {}
     }
   },
 

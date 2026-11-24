@@ -378,12 +378,11 @@ function dispatchToMatchingDrivers(
   const sig = `${notif.eventType}:${notif.scheduleId}:${notif.status}:${notif.departureDate || ''}:${(notif.changedFields || []).join(',')}`;
   if (isDuplicateEvent(sig)) return;
 
-  // Simpan notifikasi perubahan jadwal agar tampil di menu Laporan Kiriman Kru
+  // Simpan notifikasi perubahan jadwal di memori sesi (tanpa localStorage) agar tampil real-time di menu Laporan Kiriman Kru
   try {
-    const raw = localStorage.getItem('akk_schedule_change_notifs_v1');
-    const prevList: DriverRealtimeNotificationPayload[] = raw ? JSON.parse(raw) : [];
-    const nextList = [notif, ...prevList.filter(item => item.id !== notif.id)].slice(0, 30);
-    localStorage.setItem('akk_schedule_change_notifs_v1', JSON.stringify(nextList));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('akk_schedule_change_notifs_v1');
+    }
     window.dispatchEvent(
       new CustomEvent('akk-driver-schedule-realtime', {
         detail: { eventType, schedule: newRow, previousSchedule: oldRow, notification: notif }
