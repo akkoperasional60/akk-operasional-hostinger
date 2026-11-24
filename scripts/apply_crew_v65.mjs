@@ -5,6 +5,7 @@
  */
 import './apply_crew_capture_v68.mjs';
 import './apply_crew_monitor_v70.mjs';
+import './apply_crew_lock_v71.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 

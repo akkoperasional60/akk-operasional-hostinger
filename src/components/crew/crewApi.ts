@@ -1,7 +1,7 @@
 import type { UserProfile } from '../../types';
 import {
   assertTripVisible, fetchLiveTrips, fetchQaTrips, freshGps, getAuthHeaders, isQaAccount,
-  QA_EVENT, slotForUser, type CrewSlot, type FieldTrip, type WorkAction
+  QA_EVENT, slotForUser, isCompleted, type CrewSlot, type FieldTrip, type WorkAction
 } from './crewModel';
 import { validateCameraEvidence, type CameraEvidence } from './crewCaptureEvidence';
 
@@ -45,7 +45,7 @@ export async function getTripsForUser(user: UserProfile): Promise<FieldTrip[]> {
   const latest = new Date(today.getTime() + 60 * 86400000);
   return all.filter(t => {
     if (!assertTripVisible(user, t)) return false;
-    if (isQaAccount(user)) return true;
+    if (isQaAccount(user) || (slotForUser(t,user) && !isCompleted(t))) return true;
     if (!t.date) return false;
     const d = new Date(t.date + 'T12:00:00');
     return d >= earliest && d <= latest;
@@ -58,18 +58,22 @@ async function claimLiveTrip(user: UserProfile, tripId: string, slot: CrewSlot):
   if (!CREW_CLAIM_LIVE_ENABLED) {
     throw new Error('Ambil Kiriman nyata belum aktif. Penguncian slot di server harus dipasang sebelum digunakan.');
   }
-  const live = (await fetchLiveTrips()).find(t => t.id === tripId);
+  const all = await fetchLiveTrips();
+  if (all.some(t => !isCompleted(t) && slotForUser(t,user))) throw new Error('Selesaikan kiriman aktif sebelum mengambil kiriman lain.');
+  const live = all.find(t => t.id === tripId);
   if (!live?.schedule || !assertTripVisible(user, live)) throw new Error('Kiriman tidak tersedia untuk akun ini.');
   if (live.phase !== 'waiting') throw new Error('Kiriman sudah berjalan atau selesai.');
   if (slotForUser(live, user)) throw new Error('Kamu sudah mengambil posisi lain di kiriman ini.');
   if (live[slot]) throw new Error('Posisi sudah diambil. Muat ulang daftar kiriman.');
   // Intentionally use a DEDICATED endpoint: the server must implement atomic CAS and server-side branch/RBAC checks.
-  await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/claim`, 'POST', { slot });
+  await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/claim`, 'POST', { slot, confirmed: true });
 }
 
 export async function claimTrip(user: UserProfile, tripId: string, slot: CrewSlot): Promise<void> {
-  if (!isQaAccount(user)) { await claimLiveTrip(user, tripId, slot); return; }
-  await jsonRequest(`/api/crew-qa/trips/${encodeURIComponent(tripId)}/claim`, 'POST', { slot });
+  if (!isQaAccount(user)) { await claimLiveTrip(user, tripId, slot); notifyCrewChanged(); return; }
+  const all = await fetchQaTrips();
+  if (all.some(t => !isCompleted(t) && slotForUser(t,user))) throw new Error('Selesaikan kiriman aktif sebelum mengambil kiriman lain.');
+  await jsonRequest(`/api/crew-qa/trips/${encodeURIComponent(tripId)}/claim`, 'POST', { slot, confirmed: true });
   notifyCrewChanged();
 }
 

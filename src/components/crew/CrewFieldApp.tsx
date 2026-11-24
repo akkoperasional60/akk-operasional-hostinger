@@ -42,6 +42,8 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
   const [fault, setFault] = useState('');
   const [message, setMessage] = useState('');
   const [claimId, setClaimId] = useState<string | null>(null);
+  const [claimPosition, setClaimPosition] = useState<CrewSlot | null>(null);
+  const [claimReceipt, setClaimReceipt] = useState<string | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [taskConfirm, setTaskConfirm] = useState<{tripId: string; kind: 'inspection' | 'waybill'} | null>(null);
   const [taskChecks, setTaskChecks] = useState<[boolean, boolean]>([false,false]);
@@ -67,7 +69,12 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     const request = (async () => {
       try {
         const next = await getTripsForUser(user);
-        if (alive.current) { loadedOnce.current = true; setTrips(next); if (!quiet && !afterMutation) setFault(''); }
+        if (alive.current) {
+          loadedOnce.current = true; setTrips(next);
+          // Do not unlock during a failed or stale post-claim refresh.
+          setClaimReceipt(id => id && next.some(t => t.id === id && slotForUser(t,user)) ? null : id);
+          if (!quiet && !afterMutation) setFault('');
+        }
       } catch (e) {
         if (alive.current) setFault((e as Error)?.message || 'Gagal memuat jadwal.');
         if (afterMutation) throw e;
@@ -92,16 +99,23 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
   const mine = useMemo(() => trips.filter(t => Boolean(slotForUser(t, user))), [trips, user.id, user.fullName]);
   const ongoing = useMemo(() => mine.filter(t => !isCompleted(t)), [mine]);
   const completed = useMemo(() => mine.filter(isCompleted), [mine]);
-  const openTrips = useMemo(() => trips.filter(t => t.phase !== 'returned'), [trips]);
+  const hasActiveAssignment = ongoing.length > 0 || claimReceipt !== null;
+  const openTrips = useMemo(() => hasActiveAssignment ? ongoing : trips.filter(t => t.phase !== 'returned'), [trips, ongoing, hasActiveAssignment]);
   const visibleTrips = useMemo(() => openTrips.filter(t => {
+    if (hasActiveAssignment) return true;
     const query = search.trim().toLocaleLowerCase('id-ID');
     return !query || [t.area, t.fleetLabel, t.trackingNumber, t.driver?.name, t.helper?.name].some(v => String(v || '').toLocaleLowerCase('id-ID').includes(query));
-  }), [openTrips, search]);
+  }), [openTrips, search, hasActiveAssignment]);
   const activeTrip = ongoing.find(t => t.id === selectedId) || ongoing[0] || null;
   const activeSlot = activeTrip ? slotForUser(activeTrip, user) : null;
   const reportTrip = reportTripId ? ongoing.find(t => t.id === reportTripId) || null : null;
   const claimTarget = trips.find(t => t.id === claimId);
-  const claimAllowed = qa || canClaimLive();
+  const claimEnabled = qa || canClaimLive();
+  const claimAllowed = claimEnabled && !hasActiveAssignment;
+  const claimPositionAvailable = Boolean(claimTarget && claimPosition && claimTarget.phase === 'waiting' && !claimTarget[claimPosition] && !slotForUser(claimTarget,user) && claimAllowed);
+  useEffect(() => {
+    if (hasActiveAssignment) { setClaimId(null); setClaimPosition(null); setSearch(''); }
+  }, [hasActiveAssignment]);
   const branchText = useMemo(() => {
     const ids = Array.from(new Set(trips.map(t => t.branchId)));
     return ids.length === 1 ? (ids[0] === 'cab-sidoarjo' ? 'Sidoarjo' : ids[0] === 'cab-banyuwangi' ? 'Nusantara' : '') : '';
@@ -131,10 +145,13 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     } catch (e) { setFault((e as Error)?.message || 'Gagal menyimpan. Coba lagi.'); }
     finally { mutationInFlight.current = false; setBusy(false); }
   };
-  const submitClaim = (slot: CrewSlot) => {
-    if (!claimId || !claimTarget || !claimAllowed || claimTarget.phase !== 'waiting' || claimTarget[slot] || slotForUser(claimTarget,user)) return;
-    const id = claimId;
-    void invoke(() => claimTrip(user,id,slot), 'Kiriman berhasil diambil.', () => {setClaimId(null); choose(id);});
+  const closeClaim = () => { if (mutationInFlight.current) return; setClaimId(null); setClaimPosition(null); clearNotice(); };
+  const submitClaim = () => {
+    if (!claimId || !claimPosition || !claimPositionAvailable || busy || mutationInFlight.current) return;
+    const id = claimId, slot = claimPosition;
+    void invoke(() => claimTrip(user,id,slot), 'Kiriman berhasil diambil.', () => {
+      setClaimReceipt(id); setClaimId(null); setClaimPosition(null); choose(id);
+    });
   };
   const openTaskConfirm = (kind: 'inspection' | 'waybill') => {
     if (!activeTrip || busy || (kind === 'inspection' ? activeTrip.inspectionDone : activeTrip.waybillValidated)) return;
@@ -175,7 +192,7 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
 
   if (typeof document === 'undefined') return null;
   return createPortal(
-    <div id="akk-crew-v66" className="cv66-root" data-testid="akk-crew-field-v65" data-version="69">
+    <div id="akk-crew-v66" className="cv66-root" data-testid="akk-crew-field-v65" data-version="71">
       <div className="cv66-shell">
         <header className="cv66-header"><div className="cv66-brand"><span className="cv66-brand-icon"><CrewArt name="truck" size={37}/></span><div className="cv66-brand-text"><span className="cv66-brand-title">AKK Pengiriman</span>{(qa || branchText) && <span className="cv66-brand-sub">{qa ? 'Simulasi' : branchText}</span>}</div></div>
           <div className="cv66-header-actions"><button type="button" aria-label="Muat ulang jadwal" disabled={refreshing || busy} onClick={()=>void refresh()} className="cv66-icon-button"><RefreshCw size={20} className={refreshing ? 'cv66-spin' : ''}/></button><button type="button" aria-label="Akun" disabled={busy} onClick={()=>{clearNotice();setAccountOpen(true);}} className="cv66-avatar">{initials(user.fullName)}</button></div>
@@ -186,11 +203,11 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
           <AnimatePresence mode="wait" initial={false}>
             <motion.div className="cv66-screen" key={screen} initial={reduced ? false : {opacity:0,y:8}} animate={{opacity:1,y:0}} exit={reduced ? {opacity:1} : {opacity:0,y:-3}} transition={{duration:reduced ? 0 : .19,ease:[.2,.7,.3,1]}}>
               {screen === 'kiriman' && <>
-                <Heading title="Kiriman"/>
-                {ongoing.length > 0 && <button type="button" className="cv66-resume" disabled={busy} onClick={()=>choose(activeTrip?.id || ongoing[0].id)}><IconTile icon={ClipboardCheck}/><span className="cv66-row-text"><span className="cv66-row-title">Lanjutkan Kiriman</span><span className="cv66-meta">{activeTrip?.area || ongoing[0].area}</span></span><ChevronRight size={20}/></button>}
-                {(openTrips.length > 0 || search) && <label className="cv66-search"><Search size={20}/><input aria-label="Cari kiriman" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Cari area atau armada"/>{search && <button type="button" aria-label="Hapus pencarian" onClick={()=>setSearch('')}><X size={18}/></button>}</label>}
-                {!claimAllowed && visibleTrips.some(t=>t.phase==='waiting' && (!t.driver || !t.helper) && !slotForUser(t,user)) && <div className="cv66-required">Pengambilan kiriman belum aktif di server.</div>}
-                {visibleTrips.length ? visibleTrips.map(t=><TripCard key={t.id} trip={t} mine={slotForUser(t,user)} claimAllowed={claimAllowed} busy={busy} onOpen={()=>choose(t.id)} onClaim={()=>{clearNotice();setClaimId(t.id);}}/>) : <Empty icon={Truck} title={search ? 'Kiriman tidak ditemukan' : 'Belum ada kiriman'} detail={search ? undefined : 'Jadwal dari Admin akan muncul di sini.'}/>}
+                <Heading title={hasActiveAssignment ? "Kiriman Aktif" : "Kiriman"}/>
+                {hasActiveAssignment && <p className="cv66-meta">Selesaikan kiriman ini untuk mengambil kiriman berikutnya.</p>}
+                {!hasActiveAssignment && (openTrips.length > 0 || search) && <label className="cv66-search"><Search size={20}/><input aria-label="Cari kiriman" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Cari area atau armada"/>{search && <button type="button" aria-label="Hapus pencarian" onClick={()=>setSearch('')}><X size={18}/></button>}</label>}
+                {!claimEnabled && visibleTrips.some(t=>t.phase==='waiting' && (!t.driver || !t.helper) && !slotForUser(t,user)) && <div className="cv66-required">Pengambilan kiriman belum aktif di server.</div>}
+                {visibleTrips.length ? visibleTrips.map(t=><TripCard key={t.id} trip={t} mine={slotForUser(t,user)} claimAllowed={claimAllowed} busy={busy} onOpen={()=>choose(t.id)} onClaim={()=>{if (!claimAllowed || busy) return; clearNotice();setClaimPosition(null);setClaimId(t.id);}}/>) : <Empty icon={Truck} title={hasActiveAssignment ? 'Kiriman tersimpan' : search ? 'Kiriman tidak ditemukan' : 'Belum ada kiriman'} detail={hasActiveAssignment ? 'Muat ulang untuk menampilkan kiriman aktif.' : search ? undefined : 'Jadwal dari Admin akan muncul di sini.'} action={hasActiveAssignment ? {label:'Muat Ulang',run:()=>void refresh()} : undefined}/>}
               </>}
               {screen === 'tugas' && <>
                 <Heading title="Tugas"/>
@@ -231,9 +248,19 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
       </div>
       {cameraOpen && reportTrip && reportKind && <CrewLiveCamera key={`${reportTrip.id}:${reportKind}`} onClose={()=>setCameraOpen(false)} onCapture={evidence=>{setReportEvidence(evidence);setCameraOpen(false);clearNotice();}}/>}
       <AnimatePresence>
-        {claimId && <Dialog key="claim" title="Ambil Kiriman" busy={busy} onClose={()=>{setClaimId(null);clearNotice();}}>{notice}{claimTarget && <div className="cv66-dialog-trip"><span className="cv66-dialog-area">{claimTarget.area}</span><span className="cv66-meta">{claimTarget.fleetLabel} · {claimTarget.departureTime} WIB</span></div>}
-          <div className="cv66-choice-grid">{(['driver','helper'] as const).map(slot=>{const occupied=Boolean(claimTarget?.[slot]);return <button type="button" className="cv66-choice" key={slot} disabled={busy || occupied || !claimTarget || claimTarget.phase!=='waiting' || !claimAllowed || Boolean(claimTarget && slotForUser(claimTarget,user))} onClick={()=>submitClaim(slot)}><IconTile icon={slot==='driver'?Truck:Users} size={60}/><span className="cv66-choice-title">{roleName(slot)}</span>{occupied && <span className="cv66-meta">Sudah terisi</span>}</button>})}</div>
-          {!claimAllowed && <p className="cv66-required">Pengambilan kiriman belum aktif.</p>}</Dialog>}
+        {claimId && <Dialog key="claim" title={claimPosition ? "Konfirmasi Kiriman" : "Pilih Posisi"} busy={busy} onClose={closeClaim}>
+          {notice}
+          {claimTarget && <div className="cv66-dialog-trip"><span className="cv66-dialog-area">{claimTarget.area}</span><span className="cv66-meta">{shortDate(claimTarget.date)} · {claimTarget.fleetLabel} · {claimTarget.departureTime} WIB</span></div>}
+          {!claimPosition ? <div className="cv66-choice-grid">{(['driver','helper'] as const).map(slot=>{const occupied=Boolean(claimTarget?.[slot]);return <button type="button" className="cv66-choice" key={slot} disabled={busy || occupied || !claimTarget || claimTarget.phase!=='waiting' || !claimAllowed || Boolean(claimTarget && slotForUser(claimTarget,user))} onClick={()=>{clearNotice();setClaimPosition(slot);}}><IconTile icon={slot==='driver'?Truck:Users} size={60}/><span className="cv66-choice-title">{roleName(slot)}</span>{occupied && <span className="cv66-meta">Sudah terisi</span>}</button>})}</div> : <>
+            <div className="cv66-row"><IconTile icon={claimPosition==='driver'?Truck:Users} size={48}/><span className="cv66-row-text"><span className="cv66-meta">Posisi</span><span className="cv66-row-title">{roleName(claimPosition)}</span></span></div>
+            <p className="cv66-required">Kiriman lain terkunci sampai kiriman ini selesai.</p>
+            {!claimPositionAvailable && <p className="cv66-required" role="alert">Posisi sudah tidak tersedia. Pilih kembali atau muat ulang.</p>}
+            <Button onClick={submitClaim} disabled={busy || !claimPositionAvailable} loading={busy}><Check size={18}/>Ya, Ambil Kiriman</Button>
+            <Button variant="secondary" disabled={busy} onClick={()=>{clearNotice();setClaimPosition(null);}}>Ganti Posisi</Button>
+            <button type="button" className="cv66-back" disabled={busy} onClick={closeClaim}>Batal</button>
+          </>}
+          {!claimEnabled && <p className="cv66-required">Pengambilan kiriman belum aktif.</p>}
+        </Dialog>}
         {taskConfirm && <Dialog key="check" title={taskConfirm.kind==='inspection'?'Cek Armada':'Cek Surat Jalan'} busy={busy} onClose={()=>{setTaskConfirm(null);clearNotice();}}>{notice}<div className="cv66-checklist">{(taskConfirm.kind==='inspection'?['Ban, rem, dan lampu aman','Kendaraan dan perlengkapan siap']:['Tujuan dan jumlah surat jalan sesuai','Dokumen lengkap dan siap dibawa']).map((label,i)=><label key={label}><input type="checkbox" checked={taskChecks[i]} disabled={busy} onChange={e=>{const checked=e.target.checked;setTaskChecks(v=>i===0?[checked,v[1]]:[v[0],checked]);}}/><span>{label}</span></label>)}</div><Button disabled={busy || !taskChecks.every(Boolean)} loading={busy} onClick={saveCheck}><Check size={18}/>Simpan</Button>{!qa && <p className="cv66-meta cv66-gps">Waktu dan GPS dicatat.</p>}</Dialog>}
         {accountOpen && <Dialog key="account" title="Akun" onClose={()=>{setAccountOpen(false);clearNotice();}}><div className="cv66-profile"><span className="cv66-profile-avatar">{initials(user.fullName)}</span><div><span className="cv66-profile-name">{user.fullName||'Kru AKK'}</span><span className="cv66-meta">{user.email}</span></div></div>{!qa && onOpenClassic && <Button variant="secondary" onClick={()=>{setAccountOpen(false);onOpenClassic();}}>Fitur Operasional Lengkap<ArrowUpRight size={18}/></Button>}<Button variant="danger" onClick={()=>logisticsStore.logoutUser()}><LogOut size={18}/>Keluar Akun</Button></Dialog>}
       </AnimatePresence>
