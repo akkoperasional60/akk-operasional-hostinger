@@ -127,11 +127,7 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
     const branchMatched = allDataArmadaFleets.filter(
       f => branchStore.getFleetBranchId(f.id, f.plateNumber, f.initialCode, f.branchId) === effectiveBranchId
     );
-    if (branchMatched.length === 0) {
-      return allDataArmadaFleets;
-    }
-    const remaining = allDataArmadaFleets.filter(f => !branchMatched.some(bm => bm.id === f.id));
-    return [...branchMatched, ...remaining];
+    return branchMatched.length > 0 ? branchMatched : allDataArmadaFleets;
   }, [effectiveBranchId, storeTick]);
 
   const crews = useMemo(() => {

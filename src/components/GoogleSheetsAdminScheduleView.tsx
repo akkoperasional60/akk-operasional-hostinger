@@ -1724,9 +1724,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     const branchMatched = allFleets.filter(
       f => branchStore.getFleetBranchId(f.id, f.plateNumber, f.initialCode, f.branchId) === branchFilter
     );
-    if (branchMatched.length === 0) return allFleets;
-    const remaining = allFleets.filter(f => !branchMatched.some(bm => bm.id === f.id));
-    return [...branchMatched, ...remaining];
+    return branchMatched.length > 0 ? branchMatched : allFleets;
   };
 
   useEffect(() => {

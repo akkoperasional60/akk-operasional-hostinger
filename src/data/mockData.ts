@@ -586,18 +586,29 @@ export function resolveCanonicalFleetMeta(
     if (f4) return f4;
   }
 
+  const GENERIC_INIT_PARTS = new Set(['NMR', 'NLR', 'ELF', 'CANTER', 'HINO', 'ISUZU', 'TRAGA', 'L300']);
+
   return INITIAL_FLEETS.find(f => {
     if (cleanId && f.id.toLowerCase() === cleanId) return true;
     const fPlate = norm(f.plateNumber || '');
     if (cleanPlate && fPlate === cleanPlate) return true;
     if (rawStr && fPlate === rawStr) return true;
 
+    // If caller supplied a distinct non-empty license plate that differs from this canonical fleet's plate,
+    // do not fall through to matching by a partial/shared initialCode token.
+    if (cleanPlate && fPlate && cleanPlate !== fPlate && !/^FLT\d+$/.test(cleanPlate)) {
+      return false;
+    }
+
     if (f.initialCode) {
       const fInit = norm(f.initialCode);
       if (cleanInit && fInit === cleanInit) return true;
       if (rawStr && fInit === rawStr) return true;
 
-      const parts = f.initialCode.split(/[/]+/).map(p => norm(p));
+      const parts = f.initialCode
+        .split(/[/]+/)
+        .map(p => norm(p))
+        .filter(p => p && !GENERIC_INIT_PARTS.has(p));
       if (cleanInit && parts.includes(cleanInit)) return true;
       if (rawStr && parts.includes(rawStr)) return true;
     }

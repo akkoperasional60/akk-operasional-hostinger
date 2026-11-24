@@ -5956,14 +5956,20 @@ class LogisticsStore {
   }> {
     const currentFleets = this.getFleets();
     const normPlate = (p?: string) => String(p || '').replace(/\s+/g, '').toUpperCase();
+    const isValidPlate = (plate: string) => Boolean(plate && plate !== '-' && !/^FLT-\d+$/i.test(plate));
+    const GENERIC_FLEET_TOKENS = new Set([
+      'TRUK', 'BOX', 'UNIT', 'MOBIL', 'ARMADA',
+      'NMR', 'NLR', 'ELF', 'CANTER', 'HINO', 'ISUZU', 'TRAGA', 'L300', 'COLT', 'FUSO', 'DUTRO',
+      'PICKUP', 'ENGKEL', 'DOUBLE', 'STD', 'LONG'
+    ]);
     const extractInitTokens = (init?: string) =>
       String(init || '')
         .toUpperCase()
         .split(/[\s\/\-_,()]+/)
         .map(t => t.trim())
-        .filter(t => t.length >= 2 && !['TRUK', 'BOX', 'UNIT', 'MOBIL', 'ARMADA'].includes(t));
+        .filter(t => t.length >= 2 && !GENERIC_FLEET_TOKENS.has(t));
 
-    // Union-Find clustering across normalized plate, canonical identity, and overlapping initial tokens
+    // Union-Find clustering across identical normalized plates (or missing-plate duplicates matching canonical/unit code)
     const parent = currentFleets.map((_, idx) => idx);
     const reasons = new Map<string, string>();
     const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
@@ -5982,11 +5988,22 @@ class LogisticsStore {
         const b = currentFleets[j];
         const pa = normPlate(a.plateNumber);
         const pb = normPlate(b.plateNumber);
-        if (pa && pb && pa !== '-' && pa === pb) {
+        const validA = isValidPlate(pa);
+        const validB = isValidPlate(pb);
+
+        // 1. Exact same valid license plate -> true duplicate
+        if (validA && validB && pa === pb) {
           const sameInit = String(a.initialCode || '').trim().toUpperCase() === String(b.initialCode || '').trim().toUpperCase();
           union(i, j, sameInit ? 'Plat nomor sama persis' : 'Plat sama dengan inisial berbeda');
           continue;
         }
+
+        // 2. Two distinct valid license plates represent two distinct physical vehicles (e.g., NMR / DS4 vs NMR / DS5)
+        if (validA && validB && pa !== pb) {
+          continue;
+        }
+
+        // 3. Only when at least one record has a missing/placeholder plate, match by canonical identity or unique unit token
         const ca = resolveCanonicalFleetMeta(a);
         const cb = resolveCanonicalFleetMeta(b);
         if (ca && cb && ca.id === cb.id) {
