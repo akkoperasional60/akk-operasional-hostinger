@@ -1,0 +1,841 @@
+/* AKK Driver/Helper — field-first readability layer.
+   This stylesheet does not remove any operational action, permission, or status. */
+
+.akk-driver-mobile {
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  letter-spacing: -0.005em;
+  -webkit-text-size-adjust: 100%;
+}
+.akk-driver-mobile > header {
+  box-shadow: 0 1px 0 rgba(148,163,184,.16) !important;
+  padding-top: 11px !important;
+  padding-bottom: 11px !important;
+}
+/* The phone already displays date/time. Keep the operational header to one row. */
+.akk-driver-mobile > header > div:last-child { display: none; }
+.akk-driver-mobile > header h1 {
+  font-size: 15px !important;
+  letter-spacing: -.02em !important;
+  text-transform: none !important;
+  font-weight: 800 !important;
+}
+.akk-driver-mobile > main {
+  line-height: 1.5;
+  padding-bottom: 98px;
+}
+.akk-driver-mobile :is(input,textarea,select) {
+  font-size: 16px !important;
+  border-radius: 12px;
+}
+.akk-driver-mobile [class*="text-[9px]"],
+.akk-driver-mobile [class*="text-[10px]"] {
+  font-size: 11.5px !important;
+  line-height: 1.5 !important;
+}
+.akk-driver-mobile [class*="text-[11px]"] {
+  font-size: 12px !important;
+  line-height: 1.5 !important;
+}
+.akk-driver-mobile main h2,
+.akk-driver-mobile main h3 {
+  letter-spacing: -.022em;
+  line-height: 1.35;
+}
+.akk-driver-mobile main button[class*="w-full"] {
+  min-height: 42px;
+  font-weight: 700;
+  letter-spacing: -.01em;
+  transition: background-color .18s ease, border-color .18s ease, transform .18s ease;
+}
+.akk-driver-mobile button:focus-visible,
+.akk-crew-qa button:focus-visible,
+.akk-crew-qa select:focus-visible {
+  outline: 3px solid #60a5fa;
+  outline-offset: 2px;
+}
+.akk-driver-mobile > nav {
+  padding-bottom: env(safe-area-inset-bottom, 4px);
+}
+.akk-driver-mobile > nav > div {
+  border-radius: 22px !important;
+}
+.akk-driver-mobile > nav button {
+  min-height: 49px;
+}
+.akk-driver-mobile > nav button > span[class*="text-[11px]"] {
+  font-size: 11px !important;
+  font-weight: 650;
+}
+.akk-driver-mobile > nav .grid > div > button {
+  min-width: 52px;
+}
+@media (max-width: 430px) {
+  .akk-driver-mobile > header { padding-left: 12px !important; padding-right: 12px !important; }
+  .akk-driver-mobile > nav { padding-left: 8px; padding-right: 8px; }
+  .akk-driver-mobile > main { padding-left: 10px; padding-right: 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .akk-driver-mobile *, .akk-crew-qa * {
+    animation-duration: .01ms !important;
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+/* Admin testing UI — simple cards, no decorative charts. */
+.akk-crew-qa {
+  color: #172338;
+  animation: akkCrewEnter .23s ease-out both;
+}
+@keyframes akkCrewEnter { from {opacity:.7;transform:translateY(5px)}to{opacity:1;transform:translateY(0)} }
+.akk-crew-eyebrow {
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: .08em;
+  color: #64748b;
+}
+.akk-crew-panel {
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  box-shadow: 0 8px 28px rgba(27,45,74,.035);
+  border-radius: 20px;
+  padding: clamp(17px,3vw,25px);
+}
+.akk-crew-panel-title { font-size: 17px; font-weight: 800; letter-spacing: -.024em; }
+.akk-crew-label {font-size:10px;font-weight:800;color:#64748b;white-space:nowrap;letter-spacing:.035em}
+.akk-crew-switch {display:grid;grid-template-columns:1fr 1fr;gap:5px;padding:5px;background:#f0f4f9;border-radius:13px}
+.akk-crew-switch button {display:flex;justify-content:center;align-items:center;gap:8px;border:0;background:transparent;border-radius:10px;min-height:43px;font-weight:750;font-size:13px;color:#64748b;cursor:pointer}
+.akk-crew-switch button.is-active {background:#fff;color:#1d4ed8;box-shadow:0 2px 7px rgba(22,45,83,.09)}
+.akk-crew-demo-trip {background:#f8fafc;border:1px solid #e2e8f0;border-radius:15px;padding:17px;display:grid;gap:12px}
+.akk-crew-slots {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.akk-crew-slots>div {background:white;border:1px solid #e2e8f0;border-radius:12px;padding:13px;display:flex;flex-direction:column;align-items:flex-start;gap:5px;font-size:13px;min-width:0}
+.akk-crew-slots span {color:#64748b;font-size:12px;overflow-wrap:anywhere}
+.akk-crew-status {display:inline-flex;align-items:center;color:#8a5a20;background:#fff8e6;border-radius:99px;padding:5px 9px;font-size:11px;font-weight:800;white-space:nowrap}
+.akk-crew-status.good {background:#e6f6ec;color:#147443}
+.akk-crew-primary,.akk-crew-outline,.akk-crew-danger {display:inline-flex;align-items:center;justify-content:center;gap:9px;cursor:pointer;border-radius:12px;font-size:13px;font-weight:800;min-height:44px;padding:10px 15px;transition:transform .15s ease, background-color .15s ease}
+.akk-crew-primary {background:#2563eb;color:#fff;width:100%;border:1px solid #2563eb}
+.akk-crew-primary:hover {background:#1d4ed8}
+.akk-crew-outline {border:1px solid #cbd5e1;color:#2354b4;background:#fff}
+.akk-crew-outline:hover {background:#eff6ff}
+.akk-crew-danger {background:#fff1f2;color:#be123c;border:1px solid #fecdd3}
+.akk-crew-danger:hover {background:#ffe4e6}
+.akk-crew-primary:active,.akk-crew-outline:active {transform:scale(.985)}
+.akk-crew-primary:disabled,.akk-crew-outline:disabled,.akk-crew-danger:disabled {opacity:.55;cursor:not-allowed}
+.akk-crew-quiet {color:#64748b;font-size:12px;font-weight:700;padding:6px 2px;cursor:pointer}
+.akk-crew-claim {border:1px solid #bfdbfe;background:#eff6ff;border-radius:13px;padding:13px}
+.akk-crew-task-list {display:grid;gap:8px;padding:15px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;font-size:13px}
+.akk-crew-task-list>div {display:flex;align-items:center;gap:8px;color:#334155}
+.akk-crew-task-list>div svg {color:#16a34a;flex-shrink:0}
+.akk-crew-field {display:flex;flex-direction:column;gap:7px;font-size:13px;font-weight:750;color:#334155}
+.akk-crew-field select {height:44px;padding:8px 12px;border-radius:12px;border:1px solid #cbd5e1;background:#fff;color:#0f172a}
+.akk-crew-notice,.akk-crew-alert {display:flex;gap:9px;align-items:flex-start;padding:12px 14px;border-radius:12px;font-size:13px;line-height:1.5}
+.akk-crew-notice svg,.akk-crew-alert svg{flex-shrink:0;margin-top:2px}
+.akk-crew-notice.ok {background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0}
+.akk-crew-notice.error,.akk-crew-alert {background:#fff7ed;color:#9a3412;border:1px solid #fed7aa}
+.akk-crew-account {display:grid;gap:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:15px}
+.akk-crew-value {font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;color:#334155;overflow-wrap:anywhere}
+.akk-crew-error {background:#fff7ed;border:1px solid #fed7aa;padding:11px 13px;border-radius:11px;color:#9a3412;font-size:13px}
+.akk-crew-error summary {cursor:pointer;display:flex;align-items:center;gap:7px;font-weight:700}
+html.dark .akk-crew-qa {color:#e2e8f0}
+html.dark .akk-crew-panel {border-color:#29364d;background:#111d30;box-shadow:none}
+html.dark .akk-crew-switch {background:#19263a}
+html.dark .akk-crew-switch button.is-active {color:#93c5fd;background:#293952;box-shadow:none}
+html.dark .akk-crew-demo-trip, html.dark .akk-crew-task-list,html.dark .akk-crew-account {background:#18253a;border-color:#334155}
+html.dark .akk-crew-slots>div {background:#101b2d;border-color:#334155}
+html.dark .akk-crew-outline {background:#18283e;color:#bfdbfe;border-color:#475569}
+html.dark .akk-crew-outline:hover {background:#203751}
+html.dark .akk-crew-claim {background:#122847;border-color:#1d4ed8}
+html.dark .akk-crew-task-list>div,html.dark .akk-crew-field,html.dark .akk-crew-value {color:#cbd5e1}
+html.dark .akk-crew-field select {background:#111d30;color:#e2e8f0;border-color:#475569}
+html.dark .akk-crew-notice.ok {background:#064e3b;color:#d1fae5;border-color:#047857}
+html.dark .akk-crew-notice.error,html.dark .akk-crew-alert,html.dark .akk-crew-error {background:#402915;color:#fde68a;border-color:#92400e}
+@media (max-width: 540px) {
+  .akk-crew-panel {padding:16px;border-radius:16px}
+  .akk-crew-qa {padding:15px 12px}
+  .akk-crew-slots>div {padding:10px}
+  .akk-crew-switch button {font-size:12px}
+}
+
+/* ==========================================================================
+   AKK CREW V62 - FIELD WORKSPACE
+   A single visual system across crew schedule, forms, dialogs and sheets.
+   Scoped to the existing DriverMobileView and its mounted dialogs.
+   Keep the existing React events, API calls, permission checks and GPS flow.
+   ========================================================================== */
+
+body.akk-crew-portal-ui {
+  --akk-crew-bg: #f4f6fa;
+  --akk-crew-card: #ffffff;
+  --akk-crew-line: #e7ebf2;
+  --akk-crew-ink: #14233b;
+  --akk-crew-muted: #66768e;
+  --akk-crew-accent: #225be7;
+  --akk-crew-accent-soft: #eaf0ff;
+  --akk-crew-shadow: 0 6px 23px rgba(24, 47, 83, .055);
+  --akk-crew-easing: cubic-bezier(.2,.8,.2,1);
+}
+
+/* The crew account uses the in-app title bar, not two competing headers. */
+@media (max-width: 1023px) {
+  body.akk-crew-focus #root main:has(.akk-driver-mobile) {
+    padding-top: 0 !important;
+  }
+}
+body.akk-crew-portal-ui .akk-driver-mobile {
+  width: 100%;
+  max-width: 500px !important;
+  margin: 0 auto;
+  background: var(--akk-crew-bg) !important;
+  color: var(--akk-crew-ink) !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  font-size: 14px;
+  line-height: 1.5;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > header {
+  background: rgba(255,255,255,.97) !important;
+  border-bottom: 1px solid var(--akk-crew-line) !important;
+  padding: 13px 18px !important;
+  box-shadow: none !important;
+  min-height: 66px;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > header > div:first-child {gap: 11px !important;}
+body.akk-crew-portal-ui .akk-driver-mobile > header h1 {
+  color: var(--akk-crew-ink) !important;
+  font-size: 17px !important;
+  letter-spacing: -.04em !important;
+  font-weight: 800 !important;
+  text-transform: none !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > header .bg-blue-600\/15 {
+  background: var(--akk-crew-accent-soft) !important;
+  border-color: #d5e1ff !important;
+  color: var(--akk-crew-accent) !important;
+  border-radius: 11px !important;
+}
+/* When the connection is healthy, don't give it valuable header space.
+   Offline and queued changes remain visible. */
+body.akk-crew-portal-ui .akk-driver-mobile > header button:has(> svg[class*="text-emerald-400"]) { display: none !important; }
+body.akk-crew-portal-ui .akk-driver-mobile > header button[aria-label="Perbarui Data Pengiriman"] {
+  background: transparent !important;
+  color: #718096 !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > header button[aria-label="Buka Profil Kru"] {
+  background: #edf2fb !important;
+  color: var(--akk-crew-ink) !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: none !important;
+  border-radius: 12px !important;
+  width: 37px !important;
+  height: 37px !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > header > div:last-child {display:none !important;}
+
+/* One task per card; avoid bright borders, gradients and visual clutter. */
+body.akk-crew-portal-ui .akk-driver-mobile > main {
+  padding: 18px 15px 112px !important;
+  line-height: 1.5;
+  gap: 16px;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main :is(div.bg-white, div.bg-slate-900):is(.rounded-2xl, .rounded-xl) {
+  background: var(--akk-crew-card) !important;
+  border-color: var(--akk-crew-line) !important;
+  box-shadow: var(--akk-crew-shadow) !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main :is(h1,h2,h3,h4) {
+  color: var(--akk-crew-ink) !important;
+  font-weight: 800;
+  letter-spacing: -.035em;
+  line-height: 1.33;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main :where(.text-white, .text-slate-100, .text-slate-200):not(button):not([class*="bg-blue-600"]):not([class*="bg-emerald-"]) {
+  color: var(--akk-crew-ink);
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main :is(.text-slate-400,.text-slate-500) {color: var(--akk-crew-muted);}
+body.akk-crew-portal-ui .akk-driver-mobile > main :where(button, input, textarea, select) {
+  font-size: 13px;
+  letter-spacing: -.012em;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main button {
+  transition: transform .17s var(--akk-crew-easing), background-color .17s ease, border-color .17s ease;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main button:active { transform: scale(.98); }
+body.akk-crew-portal-ui .akk-driver-mobile > main :is(input,select,textarea) {
+  font-size: 15px !important;
+  border-radius: 12px !important;
+  min-height: 44px;
+  background: #fff;
+  color: var(--akk-crew-ink);
+  border-color: var(--akk-crew-line);
+  box-shadow: none;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main input::placeholder {
+  color: #8997aa;
+}
+
+/* Personal summary should say who is working and what action is next. */
+body.akk-crew-portal-ui .akk-driver-mobile > main > div:first-child {
+  padding: 17px !important;
+  border-radius: 18px !important;
+  background: var(--akk-crew-card) !important;
+  border: 1px solid var(--akk-crew-line) !important;
+  box-shadow: var(--akk-crew-shadow) !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main > div:first-child h2 {
+  font-size: 16px !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main > div:first-child button {
+  border-radius: 12px !important;
+  min-height: 44px;
+  padding: 9px 15px !important;
+}
+/* Native GPS with a valid fix can remain automatic. Keep its warning and
+   enable-location action visible only when positioning is unavailable. */
+body.akk-crew-portal-ui .akk-driver-mobile > main > div:first-child > div.border-t:has([title*="Koordinat"]):has(.text-emerald-700) {
+  display: none !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main > div:first-child > div.border-t:not(:has(.text-emerald-700)) {
+  border-top-color: #e9edf4 !important;
+  padding-top: 11px !important;
+}
+
+/* Search and status: one quiet toolbar, one simple segmented control. */
+body.akk-crew-portal-ui .akk-driver-mobile > main input[id="portal-search-query"] {
+  background: #fff !important;
+  border: 1px solid var(--akk-crew-line) !important;
+  border-radius: 14px !important;
+  min-height: 48px !important;
+  font-size: 14px !important;
+  box-shadow: 0 2px 10px rgba(21,41,71,.025);
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main .grid.grid-cols-3:has(> button) {
+  border-radius: 14px !important;
+  border-color: var(--akk-crew-line) !important;
+  background: #e9edf4 !important;
+  padding: 4px !important;
+  gap: 3px !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main .grid.grid-cols-3:has(> button) > button {
+  min-height: 43px !important;
+  font-size: 12px !important;
+  font-weight: 720;
+  border-radius: 10px !important;
+  color: #64748b;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main .grid.grid-cols-3:has(> button) > button.bg-amber-500 {
+  background: #fff !important;
+  color: var(--akk-crew-accent) !important;
+  box-shadow: 0 2px 7px rgba(23,44,87,.095) !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main .py-8.text-center:has(h3) {
+  padding: 32px 20px !important;
+  border-radius: 18px !important;
+  border-color: var(--akk-crew-line) !important;
+  background: #fff !important;
+  box-shadow: var(--akk-crew-shadow);
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main .py-8.text-center:has(h3) h3 {
+  font-size: 16px !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main .py-8.text-center:has(h3) p {
+  margin-top: 4px !important;
+  color: #7b899d !important;
+  font-size: 12px !important;
+  line-height: 1.55 !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > main .py-8.text-center:has(h3) button {
+  background: var(--akk-crew-accent-soft);
+  color: var(--akk-crew-accent) !important;
+  border: none !important;
+  padding: 10px 13px !important;
+  border-radius: 11px !important;
+  font-weight: 750;
+}
+
+/* Bottom navigation: a predictable tab bar instead of a floating five-icon puzzle. */
+body.akk-crew-portal-ui .akk-driver-mobile > nav {
+  bottom: 0 !important;
+  padding: 8px 10px calc(10px + env(safe-area-inset-bottom, 0px)) !important;
+  background: rgba(255,255,255,.97);
+  border-top: 1px solid var(--akk-crew-line);
+  border-radius: 0 !important;
+  box-shadow: 0 -7px 28px rgba(27,44,74,.07) !important;
+  max-width: 500px;
+  backdrop-filter: blur(16px);
+}
+body.akk-crew-portal-ui .akk-driver-mobile > nav > div {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  backdrop-filter: none;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > nav .grid.grid-cols-5 {gap: 4px;}
+body.akk-crew-portal-ui .akk-driver-mobile > nav button {
+  min-height: 59px !important;
+  border-radius: 13px !important;
+  color: #77859a;
+  font-size: 11px !important;
+  font-weight: 650 !important;
+  padding-block: 8px !important;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > nav button.text-blue-600,
+body.akk-crew-portal-ui .akk-driver-mobile > nav button.text-cyan-600 {color: var(--akk-crew-accent) !important;}
+body.akk-crew-portal-ui .akk-driver-mobile > nav [class*="-mt-7"] {margin-top: 0 !important;}
+body.akk-crew-portal-ui .akk-driver-mobile > nav button[aria-label="Fitur Lapangan Driver & Helper"] {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  width: 43px !important;
+  height: 43px !important;
+  min-height: 43px !important;
+  margin: 0 auto 13px;
+  border-radius: 14px !important;
+  border: none !important;
+  background: var(--akk-crew-accent) !important;
+  box-shadow: 0 3px 12px rgba(34,91,231,.20) !important;
+  color: #fff !important;
+  outline: none;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > nav button[aria-label="Fitur Lapangan Driver & Helper"] svg {
+  width: 23px;
+  height: 23px;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > nav button[aria-label="Fitur Lapangan Driver & Helper"]::after {
+  content: 'Lapor';
+  position: absolute;
+  top: 46px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--akk-crew-muted);
+  font: 650 11px/1.2 'Plus Jakarta Sans', sans-serif;
+  white-space: nowrap;
+}
+body.akk-crew-portal-ui .akk-driver-mobile > nav .grid button > span:last-child[class*="w-1.5"] {display:none;}
+
+/* Common modal shell for check-in, reports, checklist, form kirim and surat jalan.
+   Camera capture and document preview retain their own full-screen treatment. */
+body.akk-crew-portal-ui div.fixed.inset-0:has(> div.max-w-md),
+body.akk-crew-portal-ui div.fixed.inset-0:has(> div.max-w-lg),
+body.akk-crew-portal-ui div.fixed.inset-0:has(> div.max-w-xl) {
+  background: rgba(16,29,51,.39) !important;
+  backdrop-filter: blur(7px) !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-md,
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg,
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-xl {
+  background: #fff !important;
+  color: var(--akk-crew-ink) !important;
+  border: 1px solid var(--akk-crew-line) !important;
+  box-shadow: 0 28px 90px rgba(8,26,52,.17) !important;
+  border-radius: 22px !important;
+  max-height: min(92dvh, 900px) !important;
+  overflow: hidden;
+}
+/* First section is the dialog heading in all crew workflow forms. */
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-md > div:first-child,
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div:first-child,
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-xl > div:first-child {
+  background: #fff !important;
+  border-bottom: 1px solid var(--akk-crew-line) !important;
+  padding: 18px 19px !important;
+  box-shadow: none !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) > div:first-child :is(h2,h3,h4,.font-black) {
+  color: var(--akk-crew-ink) !important;
+  font-size: 17px !important;
+  font-weight: 800 !important;
+  text-transform: none !important;
+  letter-spacing: -.032em !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) > div:first-child p {
+  display:none !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) > div:first-child button:has(svg) {
+  color: #66758a !important;
+  border-radius: 10px;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) > div.flex-1.overflow-y-auto {
+  background: #fff !important;
+  padding: 16px 18px !important;
+  gap: 15px !important;
+  color: var(--akk-crew-ink) !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) :is(label, input, select, textarea) {
+  font-family: inherit;
+  letter-spacing: -.008em;
+  text-transform: none !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) label {
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
+  color: #465770 !important;
+  line-height: 1.4 !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+  background: #fff !important;
+  color: var(--akk-crew-ink) !important;
+  border: 1px solid #dee5ef !important;
+  min-height: 46px;
+  padding: 11px 13px;
+  border-radius: 12px !important;
+  font-size: 14px !important;
+  box-shadow: none !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) textarea {
+  min-height: 92px;
+  line-height: 1.55;
+  resize: vertical;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) :is(input,textarea)::placeholder {color:#98a3b4;}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) :is(input,textarea,select):focus {
+  outline: 2px solid #bcd0ff !important;
+  outline-offset: 1px;
+  border-color: var(--akk-crew-accent) !important;
+}
+/* Light surfaces and dark-on-light labels, keeping colored primary actions readable. */
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) div.bg-slate-950:not([class*="bg-black"]),
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) div.bg-slate-900:not([class*="bg-black"]) {
+  background: #f8fafd !important;
+  border-color: var(--akk-crew-line) !important;
+  box-shadow: none !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) :is(h1,h2,h3,h4,label) {
+  color: var(--akk-crew-ink) !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) :where(p,.text-slate-300,.text-slate-400):not(button) {
+  color: #66768e !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) :is(.rounded-2xl,.rounded-xl) {
+  border-radius: 13px !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) button:not(:disabled) {
+  cursor:pointer;
+  transition: transform .17s var(--akk-crew-easing),background-color .17s ease,border-color .17s ease;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) button:active:not(:disabled) {transform:scale(.985);}
+
+/* Report sheet: category first, no long instructions and no repeated BBM heading. */
+/* Never inject duplicate headings in a live form. */
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div:first-child h3 {
+  font-size: 15px !important; line-height: 1.35 !important;
+  overflow-wrap: anywhere; white-space: normal !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div.flex-1.overflow-y-auto > div.space-y-1\.5:first-child > label {
+  display:none !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div.flex-1.overflow-y-auto > div:first-child.grid,
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div.flex-1.overflow-y-auto > div:first-child > .grid {
+  gap: 9px !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div.flex-1.overflow-y-auto > div:first-child > .grid > button {
+  min-height: 54px !important;
+  border-radius: 13px !important;
+  justify-content: flex-start !important;
+  padding: 13px !important;
+  background: #f8fafd !important;
+  border: 1px solid #e2e9f2 !important;
+  color: #41536c !important;
+  font-size: 12px !important;
+  font-weight: 760;
+  box-shadow: none !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div.flex-1.overflow-y-auto > div:first-child > .grid > button:is(.bg-amber-600,.bg-rose-600,.bg-blue-600,.bg-indigo-600) {
+  background: var(--akk-crew-accent-soft) !important;
+  border: 1px solid #a7c0ff !important;
+  color: var(--akk-crew-accent) !important;
+  box-shadow: inset 0 0 0 1px #a7c0ff !important;
+}
+/* The selected category is already named by its tab. Don't repeat an icon,
+   heading, and paragraph before the first field. */
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div.flex-1.overflow-y-auto > div.p-3\.5.rounded-2xl > div.flex:first-child:has(> div) {
+  display:none !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div.flex-1.overflow-y-auto > div.p-3\.5.rounded-2xl {
+  border: 1px solid var(--akk-crew-line) !important;
+  background: #fff !important;
+  padding: 13px !important;
+  border-radius: 14px !important;
+  box-shadow: none !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div.flex-1.overflow-y-auto > div.p-3\.5.rounded-2xl > div.flex:first-child:has(> div) p {
+  display:none !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div.flex-1.overflow-y-auto > div.p-3\.5.rounded-2xl :where(.text-white,.text-slate-100,.text-slate-200):not(button) {
+  color: var(--akk-crew-ink) !important;
+}
+/* Prefer primary Save; WhatsApp remains available but visually secondary. */
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div:last-child:has(button) {
+  background: #fff !important;
+  border-top: 1px solid var(--akk-crew-line) !important;
+  padding: 12px 17px calc(13px + env(safe-area-inset-bottom, 0px)) !important;
+  gap: 10px !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div:last-child:has(button) > button:first-child {
+  flex: 0 0 35%;
+  background: #f1f4f9 !important;
+  color: #405570 !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 12px !important;
+  font-size: 12px !important;
+  min-height: 48px;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div:last-child:has(button) > button:last-child {
+  flex: 1 1 auto;
+  background: var(--akk-crew-accent) !important;
+  color: #fff !important;
+  border: none !important;
+  border-radius: 12px !important;
+  font-size: 13px !important;
+  min-height: 48px;
+}
+
+/* Check-in and other operations use the same visual rhythm. */
+body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-md > div.flex-1.overflow-y-auto > div:first-child:has(.text-amber-400) {
+  background: #f8fafd !important;
+  padding: 11px 13px !important;
+  border-color: var(--akk-crew-line) !important;
+  border-radius: 12px !important;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) .grid.grid-cols-2:has(> button) > button {
+  min-height: 48px;
+  border-radius: 12px !important;
+  font-weight: 750;
+  font-size: 13px;
+}
+body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) .bg-amber-500:not(input) {
+  background: var(--akk-crew-accent) !important;
+  color: white !important;
+  border-color: var(--akk-crew-accent) !important;
+}
+
+/* Quiet, accessible transitions. Do not animate live status indicators wildly. */
+@media (prefers-reduced-motion: reduce) {
+  body.akk-crew-portal-ui .akk-driver-mobile *,
+  body.akk-crew-portal-ui div.fixed.inset-0 :is(button,input,textarea,select) {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
+}
+@media (max-width: 600px) {
+  body.akk-crew-portal-ui div.fixed.inset-0 > :is(div.max-w-md,div.max-w-lg,div.max-w-xl) {
+    border-radius: 24px 24px 0 0 !important;
+    max-height: min(94dvh, 1000px) !important;
+    margin-bottom: 0 !important;
+  }
+  body.akk-crew-portal-ui div.fixed.inset-0:has(> div.max-w-lg),
+  body.akk-crew-portal-ui div.fixed.inset-0:has(> div.max-w-md),
+  body.akk-crew-portal-ui div.fixed.inset-0:has(> div.max-w-xl) {
+    align-items: flex-end !important;
+    padding: 0 !important;
+  }
+  body.akk-crew-portal-ui .akk-driver-mobile > main {padding-inline: 13px !important;}
+  body.akk-crew-portal-ui div.fixed.inset-0 > div.max-w-lg > div.flex-1.overflow-y-auto {padding: 15px !important;}
+}
+
+/* Primary work CTA uses one consistent accent, rather than an urgent orange. */
+body.akk-crew-portal-ui .akk-driver-mobile > main > div:first-child button.bg-amber-500,
+body.akk-crew-portal-ui .akk-driver-mobile > main > div:first-child button.hover\:bg-amber-400 {
+  background: var(--akk-crew-accent) !important;
+  color: #fff !important;
+  border-color: var(--akk-crew-accent) !important;
+  box-shadow: 0 5px 14px rgba(34,91,231,.16) !important;
+}
+
+/* V63: focused create-shipment flow in existing Jadwal Kirim / Driver menu. */
+body.akk-clean-ui button[title="Pop-up Form Tambah Jadwal Baru (Manual)"] { display: none !important; }
+.akk-ship-create-trigger {
+  position: fixed; z-index: 1090; right: 24px; top: 78px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+  padding: 12px 18px; min-height: 46px; border-radius: 14px;
+  border: 1px solid #1d4ed8; background: #2563eb; color: #fff;
+  font: 700 14px/1.2 system-ui, sans-serif;
+  box-shadow: 0 7px 18px rgba(37, 99, 235, .17);
+  transition: transform .16s ease, background .16s ease;
+}
+.akk-ship-create-trigger:hover { background: #1d4ed8; transform: translateY(-1px); }
+.akk-ship-qa-trigger { top: 78px; bottom: auto; right: 24px; z-index: 1080; }
+.akk-ship-backdrop { position: fixed; inset: 0; z-index: 2147483000; background: rgba(9, 18, 35, .58); display: flex; align-items: center; justify-content: center; padding: 16px; backdrop-filter: blur(4px); }
+.akk-ship-dialog { width: 100%; max-width: 580px; max-height: min(760px, 95dvh); display: flex; flex-direction: column; border-radius: 22px; overflow: hidden; background: #fff; color: #162338; box-shadow: 0 35px 110px rgba(10,22,41,.26); }
+.akk-ship-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 22px 24px 18px; border-bottom: 1px solid #edf0f5; }
+.akk-ship-dialog-head h2 { color: #101f36; font: 800 22px/1.25 system-ui,sans-serif; letter-spacing: -.02em; margin: 2px 0 0; }
+.akk-ship-kicker { margin: 0; color: #64748b; letter-spacing: .12em; font-size: 10px; font-weight: 700; }
+.akk-ship-close { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; color: #64748b; }
+.akk-ship-close:hover { background: #f1f5f9; }
+.akk-ship-dialog-body { padding: 20px 24px; overflow-y: auto; overscroll-behavior: contain; min-height: 0; }
+.akk-ship-dialog-body select, .akk-ship-dialog-body input { color-scheme: light; }
+.akk-ship-dialog-body input:focus, .akk-ship-dialog-body select:focus { outline: none; }
+.akk-ship-crew-picker { background: #f8fafc; border: 1px solid #e8edf4; padding: 15px; border-radius: 16px; }
+.akk-ship-dialog-footer { border-top: 1px solid #edf0f5; padding: 14px 24px; display: flex; gap: 10px; align-items: center; justify-content: flex-end; }
+.akk-ship-cancel { min-height: 44px; padding: 0 16px; color: #475569; border-radius: 12px; background: #f1f5f9; font: 700 13px system-ui,sans-serif; }
+.akk-ship-cancel:hover { background: #e2e8f0; }
+.akk-ship-qa-warning { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: 11px; margin-bottom: 15px; background: #eff6ff; color: #1e40af; font-size: 12px; font-weight: 600; }
+.akk-ship-error { margin-top: 14px; padding: 11px 12px; border-radius: 10px; background: #fef2f2; color: #b91c1c; font-size: 12px; font-weight: 700; }
+.akk-ship-test-list { border-top: 1px solid #e2e8f0; margin-top: 20px; padding-top: 18px; display: grid; gap: 10px; }
+.akk-ship-test-list h3 { margin: 0 0 4px; font: 750 14px system-ui,sans-serif; }
+.akk-ship-test-card { border: 1px solid #e2e8f0; border-radius: 14px; padding: 13px; }
+.akk-ship-test-slot { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; border: 1px solid #e2e8f0; padding: 10px; border-radius: 10px; }
+.akk-ship-test-claim { color: #2563eb; font-size: 12px; font-weight: 700; }
+.akk-ship-test-claim:hover { text-decoration: underline; }
+.akk-ship-notice { z-index: 1091; position: fixed; right: 24px; top: 135px; max-width: min(470px, calc(100vw - 32px)); display: flex; gap: 8px; align-items: center; background: #ecfdf5; border: 1px solid #bbf7d0; color: #065f46; padding: 12px 14px; border-radius: 12px; font: 600 12px/1.4 system-ui,sans-serif; box-shadow: 0 10px 20px rgba(15,23,42,.08); }
+.akk-ship-notice button { margin-left: auto; }
+@media (max-width: 767px) {
+  .akk-ship-create-trigger { right: 14px; top: 80px; padding: 10px 14px; min-height: 42px; border-radius: 12px; font-size: 13px; }
+  .akk-ship-qa-trigger { top: 80px; bottom: auto; right: 14px; }
+  .akk-ship-backdrop { padding: 0; align-items: flex-end; }
+  .akk-ship-dialog { max-height: 93dvh; border-radius: 24px 24px 0 0; }
+  .akk-ship-dialog-head { padding: 19px 18px 13px; }
+  .akk-ship-dialog-body { padding: 18px; }
+  .akk-ship-dialog-footer { padding: 12px 18px; }
+  .akk-ship-notice { top: 132px; right: 10px; left: 10px; max-width: none; }
+}
+@media (prefers-reduced-motion: reduce) { .akk-ship-create-trigger { transition: none; } }
+
+/* ===========================================================================
+   V64 - CREW QA: one clean workspace, same UI before claiming either slot.
+   The persistent job role is intentionally NOT used for menu rendering.
+   =========================================================================== */
+body.akk-qa-crew-active { overflow: hidden !important; }
+.akk-crew-v64, .akk-crew-v64 *, .akk-crew-v64 *::before, .akk-crew-v64 *::after { box-sizing: border-box; }
+.akk-crew-v64 {
+  --v64-ink:#17253c; --v64-muted:#6c7a8e; --v64-line:#e3e9f2;
+  --v64-accent:#245ce8; --v64-card:#ffffff;
+  position:fixed; inset:0; z-index:2147480100;
+  background:#eaf0f7; color:var(--v64-ink);
+  font-family:Inter,'Plus Jakarta Sans',system-ui,-apple-system,sans-serif;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  letter-spacing:-.015em;
+}
+.akk-crew-v64 button, .akk-crew-v64 input, .akk-crew-v64 textarea, .akk-crew-v64 select { font:inherit; }
+.akk-crew-v64 button { cursor:pointer; }
+.akk-crew-v64 button:disabled { opacity:.48; cursor:not-allowed; }
+.akk-crew-v64 button:focus-visible, .akk-crew-v64 input:focus-visible, .akk-crew-v64 textarea:focus-visible, .akk-crew-v64 select:focus-visible { outline:3px solid #a0b9fd; outline-offset:2px; }
+.akk-crew-v64-shell {
+  height:100dvh; max-width:480px; width:100%; margin:0 auto;
+  display:flex; flex-direction:column; background:#f7f9fc;
+  border-inline:1px solid rgba(180,193,209,.45); box-shadow:0 0 80px rgba(22,46,79,.10);
+}
+.akk-crew-v64-header {
+  flex:0 0 auto; display:flex; justify-content:space-between; align-items:center;
+  gap:12px; min-height:72px; padding:13px 19px;
+  background:var(--v64-card); border-bottom:1px solid var(--v64-line);
+}
+.akk-crew-v64-brand { display:flex; align-items:center; gap:11px; min-width:0; }
+.akk-crew-v64-symbol { width:42px; height:42px; display:grid; place-items:center; flex:none;
+  color:var(--v64-accent); background:#edf2ff; border-radius:14px; }
+.akk-crew-v64-brand div { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.akk-crew-v64-brand strong { font-size:17px; line-height:1.2; font-weight:800; }
+.akk-crew-v64-brand small { font-size:12px; line-height:1.25; color:var(--v64-muted); }
+.akk-crew-v64-profile { display:grid; place-items:center; width:42px; height:42px; border-radius:14px;
+  border:1px solid var(--v64-line); background:#fff; color:var(--v64-ink); }
+.akk-crew-v64-content { flex:1 1 0; min-height:0; overflow-y:auto; overscroll-behavior:contain;
+  padding:23px 17px 28px; scroll-behavior:smooth; }
+.akk-crew-v64-heading { margin:0 0 19px; }
+.akk-crew-v64-heading h1 { font-size:27px; line-height:1.14; font-weight:800; margin:0 0 6px; letter-spacing:-.045em; }
+.akk-crew-v64-heading p { color:var(--v64-muted); font-size:13px; line-height:1.4; margin:0; }
+.akk-crew-v64-stack { display:grid; gap:13px; }
+.akk-crew-v64-card, .akk-crew-v64-section, .akk-crew-v64-taskhero {
+  background:var(--v64-card); border:1px solid var(--v64-line); border-radius:19px;
+  padding:18px; box-shadow:0 6px 19px rgba(31,49,78,.038);
+}
+.akk-crew-v64-cardtop { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:13px; }
+.akk-crew-v64-tag { display:inline-flex; align-items:center; padding:6px 10px; min-height:27px;
+  color:#255cb7; background:#ebf2ff; border-radius:9px; font-size:11px; font-weight:750; white-space:nowrap; }
+.akk-crew-v64-date { color:var(--v64-muted); font-size:12px; font-weight:600; }
+.akk-crew-v64-card h2, .akk-crew-v64-taskhero h2 { font-size:19px; font-weight:800; letter-spacing:-.035em;
+  line-height:1.3; margin:0 0 8px; overflow-wrap:anywhere; }
+.akk-crew-v64-meta { display:flex; align-items:center; gap:6px; flex-wrap:wrap; color:var(--v64-muted);
+  font-size:12px; line-height:1.45; margin:0; }
+.akk-crew-v64-meta svg { flex:0 0 auto; }
+.akk-crew-v64-people { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px;
+  padding:14px 0 15px; margin-top:15px; border-top:1px solid #edf0f5; }
+.akk-crew-v64-people > div { display:flex; flex-direction:column; gap:5px; min-width:0; }
+.akk-crew-v64-people span { color:var(--v64-muted); font-size:12px; }
+.akk-crew-v64-people strong { font-size:13px; font-weight:760; line-height:1.4; overflow-wrap:anywhere; }
+.akk-crew-v64-mainbtn { display:flex; justify-content:center; align-items:center; gap:10px;
+  width:100%; min-height:48px; padding:12px 14px; background:var(--v64-accent); border:1px solid var(--v64-accent);
+  border-radius:13px; color:#fff; font-size:14px; line-height:1.25; font-weight:750;
+  transition:background .18s ease,transform .18s ease; }
+.akk-crew-v64-mainbtn:hover { background:#164dd4; }
+.akk-crew-v64-mainbtn:active { transform:scale(.985); }
+.akk-crew-v64-mainbtn svg:last-child:not(:first-child) { margin-left:auto; }
+.akk-crew-v64-muted { margin:0; padding:10px 3px 0; color:var(--v64-muted); font-size:12px; }
+.akk-crew-v64-empty { margin-top:10px; display:flex; flex-direction:column; align-items:center; text-align:center;
+  background:#fff; border:1px solid var(--v64-line); border-radius:19px; padding:39px 20px; }
+.akk-crew-v64-empty > span { display:grid; place-items:center; color:#708bb4; background:#edf3fd;
+  width:53px; height:53px; border-radius:17px; margin-bottom:17px; }
+.akk-crew-v64-empty h2 { font-size:17px; line-height:1.3; font-weight:780; margin:0 0 8px; }
+.akk-crew-v64-empty p { color:var(--v64-muted); font-size:13px; max-width:240px; line-height:1.6; margin:0; }
+.akk-crew-v64-empty .akk-crew-v64-mainbtn { margin-top:19px; }
+.akk-crew-v64-taskhero { margin-bottom:14px; }
+.akk-crew-v64-taskhero .akk-crew-v64-tag { margin-bottom:11px; }
+.akk-crew-v64-taskhero p { font-size:13px; color:var(--v64-muted); margin:0; }
+.akk-crew-v64-partner { display:flex; align-items:center; flex-wrap:wrap; gap:6px;
+  border-top:1px solid var(--v64-line); margin-top:15px; padding-top:14px; color:var(--v64-muted); font-size:13px; }
+.akk-crew-v64-partner b { font-size:13px; color:var(--v64-ink); overflow-wrap:anywhere; }
+.akk-crew-v64-section { margin-bottom:14px; }
+.akk-crew-v64-section h2 { font-size:16px; line-height:1.35; font-weight:800; margin:0 0 14px; letter-spacing:-.025em; }
+.akk-crew-v64-progress { display:grid; grid-template-columns:1fr 1fr; gap:9px; margin-bottom:13px; }
+.akk-crew-v64-progress > div { min-width:0; border-radius:12px; background:#f4f7fc; padding:11px 12px; display:flex; flex-direction:column; gap:5px; }
+.akk-crew-v64-progress span { color:var(--v64-muted); font-size:12px; }
+.akk-crew-v64-progress strong { font-size:14px; }
+.akk-crew-v64-action { display:flex; align-items:center; gap:12px; width:100%; min-height:54px;
+  text-align:left; border:1px solid var(--v64-line); padding:13px; background:#fff; border-radius:12px;
+  font-size:14px; font-weight:730; color:var(--v64-ink); margin-top:8px; }
+.akk-crew-v64-action svg { color:var(--v64-accent); flex-shrink:0; }
+.akk-crew-v64-action svg:last-child { margin-left:auto; color:#90a0b5; }
+.akk-crew-v64-action:active { background:#f4f7ff; }
+.akk-crew-v64-km { display:flex; align-items:center; gap:8px; margin-bottom:13px; flex-wrap:wrap; }
+.akk-crew-v64-km > div { display:flex; flex-direction:column; gap:4px; min-width:105px; margin-right:auto; }
+.akk-crew-v64-km strong { font-size:13px; } .akk-crew-v64-km small { font-size:12px; color:var(--v64-muted); }
+.akk-crew-v64-km input { width:98px; height:43px; border:1px solid var(--v64-line); border-radius:10px; padding:9px; font-size:15px; }
+.akk-crew-v64-km button { height:43px; border-radius:10px; padding:0 12px; font-size:13px; background:#eaf0ff; color:var(--v64-accent); font-weight:750; }
+.akk-crew-v64-reportrow { display:flex; gap:12px; align-items:center; padding:10px 0; border-bottom:1px solid var(--v64-line); }
+.akk-crew-v64-reportrow:last-child { border:0; } .akk-crew-v64-reportrow svg { color:#16a66b; }
+.akk-crew-v64-reportrow div { display:flex; flex-direction:column; gap:3px; }
+.akk-crew-v64-reportrow strong { font-size:13px; } .akk-crew-v64-reportrow span { font-size:12px; color:var(--v64-muted); }
+.akk-crew-v64-field { display:flex; flex-direction:column; gap:7px; width:100%; margin-bottom:14px; }
+.akk-crew-v64-field > span { font-size:13px; font-weight:750; }
+.akk-crew-v64-field :is(textarea,select) { background:#fff; color:var(--v64-ink);
+  border:1px solid #ced8e8; border-radius:13px; font-size:15px; padding:12px 13px; width:100%;
+  min-height:47px; resize:vertical; line-height:1.5; }
+.akk-crew-v64-reportform > p { font-size:13px; color:var(--v64-muted); margin:-8px 0 20px; }
+.akk-crew-v64-back { display:flex; align-items:center; gap:8px; color:var(--v64-accent); font-weight:750; font-size:13px; margin-bottom:16px; }
+.akk-crew-v64-mutedsmall { display:block; font-size:11px; color:var(--v64-muted); line-height:1.5; margin-top:13px; }
+.akk-crew-v64-feedback { display:flex; align-items:center; gap:9px; font-size:12px; line-height:1.45;
+  border-radius:12px; padding:11px 12px; margin-bottom:14px; }
+.akk-crew-v64-feedback svg { flex-shrink:0; } .akk-crew-v64-feedback button { margin-left:auto; }
+.akk-crew-v64-feedback.ok { color:#047857; background:#e7f8ef; border:1px solid #b9edd1; }
+.akk-crew-v64-feedback.fail { color:#a4372d; background:#fff3f0; border:1px solid #f5c6bf; }
+.akk-crew-v64-nav { flex:0 0 auto; display:grid; grid-template-columns:repeat(3,minmax(0,1fr));
+  background:#fff; border-top:1px solid var(--v64-line); padding:8px 12px calc(8px + env(safe-area-inset-bottom,0px)); }
+.akk-crew-v64-nav button { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px;
+  height:58px; border:0; background:transparent; font-size:12px; font-weight:690; color:#8190a4;
+  border-radius:12px; transition:color .16s ease,background .16s ease; }
+.akk-crew-v64-nav button.active { color:var(--v64-accent); background:#edf2ff; }
+.akk-crew-v64-shade { position:fixed; inset:0; z-index:2147480102; display:flex; align-items:flex-end;
+  justify-content:center; padding:0 0 env(safe-area-inset-bottom,0px); background:rgba(13,28,53,.48); backdrop-filter:blur(4px); }
+.akk-crew-v64-sheet { width:100%; max-width:480px; display:flex; flex-direction:column; gap:12px;
+  background:white; border-radius:24px 24px 0 0; padding:21px 19px 24px; max-height:80dvh; overflow:auto; box-shadow:0 -18px 60px rgba(10,25,49,.17); }
+.akk-crew-v64-sheet-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.akk-crew-v64-sheet-head h2 { margin:0; font-size:21px; font-weight:800; letter-spacing:-.04em; }
+.akk-crew-v64-sheet-head button { display:grid; place-items:center; width:38px; height:38px; border-radius:11px; color:#708196; }
+.akk-crew-v64-sheet > p { margin:0 0 7px; color:var(--v64-muted); font-size:13px; line-height:1.55; }
+.akk-crew-v64-slotgrid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.akk-crew-v64-slotbutton { display:flex; flex-direction:column; align-items:flex-start; gap:8px;
+  padding:16px 13px; text-align:left; border:1px solid #d7e2f2; border-radius:15px; background:#f8fbff; min-width:0; }
+.akk-crew-v64-slotbutton > span { display:grid; place-items:center; width:38px; height:38px; background:#e7efff; border-radius:12px; color:var(--v64-accent); }
+.akk-crew-v64-slotbutton strong { font-size:15px; font-weight:800; }
+.akk-crew-v64-slotbutton small { color:var(--v64-muted); font-size:12px; }
+.akk-crew-v64-cancel { min-height:46px; width:100%; border-radius:12px; color:#43546e; background:#f0f3f8; font-size:14px; font-weight:750; }
+.akk-crew-v64-logout { display:flex; align-items:center; justify-content:center; gap:9px; width:100%;
+  min-height:48px; margin-top:8px; background:#fff4f4; color:#b42336; font-size:14px; font-weight:750; border-radius:12px; }
+.akk-crew-v64-accountname { font-weight:800; font-size:16px !important; color:var(--v64-ink) !important; overflow-wrap:anywhere; }
+@media (min-width:641px) { .akk-crew-v64-shell { margin-block:0; } .akk-crew-v64-shade { align-items:center; padding:18px; } .akk-crew-v64-sheet { border-radius:22px; } }
+@media (max-width:400px) { .akk-crew-v64-content {padding-inline:13px;} .akk-crew-v64-card,.akk-crew-v64-section,.akk-crew-v64-taskhero {padding:15px;} .akk-crew-v64-header {padding-inline:15px;} }
+@media (prefers-reduced-motion:reduce) { .akk-crew-v64 *, .akk-crew-v64 *::after { transition:none !important; animation:none !important; scroll-behavior:auto !important; } }

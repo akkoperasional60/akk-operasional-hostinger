@@ -6,11 +6,13 @@ import {
 } from 'lucide-react';
 import { AkkLogo } from './AkkLogo';
 import { ThemeSwitcher } from './ThemeSwitcher';
+import { ShipmentScheduleWorkbench } from './ShipmentScheduleWorkbench';
 import { logisticsStore } from '../services/store';
 import type { UserProfile } from '../types';
 import { canAccess } from '../utils/rbac';
 import { preloadTabModule } from '../utils/tabLoaders';
 import '../styles/akk-clean-design.css';
+import '../styles/akk-driver-helper-clean.css';
 
 // All existing tab IDs remain unchanged. Routes, role permissions, and saved links keep working.
 export type NavTab =
@@ -179,6 +181,7 @@ const readStoredTabs = (key: string): NavTab[] => {
 
 const SidebarComponent: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onOpenAuth, isMinimized = false, onToggleMinimize }) => {
   const [user, setUser] = useState<UserProfile>(() => logisticsStore.getCurrentUser());
+  const isCrewWorkScreen = currentTab === 'driver_portal' && (user.role === 'driver' || user.role === 'crew_helper');
   const [isMobileOpen, setMobileOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [favorites, setFavorites] = useState<NavTab[]>(() => readStoredTabs(FAVORITE_KEY));
@@ -193,7 +196,11 @@ const SidebarComponent: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onO
 
   const visible = useMemo(() => SECTIONS.filter(s => s.access(user)).map(section => ({
     ...section,
-    items: section.items.filter(item => canAccess(user, item.tab)),
+    items: section.items.filter(item =>
+      item.tab === 'e2e_testing'
+        ? user.role === 'super_admin' && user.status === 'approved'
+        : canAccess(user, item.tab)
+    ),
   })).filter(section => section.items.length > 0), [user]);
 
   const allItems = useMemo(() => visible.flatMap(s => s.items.map(item => ({ ...item, sectionId: s.id, sectionLabel: s.label }))), [visible]);
@@ -208,6 +215,17 @@ const SidebarComponent: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onO
     try { document.body.classList.add('akk-clean-ui'); } catch { /* SSR-safe */ }
     return () => { try { document.body.classList.remove('akk-clean-ui'); } catch { /* SSR-safe */ } };
   }, []);
+
+  // Keep a single application header for crew accounts on the driver work screen.
+  // Admin users retain normal navigation when previewing the same screen.
+  useEffect(() => {
+    document.body.classList.toggle('akk-crew-focus', isCrewWorkScreen);
+    document.body.classList.toggle('akk-crew-portal-ui', currentTab === 'driver_portal');
+    return () => {
+      document.body.classList.remove('akk-crew-focus');
+      document.body.classList.remove('akk-crew-portal-ui');
+    };
+  }, [currentTab, isCrewWorkScreen]);
 
   useEffect(() => {
     const onEscape = (e: KeyboardEvent) => {
@@ -379,11 +397,12 @@ const SidebarComponent: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onO
   );
 
   return <>
-    <div className="akk-clean-mobile-top lg:hidden">
+    <ShipmentScheduleWorkbench activeTab={currentTab} user={user} />
+    {!isCrewWorkScreen && <div className="akk-clean-mobile-top lg:hidden">
       <button type="button" className="akk-clean-icon-button" onClick={() => setMobileOpen(true)} aria-label="Buka menu"><Menu size={22} /></button>
       <button type="button" className="akk-clean-mobile-home" onClick={() => navigate('dashboard')}><AkkLogo size="sm" showSubtitle={false} showText={false} /><strong>AKK</strong></button>
       <button type="button" className="akk-clean-icon-button" onClick={() => onOpenAuth('login')} title="Profil akun" aria-label="Profil akun"><Users size={19} /></button>
-    </div>
+    </div>}
     <aside className={`akk-clean-sidebar hidden lg:flex ${isMinimized ? 'is-minimized' : ''}`} aria-label="Navigasi utama">{renderContent(true)}</aside>
     {isMobileOpen && <div className="akk-clean-mobile-layer lg:hidden" role="dialog" aria-modal="true" aria-label="Menu AKK">
       <button type="button" className="akk-clean-mobile-backdrop" onClick={() => setMobileOpen(false)} aria-label="Tutup menu" />

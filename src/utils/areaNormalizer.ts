@@ -7,41 +7,40 @@
 export const OFFICIAL_DESTINATION_AREAS = [
   'Denpasar 1',
   'Denpasar 2',
-  'Situbondo',
-  'Bondowoso',
-  'Susulan Genteng Rogojampi',
-  'Muncar Pasar',
-  'Muncar Pinggir',
-  'Grosir Banyuwangi Rogojampi',
-  'Jember Selatan',
   'Singaraja',
+  'Negara',
+  'Galekan Retail',
   'Sumberayu Retail',
   'Susulan Sanggar Jajag',
+  'Jember Selatan',
+  'Grosir Banyuwangi Rogojampi',
+  'Muncar Pasar',
+  'Muncar Pinggir',
   'Rogojampi Retail',
   'Genteng Retail',
-  'Grosir Genteng Gendoh',
-  'Songgon Retail',
-  'BWI Kota Selatan',
-  'Susulan Situbondo Bondowoso',
   'Jember Barat',
-  'Galekan Retail',
+  'Bwi Kota Selatan',
+  'Grosir Songgon Genteng',
+  'Songgon Retail',
+  'Susulan Situbondo Bondowoso',
+  'Kalibaru Retail',
   'Ketapang Wongsorejo',
   'Grosir Srono Sumberayu Muncar',
-  'Kalibaru Retail',
-  'Sempu Stail',
-  'Sanggar Retail',
   'Susulan Rogojampi Muncar',
-  'Negara',
+  'Sanggar Retail',
+  'Sempu Kalistail',
   'Purwo Pasar',
   'Purwo Dambuntung',
-  'Grosir Jajag Sanggar Purwo',
-  'Jajag Retail',
   'Srono Retail',
+  'Grosir Jajag Sanggar Purwo',
   'Jember Kota',
-  'Toko DR. Soetomo',
-  'Nusantara Expand',
-  'Titipan Kota Kota',
-  'Kanvas LKT'
+  'Jajag Retail',
+  'Susulan Genteng Rogojampi',
+  'Situbondo',
+  'Bondowoso',
+  'Toko Dr. Sutomo',
+  'NX',
+  'Titipan Kota-kota'
 ] as const;
 
 export const SIDOARJO_DESTINATION_AREAS = [
@@ -58,10 +57,7 @@ export const SIDOARJO_DESTINATION_AREAS = [
 
 export type SidoarjoDestinationArea = typeof SIDOARJO_DESTINATION_AREAS[number];
 
-export function getOfficialAreasForBranch(branchId?: string | null): readonly string[] {
-  if (branchId === 'cab-sidoarjo') {
-    return SIDOARJO_DESTINATION_AREAS;
-  }
+export function getOfficialAreasForBranch(_branchId?: string | null): readonly string[] {
   return OFFICIAL_DESTINATION_AREAS;
 }
 
@@ -105,10 +101,11 @@ export const AREA_CODE_MAP: Record<string, StandardAreaName> = {
   'ROGOJAMPI_RETAIL': 'Rogojampi Retail',
   'RITEL_ROGOJAMPI': 'Rogojampi Retail',
   'GENTENG_RETAIL': 'Genteng Retail',
-  'GROSIR_GENTENG_GENDOH': 'Grosir Genteng Gendoh',
+  'GROSIR_GENTENG_GENDOH': 'Grosir Songgon Genteng',
+  'GROSIR_SONGGON_GENTENG': 'Grosir Songgon Genteng',
   'SONGGON_RETAIL': 'Songgon Retail',
   'RITEL_SONGGON': 'Songgon Retail',
-  'BWI_KOTA_SELATAN': 'BWI Kota Selatan',
+  'BWI_KOTA_SELATAN': 'Bwi Kota Selatan',
   'SUSULAN_SITUBONDO_BONDOWOSO': 'Susulan Situbondo Bondowoso',
   'SSLN_STB_BDWS': 'Susulan Situbondo Bondowoso',
   'JEMBER_BARAT': 'Jember Barat',
@@ -118,8 +115,8 @@ export const AREA_CODE_MAP: Record<string, StandardAreaName> = {
   'GROSIR_SRONO_SUMBERAYU_MUNCAR': 'Grosir Srono Sumberayu Muncar',
   'KALIBARU_RETAIL': 'Kalibaru Retail',
   'RITEL_KALIBARU': 'Kalibaru Retail',
-  'SEMPU_STAIL': 'Sempu Stail',
-  'SEMPU_KALISTAIL': 'Sempu Stail',
+  'SEMPU_STAIL': 'Sempu Kalistail',
+  'SEMPU_KALISTAIL': 'Sempu Kalistail',
   'SANGGAR_RETAIL': 'Sanggar Retail',
   'RITEL_SANGGAR': 'Sanggar Retail',
   'SUSULAN_ROGOJAMPI_MUNCAR': 'Susulan Rogojampi Muncar',
@@ -132,14 +129,13 @@ export const AREA_CODE_MAP: Record<string, StandardAreaName> = {
   'RITEL_SRONO': 'Srono Retail',
   'JEMBER_KOTA': 'Jember Kota',
   'GROSIR1': 'Grosir Banyuwangi Rogojampi',
-  'TOKO_DR_SOETOMO': 'Toko DR. Soetomo',
-  'DR_SOETOMO': 'Toko DR. Soetomo',
-  'NUSANTARA_EXPAND': 'Nusantara Expand',
-  'TITIPAN_KOTA_KOTA': 'Titipan Kota Kota',
-  'KANVAS_LKT': 'Kanvas LKT',
-  'KANVAS LKT': 'Kanvas LKT',
-  'KANVAS': 'Kanvas LKT',
-  'LKT': 'Kanvas LKT'
+  'TOKO_DR_SOETOMO': 'Toko Dr. Sutomo',
+  'TOKO_DR_SUTOMO': 'Toko Dr. Sutomo',
+  'DR_SOETOMO': 'Toko Dr. Sutomo',
+  'DR_SUTOMO': 'Toko Dr. Sutomo',
+  'NUSANTARA_EXPAND': 'NX',
+  'NX': 'NX',
+  'TITIPAN_KOTA_KOTA': 'Titipan Kota-kota'
 };
 
 /**
@@ -196,15 +192,15 @@ export function standardizeAreaName(rawArea: string | undefined | null, branchId
     return 'Kanvas LKT';
   }
 
-  // 1b. Toko DR. Soetomo, Nusantara Expand, Titipan Kota Kota
+  // 1b. Toko Dr. Sutomo, NX, Titipan Kota-kota
   if (clean.includes('SOETOMO') || clean.includes('SUTOMO')) {
-    return 'Toko DR. Soetomo';
+    return 'Toko Dr. Sutomo';
   }
-  if (clean.includes('NUSANTARA')) {
-    return 'Nusantara Expand';
+  if (clean.includes('NUSANTARA') || clean === 'NX') {
+    return 'NX';
   }
   if (clean.includes('TITIPAN')) {
-    return 'Titipan Kota Kota';
+    return 'Titipan Kota-kota';
   }
 
   // 2. Denpasar 1 & Denpasar 2
@@ -245,12 +241,12 @@ export function standardizeAreaName(rawArea: string | undefined | null, branchId
     return 'Muncar Pinggir';
   }
 
-  // 6. Grosir Banyuwangi Rogojampi, Grosir Genteng Gendoh, Grosir Srono Sumberayu Muncar, Grosir Jajag Sanggar Purwo
+  // 6. Grosir Banyuwangi Rogojampi, Grosir Songgon Genteng, Grosir Srono Sumberayu Muncar, Grosir Jajag Sanggar Purwo
   if (clean.includes('GROSIR') && clean.includes('BANYUWANGI')) {
     return 'Grosir Banyuwangi Rogojampi';
   }
-  if (clean.includes('GROSIR') && (clean.includes('GENDOH') || clean.includes('GENTENG'))) {
-    return 'Grosir Genteng Gendoh';
+  if (clean.includes('GROSIR') && (clean.includes('GENDOH') || clean.includes('GENTENG') || clean.includes('SONGGON'))) {
+    return 'Grosir Songgon Genteng';
   }
   if (clean.includes('GROSIR') && (clean.includes('SRONO') || clean.includes('SUMBERAYU'))) {
     return 'Grosir Srono Sumberayu Muncar';
@@ -309,9 +305,9 @@ export function standardizeAreaName(rawArea: string | undefined | null, branchId
     return 'Songgon Retail';
   }
 
-  // 14. BWI Kota Selatan
+  // 14. Bwi Kota Selatan
   if (clean.includes('BWI KOTA') || clean.includes('BANYUWANGI KOTA') || clean.includes('BWI KOTA SELATAN')) {
-    return 'BWI Kota Selatan';
+    return 'Bwi Kota Selatan';
   }
 
   // 15. Galekan Retail
@@ -329,9 +325,9 @@ export function standardizeAreaName(rawArea: string | undefined | null, branchId
     return 'Kalibaru Retail';
   }
 
-  // 18. Sempu Stail
+  // 18. Sempu Kalistail
   if (clean.includes('SEMPU') || clean.includes('STAIL') || clean.includes('KALISTAIL') || clean.includes('XSTAIL')) {
-    return 'Sempu Stail';
+    return 'Sempu Kalistail';
   }
 
   // 19. Purwo Pasar & Purwo Dambuntung

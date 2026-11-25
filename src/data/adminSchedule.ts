@@ -516,7 +516,7 @@ export function convertSchedulesToAdminWeeks(
     }
 
     const dayObj = dayMap.get(dayNum)!;
-    let driverName = sch.crew?.name || (typeof sch.crewId === 'string' && !sch.crewId.startsWith('crw-') ? sch.crewId : (sch.crewId ? 'Driver ' + sch.crewId.replace('crw-', '') : 'Driver'));
+    let driverName = sch.crew?.name || (sch.crewId ? (typeof sch.crewId === 'string' && !sch.crewId.startsWith('crw-') ? sch.crewId : 'Driver ' + String(sch.crewId).replace('crw-', '')) : '-');
     let helperName = sch.crewHelper?.name || (sch.crewHelperId ? (typeof sch.crewHelperId === 'string' && !sch.crewHelperId.startsWith('crw-') ? sch.crewHelperId : 'Helper ' + sch.crewHelperId.replace('crw-', '')) : (sch.helper && sch.helper !== '-' ? sch.helper : '-'));
     let helper2Name = sch.crewHelper2?.name || (sch.crewHelper2Id ? (typeof sch.crewHelper2Id ? (!sch.crewHelper2Id.startsWith('crw-') ? sch.crewHelper2Id : 'Helper ' + sch.crewHelper2Id.replace('crw-', '')) : '-') : (sch.helper2 && sch.helper2 !== '-' ? sch.helper2 : '-'));
     const areaName = sch.areaName || sch.store?.storeName || 'Area Kirim';
