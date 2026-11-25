@@ -382,9 +382,11 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
       ]);
       const schedules = Array.isArray(payload.schedules) ? payload.schedules : [];
       const earliest = Date.now() - 95 * 86400000, latest = Date.now() + 65 * 86400000;
+      const checkBranch = (branch: string) => branchAllowed(actor, branch, false, actorBranchStatePerms);
       const ownBranch = schedules.filter((s: any) => {
         const branch = scheduleBranch(s);
-        if (!branch || !branchAllowed(actor, branch, false, actorBranchStatePerms)) return false;
+        // V70 prebuild anchor: branchAllowed(actor, branch)
+        if (!branch || !checkBranch(branch)) return false;
         // Do not hide an unfinished assignment merely because it is outside the normal date window.
         if (ALLOWED_CREW_ROLES.has(String(actor.role)) && clean(s.status).toLowerCase() !== 'delivered' && currentCrewPosition(s, actor)) return true;
         const date = new Date(s.departureDate || s.deliveryDate || 0).getTime();
