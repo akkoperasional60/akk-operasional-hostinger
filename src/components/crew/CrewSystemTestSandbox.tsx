@@ -743,34 +743,12 @@ export const CrewSystemTestSandbox: React.FC<CrewSystemTestSandboxProps> = ({ cu
         </nav>
       </div>
 
-      {reportCamOpen && reportKind && (
-        <CrewLiveCamera
-          title={`Foto: ${WORK_LABELS[reportKind]}`}
-          onClose={() => setReportCamOpen(false)}
-          onCapture={ev => { setReportPhoto(ev.photo); setReportCamOpen(false); }}
-        />
-      )}
-
-      {taskConfirm?.kind === 'inspection' && activeInspectionCamItem && (
-        <CrewLiveCamera
-          key={`sandbox-insp-${activeInspectionCamItem.key}`}
-          title={`Foto: ${activeInspectionCamItem.label}`}
-          onClose={() => setInspectionCameraKey(null)}
-          onCapture={ev => {
-            const key = activeInspectionCamItem.key;
-            setInspectionPhotos(prev => ({ ...prev, [key]: ev }));
-            setInspectionCameraKey(null);
-            clearAlerts();
-          }}
-        />
-      )}
-
       <AnimatePresence>
         {taskConfirm && (
           <Dialog
             key="sandbox-check"
             title={taskConfirm.kind === 'inspection' ? 'Cek Armada (Uji Sistem)' : 'Cek Surat Jalan (Uji Sistem)'}
-            busy={Boolean(inspectionCameraKey)}
+            busy={false}
             onClose={() => { setTaskConfirm(null); setInspectionCameraKey(null); clearAlerts(); }}
           >
             {taskConfirm.kind === 'inspection' ? (
@@ -944,6 +922,28 @@ export const CrewSystemTestSandbox: React.FC<CrewSystemTestSandboxProps> = ({ cu
           </Dialog>
         )}
       </AnimatePresence>
+
+      {reportCamOpen && reportKind && (
+        <CrewLiveCamera
+          title={`Foto: ${WORK_LABELS[reportKind]}`}
+          onClose={() => setReportCamOpen(false)}
+          onCapture={ev => { setReportPhoto(ev.photo); setReportCamOpen(false); }}
+        />
+      )}
+
+      {taskConfirm?.kind === 'inspection' && activeInspectionCamItem && (
+        <CrewLiveCamera
+          key={`sandbox-insp-${activeInspectionCamItem.key}`}
+          title={`Foto: ${activeInspectionCamItem.label}`}
+          onClose={() => setInspectionCameraKey(null)}
+          onCapture={ev => {
+            const key = activeInspectionCamItem.key;
+            setInspectionPhotos(prev => ({ ...prev, [key]: ev }));
+            setInspectionCameraKey(null);
+            clearAlerts();
+          }}
+        />
+      )}
     </section>
   );
 };

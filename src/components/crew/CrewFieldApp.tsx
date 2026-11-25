@@ -433,20 +433,6 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
         </main>
         <nav className="cv66-tabs" aria-label="Navigasi pekerjaan">{TABS.map(({id,label})=><motion.button type="button" key={id} disabled={busy} aria-current={screen===id?'page':undefined} className={`cv66-tab ${screen===id?'cv66-tab--active':''}`} onClick={()=>nav(id)} whileTap={busy || reduced ? undefined : {scale:.94}}>{screen===id && <motion.span className="cv69-tab-indicator" layoutId="cv69-tab-indicator" transition={reduced?{duration:0}:{type:'spring',stiffness:440,damping:36}}/>}<CrewArt name={TAB_ART[id]} size={30} active={screen===id}/><span className="cv69-tab-label">{label}</span></motion.button>)}</nav>
       </div>
-      {cameraOpen && reportTrip && reportKind && <CrewLiveCamera key={`${reportTrip.id}:${reportKind}`} onClose={()=>setCameraOpen(false)} onCapture={evidence=>{setReportEvidence(evidence);setCameraOpen(false);clearNotice();}}/>}
-      {taskConfirm?.kind === 'inspection' && activeInspectionCamItem && (
-        <CrewLiveCamera
-          key={`insp-${taskConfirm.tripId}-${activeInspectionCamItem.key}`}
-          title={`Foto: ${activeInspectionCamItem.label}`}
-          onClose={() => setInspectionCameraKey(null)}
-          onCapture={evidence => {
-            const key = activeInspectionCamItem.key;
-            setInspectionPhotos(prev => ({ ...prev, [key]: evidence }));
-            setInspectionCameraKey(null);
-            clearNotice();
-          }}
-        />
-      )}
       <AnimatePresence>
         {claimId && <Dialog key="claim" title={claimPosition ? "Konfirmasi Kiriman" : "Pilih Posisi"} busy={busy} onClose={closeClaim}>
           {notice}
@@ -465,7 +451,7 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
           <Dialog
             key="check"
             title={taskConfirm.kind === 'inspection' ? 'Cek Armada' : 'Cek Surat Jalan'}
-            busy={busy || Boolean(inspectionCameraKey)}
+            busy={busy}
             onClose={() => { setTaskConfirm(null); setInspectionCameraKey(null); clearNotice(); }}
           >
             {notice}
@@ -566,6 +552,20 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
         )}
         {accountOpen && <Dialog key="account" title="Akun" onClose={()=>{setAccountOpen(false);clearNotice();}}><div className="cv66-profile"><span className="cv66-profile-avatar">{initials(user.fullName)}</span><div><span className="cv66-profile-name">{user.fullName||'Kru AKK'}</span><span className="cv66-meta">{user.email}</span></div></div>{!qa && onOpenClassic && <Button variant="secondary" onClick={()=>{setAccountOpen(false);onOpenClassic();}}>Fitur Operasional Lengkap<ArrowUpRight size={18}/></Button>}<Button variant="danger" onClick={()=>logisticsStore.logoutUser()}><LogOut size={18}/>Keluar Akun</Button></Dialog>}
       </AnimatePresence>
+      {cameraOpen && reportTrip && reportKind && <CrewLiveCamera key={`${reportTrip.id}:${reportKind}`} onClose={()=>setCameraOpen(false)} onCapture={evidence=>{setReportEvidence(evidence);setCameraOpen(false);clearNotice();}}/>}
+      {taskConfirm?.kind === 'inspection' && activeInspectionCamItem && (
+        <CrewLiveCamera
+          key={`insp-${taskConfirm.tripId}-${activeInspectionCamItem.key}`}
+          title={`Foto: ${activeInspectionCamItem.label}`}
+          onClose={() => setInspectionCameraKey(null)}
+          onCapture={evidence => {
+            const key = activeInspectionCamItem.key;
+            setInspectionPhotos(prev => ({ ...prev, [key]: evidence }));
+            setInspectionCameraKey(null);
+            clearNotice();
+          }}
+        />
+      )}
     </div>, document.body
   );
 };

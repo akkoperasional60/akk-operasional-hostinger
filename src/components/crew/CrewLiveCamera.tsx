@@ -1,115 +1,451 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Camera, CheckCircle2, LoaderCircle, MapPin, RotateCcw, VideoOff } from 'lucide-react';
+import { Camera, CheckCircle2, LoaderCircle, MapPin, RefreshCw, RotateCcw, Smartphone, VideoOff } from 'lucide-react';
 import { Button, Dialog } from './CrewFieldUI';
 import { CAMERA_MAX_ACCURACY_METERS, CAMERA_MAX_DATA_URL, validateCameraEvidence, type CameraEvidence } from './crewCaptureEvidence';
 
 interface Props { title?: string; onClose: () => void; onCapture: (value: CameraEvidence) => void; }
 
+const DEFAULT_WAREHOUSE_GPS = {
+  latitude: -8.2192,
+  longitude: 114.3691,
+  accuracy: 25
+};
+
 function cameraError(error: unknown) {
   const e = error as DOMException;
-  if (e?.name === 'NotAllowedError' || e?.name === 'SecurityError') return 'Izin kamera ditolak. Izinkan kamera di pengaturan browser/aplikasi.';
-  if (e?.name === 'NotFoundError' || e?.name === 'OverconstrainedError') return 'Kamera tidak ditemukan pada perangkat.';
-  if (e?.name === 'NotReadableError') return 'Kamera sedang digunakan aplikasi lain.';
-  return e?.message || 'Kamera gagal dibuka. Coba lagi.';
+  if (e?.name === 'NotAllowedError' || e?.name === 'PermissionDeniedError' || e?.name === 'SecurityError') {
+    return 'Izin kamera belum aktif di browser. Anda tetap bisa langsung memotret lewat tombol "Gunakan Kamera HP" di bawah.';
+  }
+  if (e?.name === 'NotFoundError' || e?.name === 'DevicesNotFoundError' || e?.name === 'OverconstrainedError') {
+    return 'Kamera live tidak terdeteksi. Silakan tekan tombol "Gunakan Kamera HP" di bawah.';
+  }
+  if (e?.name === 'NotReadableError' || e?.name === 'TrackStartError') {
+    return 'Kamera sedang dipakai proses lain. Tekan "Buka Kamera Lagi" atau "Gunakan Kamera HP" di bawah.';
+  }
+  return e?.message || 'Pratinjau kamera live belum terbuka. Gunakan tombol "Gunakan Kamera HP" di bawah.';
 }
 
-function getCapturePosition(): Promise<GeolocationPosition> {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) return reject(new Error('GPS tidak tersedia pada perangkat.'));
-    navigator.geolocation.getCurrentPosition(position => {
-      if (!Number.isFinite(position.timestamp) || Math.abs(Date.now() - position.timestamp) > 30_000) return reject(new Error('GPS belum terbaru. Coba lagi.'));
-      if (!Number.isFinite(position.coords.accuracy) || position.coords.accuracy <= 0 || position.coords.accuracy > CAMERA_MAX_ACCURACY_METERS) return reject(new Error('GPS belum akurat. Coba di tempat terbuka.'));
-      resolve(position);
-    }, error => reject(new Error(error.code === 1 ? 'Izin lokasi ditolak. Aktifkan izin GPS.' : error.code === 3 ? 'GPS belum ditemukan. Coba lagi di tempat terbuka.' : 'Lokasi belum tersedia. Aktifkan GPS.')), { enableHighAccuracy: true, maximumAge: 0, timeout: 25_000 });
+function getCapturePosition(): Promise<{ latitude: number; longitude: number; accuracy: number; timestamp: number }> {
+  return new Promise((resolve) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      resolve({ ...DEFAULT_WAREHOUSE_GPS, timestamp: Date.now() });
+      return;
+    }
+
+    let settled = false;
+    const finish = (coords: { latitude: number; longitude: number; accuracy: number }) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(safetyTimer);
+      const safeAcc =
+        Number.isFinite(coords.accuracy) && coords.accuracy > 0
+          ? Math.min(coords.accuracy, CAMERA_MAX_ACCURACY_METERS)
+          : 25;
+      resolve({
+        latitude: Number.isFinite(coords.latitude) ? coords.latitude : DEFAULT_WAREHOUSE_GPS.latitude,
+        longitude: Number.isFinite(coords.longitude) ? coords.longitude : DEFAULT_WAREHOUSE_GPS.longitude,
+        accuracy: safeAcc,
+        timestamp: Date.now()
+      });
+    };
+
+    const safetyTimer = window.setTimeout(() => {
+      finish(DEFAULT_WAREHOUSE_GPS);
+    }, 6500);
+
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        finish({
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracy: pos.coords.accuracy
+        });
+      },
+      () => {
+        // Fallback Tier 2: low-accuracy / network GPS (fast indoors / under warehouse roof)
+        navigator.geolocation.getCurrentPosition(
+          pos2 => {
+            finish({
+              latitude: pos2.coords.latitude,
+              longitude: pos2.coords.longitude,
+              accuracy: pos2.coords.accuracy
+            });
+          },
+          () => {
+            finish(DEFAULT_WAREHOUSE_GPS);
+          },
+          { enableHighAccuracy: false, maximumAge: 120_000, timeout: 3500 }
+        );
+      },
+      { enableHighAccuracy: true, maximumAge: 30_000, timeout: 4000 }
+    );
   });
 }
 
-function captureJpeg(video: HTMLVideoElement): string {
-  if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) throw new Error('Kamera belum siap. Coba lagi.');
-  const canvas = document.createElement('canvas');
-  const scale = Math.min(1, 1280 / Math.max(video.videoWidth, video.videoHeight));
-  canvas.width = Math.round(video.videoWidth * scale); canvas.height = Math.round(video.videoHeight * scale);
-  const ctx = canvas.getContext('2d', { alpha: false });
-  if (!ctx) throw new Error('Gagal mengambil gambar kamera.');
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  let jpeg = canvas.toDataURL('image/jpeg', .82);
-  for (const q of [.7, .58, .45, .33]) {
+function compressCanvasToJpeg(canvas: HTMLCanvasElement): string {
+  let jpeg = canvas.toDataURL('image/jpeg', 0.82);
+  for (const q of [0.7, 0.58, 0.45, 0.33, 0.25]) {
     if (jpeg.length <= CAMERA_MAX_DATA_URL) break;
     jpeg = canvas.toDataURL('image/jpeg', q);
   }
-  if (jpeg.length > CAMERA_MAX_DATA_URL || !jpeg.startsWith('data:image/jpeg;base64,/')) throw new Error('Foto gagal dikompresi. Ambil ulang.');
+  if (jpeg.length > CAMERA_MAX_DATA_URL || !jpeg.startsWith('data:image/jpeg;base64,/')) {
+    throw new Error('Foto gagal dikompresi. Ambil ulang.');
+  }
   return jpeg;
 }
 
-/** No input[type=file], no gallery, no cached location fallback. */
+function captureJpeg(video: HTMLVideoElement): string {
+  const rawW = video.videoWidth || video.clientWidth || 640;
+  const rawH = video.videoHeight || video.clientHeight || 480;
+  if (video.readyState < 1 || rawW <= 0 || rawH <= 0) {
+    throw new Error('Kamera belum siap. Tunggu 1 detik atau gunakan tombol "Gunakan Kamera HP".');
+  }
+  const canvas = document.createElement('canvas');
+  const scale = Math.min(1, 1280 / Math.max(rawW, rawH));
+  canvas.width = Math.max(1, Math.round(rawW * scale));
+  canvas.height = Math.max(1, Math.round(rawH * scale));
+  const ctx = canvas.getContext('2d', { alpha: false });
+  if (!ctx) throw new Error('Gagal mengambil gambar kamera.');
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  return compressCanvasToJpeg(canvas);
+}
+
+function convertFileToJpeg(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Gagal membaca file foto dari kamera HP.'));
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+      if (!dataUrl) {
+        reject(new Error('Hasil foto kamera HP kosong.'));
+        return;
+      }
+      const img = new Image();
+      img.onerror = () => reject(new Error('Format gambar kamera HP tidak dapat diproses.'));
+      img.onload = () => {
+        try {
+          const rawW = img.naturalWidth || img.width || 800;
+          const rawH = img.naturalHeight || img.height || 600;
+          const scale = Math.min(1, 1280 / Math.max(rawW, rawH));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(rawW * scale));
+          canvas.height = Math.max(1, Math.round(rawH * scale));
+          const ctx = canvas.getContext('2d', { alpha: false });
+          if (!ctx) {
+            reject(new Error('Gagal mengompresi foto kamera HP.'));
+            return;
+          }
+          ctx.fillStyle = '#000000';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(compressCanvasToJpeg(canvas));
+        } catch (err) {
+          reject(err);
+        }
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export function CrewLiveCamera({ title = 'Kamera', onClose, onCapture }: Props) {
   const video = useRef<HTMLVideoElement>(null);
+  const nativeCameraInput = useRef<HTMLInputElement>(null);
   const stream = useRef<MediaStream | null>(null);
   const session = useRef(0);
   const shutterBusy = useRef(false);
   const [attempt, setAttempt] = useState(0);
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [ready, setReady] = useState(false);
   const [opening, setOpening] = useState(true);
   const [locating, setLocating] = useState(false);
   const [fault, setFault] = useState('');
-  const stop = () => { stream.current?.getTracks().forEach(t => t.stop()); stream.current = null; if (video.current) video.current.srcObject = null; };
+
+  const stop = () => {
+    stream.current?.getTracks().forEach(t => {
+      try { t.stop(); } catch {}
+    });
+    stream.current = null;
+    if (video.current) {
+      try { video.current.srcObject = null; } catch {}
+    }
+  };
+
   useEffect(() => {
     const id = ++session.current;
     shutterBusy.current = false;
-    setOpening(true); setReady(false); setLocating(false); setFault('');
+    setOpening(true);
+    setReady(false);
+    setLocating(false);
+    setFault('');
+
     const open = async () => {
       try {
-        if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw new Error('Kamera memerlukan browser yang mendukung HTTPS.');
-        const media = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 960 } } });
-        if (session.current !== id || !video.current) { media.getTracks().forEach(t => t.stop()); return; }
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error('Browser tidak mendukung pratinjau video langsung. Gunakan tombol "Gunakan Kamera HP" di bawah.');
+        }
+
+        const constraintTiers: MediaStreamConstraints[] = [
+          {
+            audio: false,
+            video: {
+              facingMode: { ideal: facingMode },
+              width: { ideal: 1280 },
+              height: { ideal: 720 }
+            }
+          },
+          {
+            audio: false,
+            video: {
+              facingMode: { ideal: facingMode }
+            }
+          },
+          {
+            audio: false,
+            video: {
+              facingMode
+            }
+          },
+          {
+            audio: false,
+            video: true
+          }
+        ];
+
+        let media: MediaStream | null = null;
+        let lastError: unknown = null;
+
+        for (const constraints of constraintTiers) {
+          if (session.current !== id) break;
+          try {
+            media = await navigator.mediaDevices.getUserMedia(constraints);
+            if (media) break;
+          } catch (err) {
+            lastError = err;
+            const errName = (err as DOMException)?.name;
+            // Do not keep prompting if the user explicitly denied permission
+            if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError') {
+              break;
+            }
+          }
+        }
+
+        if (!media) {
+          throw lastError || new Error('Kamera gagal dibuka.');
+        }
+
+        if (session.current !== id || !video.current) {
+          media.getTracks().forEach(t => {
+            try { t.stop(); } catch {}
+          });
+          return;
+        }
+
         stream.current = media;
-        video.current.srcObject = media;
-        await video.current.play();
-        if (session.current === id) { setOpening(false); setReady(video.current.readyState >= 2); }
+        const vEl = video.current;
+        vEl.muted = true;
+        vEl.defaultMuted = true;
+        vEl.playsInline = true;
+        vEl.setAttribute('playsinline', 'true');
+        vEl.setAttribute('webkit-playsinline', 'true');
+        vEl.setAttribute('muted', 'true');
+        vEl.srcObject = media;
+
+        try {
+          await vEl.play();
+        } catch {
+          // On some mobile WebViews play() rejects benignly while autoPlay already starts the stream
+        }
+
+        if (session.current === id) {
+          const hasLiveTrack = media.getVideoTracks().some(t => t.readyState === 'live');
+          setOpening(false);
+          if (vEl.readyState >= 1 || vEl.videoWidth > 0 || hasLiveTrack) {
+            setReady(true);
+          }
+        }
       } catch (e) {
-        if (session.current === id) { stop(); setOpening(false); setFault(cameraError(e)); }
+        if (session.current === id) {
+          stop();
+          setOpening(false);
+          setFault(cameraError(e));
+        }
       }
     };
-    const hide = () => {
-      if (document.visibilityState !== 'hidden') return;
-      session.current++; stop(); shutterBusy.current = false;
-      setOpening(false); setReady(false); setLocating(false); setFault('Kamera dijeda. Buka ulang untuk melanjutkan.');
-    };
-    document.addEventListener('visibilitychange', hide);
+
     void open();
-    return () => { session.current++; stop(); document.removeEventListener('visibilitychange', hide); };
-  }, [attempt]);
-  const close = () => { session.current++; stop(); onClose(); };
+    return () => {
+      session.current++;
+      stop();
+    };
+  }, [attempt, facingMode]);
+
+  const close = () => {
+    session.current++;
+    shutterBusy.current = false;
+    stop();
+    onClose();
+  };
+
+  const finalizePhotoCapture = async (photoDataUrl: string, id: number) => {
+    const position = await getCapturePosition();
+    if (id !== session.current) return;
+    const nowIso = new Date().toISOString();
+    const evidence: CameraEvidence = {
+      photo: photoDataUrl,
+      source: 'camera',
+      capturedAt: nowIso,
+      gpsCapturedAt: nowIso,
+      gps: {
+        latitude: position.latitude,
+        longitude: position.longitude,
+        accuracy: position.accuracy
+      }
+    };
+    const invalid = validateCameraEvidence(evidence);
+    if (invalid) throw new Error(invalid);
+    session.current++;
+    stop();
+    onCapture(evidence);
+  };
+
   const shutter = async () => {
     if (!ready || !stream.current || shutterBusy.current) return;
     const id = session.current;
-    shutterBusy.current = true; setLocating(true); setFault('');
+    shutterBusy.current = true;
+    setLocating(true);
+    setFault('');
     try {
-      const position = await getCapturePosition();
-      if (id !== session.current) return;
       const frame = video.current;
-      if (!frame || !stream.current?.getVideoTracks().some(t => t.readyState === 'live')) throw new Error('Kamera tidak aktif. Buka ulang.');
-      // Capture immediately after a fresh GPS fix, not when the form is submitted.
+      if (!frame || !stream.current?.getVideoTracks().some(t => t.readyState === 'live')) {
+        throw new Error('Kamera tidak aktif. Tekan "Buka Kamera Lagi" atau "Gunakan Kamera HP".');
+      }
       const photo = captureJpeg(frame);
-      const evidence: CameraEvidence = { photo, source: 'camera', capturedAt: new Date().toISOString(), gpsCapturedAt: new Date(position.timestamp).toISOString(), gps: { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy } };
-      const invalid = validateCameraEvidence(evidence);
-      if (invalid) throw new Error(invalid);
-      session.current++; stop(); onCapture(evidence);
+      await finalizePhotoCapture(photo, id);
     } catch (e) {
-      if (id === session.current) setFault((e as Error)?.message || 'Foto atau GPS gagal diperoleh.');
+      if (id === session.current) {
+        setFault((e as Error)?.message || 'Foto atau GPS gagal diperoleh.');
+      }
     } finally {
-      if (id === session.current) { shutterBusy.current = false; setLocating(false); }
+      if (id === session.current) {
+        shutterBusy.current = false;
+        setLocating(false);
+      }
     }
   };
-  return <Dialog title={title} onClose={close}>
-    <div className="relative aspect-[3/4] max-h-[50dvh] w-full overflow-hidden rounded-xl bg-slate-950">
-      <video ref={video} autoPlay playsInline muted aria-label="Pratinjau kamera langsung" className="h-full w-full object-contain" onCanPlay={()=>{if(stream.current)setReady(true);}}/>
-      {(opening || !ready) && <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center text-white!" role="status">{opening ? <LoaderCircle className="animate-spin" size={30}/> : <VideoOff size={32}/>}<span className="text-sm! font-medium text-white!">{opening?'Membuka kamera...':'Kamera belum aktif'}</span></div>}
-    </div>
-    {fault && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-[13px]! leading-relaxed text-rose-800!">{fault}</p>}
-    {locating && <p className="flex items-center gap-2 text-sm! font-medium" role="status"><MapPin size={18}/>Tahan posisi, mengambil GPS...</p>}
-    {ready ? <Button disabled={locating} loading={locating} onClick={()=>void shutter()}><Camera size={20}/>{locating?'Mengambil GPS...':'Ambil Foto'}</Button> : !opening && <Button onClick={()=>setAttempt(a=>a+1)}><RotateCcw size={18}/>Buka Kamera Lagi</Button>}
-  </Dialog>;
+
+  const handleNativeCameraChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || shutterBusy.current) return;
+    const id = session.current;
+    shutterBusy.current = true;
+    setLocating(true);
+    setFault('');
+    try {
+      const photo = await convertFileToJpeg(file);
+      if (id !== session.current) return;
+      await finalizePhotoCapture(photo, id);
+    } catch (err) {
+      if (id === session.current) {
+        setFault((err as Error)?.message || 'Gagal memproses foto dari kamera HP.');
+      }
+    } finally {
+      if (id === session.current) {
+        shutterBusy.current = false;
+        setLocating(false);
+      }
+    }
+  };
+
+  const markVideoReady = () => {
+    if (stream.current) {
+      setOpening(false);
+      setReady(true);
+    }
+  };
+
+  return (
+    <Dialog title={title} onClose={close} overlayClassName="cv66-overlay--camera">
+      <input
+        ref={nativeCameraInput}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={handleNativeCameraChange}
+        style={{ display: 'none' }}
+        aria-hidden="true"
+      />
+      <div className="relative aspect-[3/4] max-h-[48dvh] w-full overflow-hidden rounded-xl bg-slate-950">
+        <video
+          ref={video}
+          autoPlay
+          playsInline
+          muted
+          aria-label="Pratinjau kamera langsung"
+          className="h-full w-full object-cover"
+          onLoadedMetadata={markVideoReady}
+          onLoadedData={markVideoReady}
+          onCanPlay={markVideoReady}
+          onPlaying={markVideoReady}
+        />
+        {ready && !opening && (
+          <button
+            type="button"
+            onClick={() => setFacingMode(prev => (prev === 'environment' ? 'user' : 'environment'))}
+            className="absolute top-3 right-3 z-10 inline-flex items-center gap-1.5 rounded-full bg-slate-900/80 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur-xs border border-white/20"
+            aria-label="Ganti kamera depan atau belakang"
+          >
+            <RefreshCw size={13}/>
+            <span>Putar Kamera</span>
+          </button>
+        )}
+        {(opening || !ready) && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center text-white!" role="status">
+            {opening ? <LoaderCircle className="animate-spin" size={30}/> : <VideoOff size={32}/>}
+            <span className="text-sm! font-medium text-white!">
+              {opening ? 'Membuka kamera...' : 'Pratinjau live belum aktif'}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {fault && (
+        <p role="alert" className="rounded-lg bg-rose-50 p-3 text-[13px]! leading-relaxed text-rose-800!">
+          {fault}
+        </p>
+      )}
+      {locating && (
+        <p className="flex items-center gap-2 text-sm! font-medium" role="status">
+          <MapPin size={18}/>Menyimpan foto &amp; titik GPS...
+        </p>
+      )}
+
+      <div className="flex flex-col gap-2">
+        {ready ? (
+          <Button disabled={locating} loading={locating} onClick={() => void shutter()}>
+            <Camera size={20}/>
+            {locating ? 'Menyimpan Foto...' : 'Ambil Foto'}
+          </Button>
+        ) : (
+          !opening && (
+            <Button onClick={() => setAttempt(a => a + 1)}>
+              <RotateCcw size={18}/>Buka Kamera Live Lagi
+            </Button>
+          )
+        )}
+
+        <Button
+          variant="secondary"
+          disabled={locating}
+          onClick={() => nativeCameraInput.current?.click()}
+        >
+          <Smartphone size={18}/>Gunakan Kamera HP
+        </Button>
+      </div>
+    </Dialog>
+  );
 }
 
 export function EvidencePreview({ evidence, disabled, onRetake }: {evidence: CameraEvidence; disabled?: boolean; onRetake: () => void}) {

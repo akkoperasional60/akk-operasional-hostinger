@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { CrewArt, type CrewArtName } from './CrewIllustrations';
 import {
@@ -108,11 +108,64 @@ export function Journey({trip, busy, onMove, readOnly = false}: {trip: FieldTrip
       : <div className="cv66-unavailable"><CheckCircle2 size={17}/>Kiriman selesai</div>}
   </Panel>;
 }
-export function Dialog({title, children, busy, onClose}: {title: string; children: React.ReactNode; busy?: boolean; onClose: () => void}) {
+export function Dialog({title, children, busy, onClose, overlayClassName = ''}: {title: string; children: React.ReactNode; busy?: boolean; onClose: () => void; overlayClassName?: string}) {
   const reduced = useReducedMotion();
-  return <motion.div className="cv66-overlay" initial={reduced ? false : {opacity:0}} animate={{opacity:1}} exit={{opacity:0}} onMouseDown={e=>{if(e.target===e.currentTarget && !busy)onClose()}}>
-    <motion.section role="dialog" aria-modal="true" aria-label={title} className="cv66-dialog" initial={reduced ? false : {y:30,opacity:0}} animate={{y:0,opacity:1}} exit={reduced ? {opacity:0} : {y:18,opacity:0}} transition={reduced ? {duration:0} : {type:'spring',stiffness:330,damping:31}}>
-      <div className="cv66-dialog-heading"><h2 className="cv66-section-title">{title}</h2><button type="button" className="cv66-icon-button cv66-icon-button--neutral" onClick={onClose} disabled={busy} aria-label="Tutup"><X size={21}/></button></div>{children}
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !busy) {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [busy, onClose]);
+
+  const handleClose = (e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation();
+    if (!busy) {
+      onClose();
+    }
+  };
+
+  return <motion.div
+    className={`cv66-overlay ${overlayClassName}`.trim()}
+    initial={reduced ? false : {opacity:0}}
+    animate={{opacity:1}}
+    exit={{opacity:0}}
+    onClick={e => { if (e.target === e.currentTarget && !busy) onClose(); }}
+  >
+    <motion.section
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      className="cv66-dialog"
+      onClick={e => e.stopPropagation()}
+      initial={reduced ? false : {y:30,opacity:0}}
+      animate={{y:0,opacity:1}}
+      exit={reduced ? {opacity:0} : {y:18,opacity:0}}
+      transition={reduced ? {duration:0} : {type:'spring',stiffness:330,damping:31}}
+    >
+      <div className="cv66-dialog-heading">
+        <h2 className="cv66-section-title">{title}</h2>
+        <button
+          type="button"
+          className="cv66-icon-button cv66-icon-button--neutral cv66-dialog-close"
+          onClick={handleClose}
+          onTouchEnd={e => {
+            if (!busy) {
+              e.preventDefault();
+              e.stopPropagation();
+              onClose();
+            }
+          }}
+          disabled={busy}
+          aria-label="Tutup"
+        >
+          <X size={21}/>
+        </button>
+      </div>
+      {children}
     </motion.section>
   </motion.div>;
 }
