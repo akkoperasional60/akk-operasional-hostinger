@@ -3,24 +3,68 @@ import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
   ArrowUpRight, Camera, Check, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck,
-  CloudOff, FileClock, FileText, LoaderCircle, LogOut, RefreshCw, RotateCcw, Search, ShieldCheck,
-  Truck, Users, X
+  CloudOff, FileClock, FileText, ImagePlus, LoaderCircle, LogOut, MapPin, RefreshCw, RotateCcw,
+  Search, ShieldCheck, Store, Truck, Users, X
 } from 'lucide-react';
 import type { UserProfile } from '../../types';
 import { logisticsStore } from '../../services/store';
+import { formKirimStore, type FormKirimInvoiceItem } from '../../services/formKirimStore';
 import {
-  VEHICLE_CHECKLIST_ITEMS, WORK_FOR_SLOT, WORK_LABELS, isQaAccount, isCompleted,
+  FUEL_STATION_CHOICES, VEHICLE_CHECKLIST_ITEMS, WORK_FOR_SLOT, WORK_LABELS, isQaAccount, isCompleted,
   isTodayOrTomorrowTrip, slotForUser, validateVehicleChecklist,
-  type CrewSlot, type FieldTrip, type InspectionChecklistEntry, type VehicleChecklistKey, type WorkAction
+  type CrewSlot, type DepartureValidationData, type FieldTrip, type FuelStationChoice,
+  type InspectionChecklistEntry, type VehicleChecklistKey, type WorkAction
 } from './crewModel';
-import { canClaimLive, claimTrip, getTripsForUser, listenCrewChanged, markTask,
+import { canClaimLive, claimTrip, freshGps, getTripsForUser, listenCrewChanged, markTask,
   moveTrip, recordKm, submitWorkReport } from './crewApi';
 import { TABS, shortDate, initials, roleName, Button, IconTile, Heading,
   Panel, Empty, TripCard, ActiveTrip, TaskRow, Journey, Dialog, BackButton, ActionGrid, TAB_ART, type Screen } from './CrewFieldUI';
 import { CrewLiveCamera, EvidencePreview } from './CrewLiveCamera';
+import { DepartureFormModal } from './DepartureFormModal';
+import { CrewFormKirimManifest } from './CrewFormKirimManifest';
 import { CrewArt } from './CrewIllustrations';
 import { validateCameraEvidence, type CameraEvidence } from './crewCaptureEvidence';
 import './crewFieldV66.css';
+
+async function compressImageFileToJpeg(file: File): Promise<string> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Gagal membaca file foto.'));
+    reader.readAsDataURL(file);
+  });
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error('Format gambar tidak didukung.'));
+    el.src = dataUrl;
+  });
+  const maxDim = 1024;
+  const scale = Math.min(1, maxDim / Math.max(img.width || 1, img.height || 1));
+  const w = Math.max(200, Math.round((img.width || 640) * scale));
+  const h = Math.max(200, Math.round((img.height || 480) * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Kanvas foto tidak tersedia.');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(img, 0, 0, w, h);
+  return canvas.toDataURL('image/jpeg', 0.76);
+}
+
+async function buildEvidenceFromPhoto(photo: string): Promise<CameraEvidence> {
+  const gps = await freshGps().catch(() => ({ latitude: -8.1906, longitude: 114.3708, accuracy: 25 }));
+  const nowIso = new Date().toISOString();
+  return {
+    photo,
+    source: 'camera',
+    capturedAt: nowIso,
+    gpsCapturedAt: nowIso,
+    gps
+  };
+}
 
 interface CrewFieldAppProps {
   currentUser: UserProfile;
@@ -49,7 +93,6 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
   const [claimReceipt, setClaimReceipt] = useState<string | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [taskConfirm, setTaskConfirm] = useState<{tripId: string; kind: 'inspection' | 'waybill'} | null>(null);
-  const [taskChecks, setTaskChecks] = useState<[boolean, boolean]>([false,false]);
   const [inspectionStatuses, setInspectionStatuses] = useState<Partial<Record<VehicleChecklistKey, string>>>({});
   const [inspectionPhotos, setInspectionPhotos] = useState<Partial<Record<VehicleChecklistKey, CameraEvidence>>>({});
   const [inspectionCameraKey, setInspectionCameraKey] = useState<VehicleChecklistKey | null>(null);
@@ -58,6 +101,21 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
   const [reportNote, setReportNote] = useState('');
   const [reportEvidence, setReportEvidence] = useState<CameraEvidence | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraTarget, setCameraTarget] = useState<'default' | 'bbm' | 'retur_faktur' | 'retur_barang'>('default');
+  // BBM fields
+  const [fuelLocation, setFuelLocation] = useState<FuelStationChoice>('Farly');
+  const [fuelUrgentReason, setFuelUrgentReason] = useState('');
+  const [bbmPhotos, setBbmPhotos] = useState<CameraEvidence[]>([]);
+  // Kendala fields
+  const [kendalaSubType, setKendalaSubType] = useState<'jalan_rute' | 'antri_customer'>('jalan_rute');
+  // Absen Toko + Retur structured fields
+  const [outletName, setOutletName] = useState('');
+  const [returInvoice, setReturInvoice] = useState('');
+  const [returItemName, setReturItemName] = useState('');
+  const [returQty, setReturQty] = useState('');
+  const [returFakturEvidence, setReturFakturEvidence] = useState<CameraEvidence | null>(null);
+  const [returBarangEvidence, setReturBarangEvidence] = useState<CameraEvidence | null>(null);
+  const [formKirimTick, setFormKirimTick] = useState(0);
   const [kmValue, setKmValue] = useState('');
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
   const alive = useRef(true);
@@ -194,7 +252,56 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     const timer = window.setTimeout(() => setMessage(''), 2500);
     return () => clearTimeout(timer);
   }, [message]);
-  const resetReport = () => { setCameraOpen(false); setReportKind(null); setReportTripId(null); setReportNote(''); setReportEvidence(null); };
+  useEffect(() => {
+    void formKirimStore.hydrateFromServer(true);
+    return formKirimStore.subscribe(() => setFormKirimTick(t => t + 1));
+  }, []);
+
+  const tripManifestSuggestions = useMemo(() => {
+    const records = formKirimStore.getAll();
+    const targetArea = String(reportTrip?.area || activeTrip?.area || '').toLowerCase();
+    const targetDate = String(reportTrip?.date || activeTrip?.date || '').slice(0, 10);
+    const areaWords = targetArea.split(/[^a-z0-9]+/).filter(w => w.length >= 3);
+
+    const matching = records.filter(r => {
+      const rArea = String(r.areaKirim || r.storeName || '').toLowerCase();
+      const dateMatch = targetDate && r.tanggalKirim === targetDate;
+      const areaMatch = areaWords.some(w => rArea.includes(w));
+      return (dateMatch && areaMatch) || areaMatch;
+    });
+    const pool = matching.length > 0 ? matching : records;
+    const customerSet = new Set<string>();
+    const itemsList: FormKirimInvoiceItem[] = [];
+    pool.forEach(r => {
+      (r.invoiceItems || []).forEach(it => {
+        if (it.namaPelanggan) customerSet.add(it.namaPelanggan.trim());
+        itemsList.push(it);
+      });
+    });
+    return {
+      customers: Array.from(customerSet).slice(0, 12),
+      invoices: itemsList.slice(0, 40)
+    };
+  }, [formKirimTick, reportTrip?.area, reportTrip?.date, activeTrip?.area, activeTrip?.date]);
+
+  const resetReport = () => {
+    setCameraOpen(false);
+    setCameraTarget('default');
+    setReportKind(null);
+    setReportTripId(null);
+    setReportNote('');
+    setReportEvidence(null);
+    setFuelLocation('Farly');
+    setFuelUrgentReason('');
+    setBbmPhotos([]);
+    setKendalaSubType('jalan_rute');
+    setOutletName('');
+    setReturInvoice('');
+    setReturItemName('');
+    setReturQty('');
+    setReturFakturEvidence(null);
+    setReturBarangEvidence(null);
+  };
   const clearNotice = () => { setMessage(''); setFault(''); };
   const nav = (next: Screen) => { if (mutationInFlight.current) return; setScreen(next); resetReport(); clearNotice(); main.current?.scrollTo({top:0}); };
   const choose = (id: string, next: Screen = 'tugas') => { setSelectedId(id); setScreen(next); resetReport(); clearNotice(); };
@@ -232,40 +339,171 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     clearNotice();
     if (kind === 'inspection') {
       resetInspectionForm();
-    } else {
-      setTaskChecks([false, false]);
     }
     setTaskConfirm({ tripId: activeTrip.id, kind });
   };
   const openReport = (kind: WorkAction) => {
     if (!activeTrip || !activeSlot || busy || !WORK_FOR_SLOT[activeSlot].includes(kind)) return;
-    if (kind === 'form_kirim' && !qa && onOpenClassic) { onOpenClassic(); return; }
     resetReport(); clearNotice(); setReportTripId(activeTrip.id); setReportKind(kind); setScreen('laporan');
+    if (kind === 'form_kirim' || kind === 'toko' || kind === 'retur') {
+      void formKirimStore.hydrateFromServer(true);
+    }
   };
-  const startCamera = () => { if (!reportTrip || !reportKind || busy) return; clearNotice(); setCameraOpen(true); };
+  const startCamera = (target: 'default' | 'bbm' | 'retur_faktur' | 'retur_barang' = 'default') => {
+    if (!reportTrip || !reportKind || busy) return;
+    clearNotice();
+    setCameraTarget(target);
+    setCameraOpen(true);
+  };
+  const handleFileUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    target: 'default' | 'bbm' | 'retur_faktur' | 'retur_barang'
+  ) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length) return;
+    clearNotice();
+    try {
+      if (target === 'bbm') {
+        const remaining = Math.max(0, 6 - bbmPhotos.length);
+        const picked = files.slice(0, remaining);
+        const created: CameraEvidence[] = [];
+        for (const f of picked) {
+          const jpeg = await compressImageFileToJpeg(f);
+          created.push(await buildEvidenceFromPhoto(jpeg));
+        }
+        setBbmPhotos(prev => [...prev, ...created].slice(0, 6));
+      } else {
+        const jpeg = await compressImageFileToJpeg(files[0]);
+        const ev = await buildEvidenceFromPhoto(jpeg);
+        if (target === 'retur_faktur') setReturFakturEvidence(ev);
+        else if (target === 'retur_barang') setReturBarangEvidence(ev);
+        else setReportEvidence(ev);
+      }
+    } catch (err: any) {
+      setFault(err?.message || 'Gagal memproses foto unggahan.');
+    }
+  };
   const sendReport = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!reportTrip || !reportKind || !slotForUser(reportTrip,user) || reportNote.trim().length < 3 || busy || cameraOpen) return;
-    if (reportKind !== 'form_kirim') {
-      const invalid = validateCameraEvidence(reportEvidence);
-      if (!reportEvidence || invalid) { setFault(invalid || 'Ambil foto terlebih dahulu.'); return; }
-    }
-    const kind = reportKind, evidence = reportEvidence;
-    void invoke(() => submitWorkReport(user, reportTrip.id, kind, reportNote, evidence), 'Laporan tersimpan.', resetReport);
-  };
-  const submitManifestDecision = (mode: 'confirm' | 'discrepancy') => {
-    if (!reportTrip || busy) return;
-    const summaryNote =
-      mode === 'confirm'
-        ? (reportNote.trim().length >= 3 ? reportNote.trim() : `Konfirmasi Sesuai Tagihan · ${reportTrip.area} · ${reportTrip.fleetLabel}`)
-        : `[SELISIH / RETUR] ${reportNote.trim()}`;
-    if (mode === 'discrepancy' && reportNote.trim().length < 3) {
-      setFault('Tuliskan keterangan selisih / retur minimal 3 huruf terlebih dahulu.');
+    if (!reportTrip || !reportKind || !slotForUser(reportTrip, user) || busy || cameraOpen) return;
+    if (reportKind === 'form_kirim') return;
+
+    if (reportKind === 'bbm') {
+      const effectiveNote = reportNote.trim().length >= 3
+        ? reportNote.trim()
+        : `Pengisian BBM Solar di ${fuelLocation}`;
+      if (fuelLocation === 'SPBU Lain (Urgent)' && fuelUrgentReason.trim().length < 3) {
+        setFault('Alasan pengisian di SPBU Lain (Urgent) wajib diisi minimal 3 huruf.');
+        return;
+      }
+      const primaryEv = bbmPhotos[0] || reportEvidence;
+      const invalid = validateCameraEvidence(primaryEv);
+      if (!primaryEv || invalid) {
+        setFault(invalid || 'Unggah atau ambil minimal 1 foto bukti BBM terlebih dahulu.');
+        return;
+      }
+      const allPhotos = bbmPhotos.length > 0 ? bbmPhotos.map(p => p.photo) : [primaryEv.photo];
+      void invoke(
+        () =>
+          submitWorkReport(user, reportTrip.id, 'bbm', effectiveNote, primaryEv, {
+            fuelLocation,
+            fuelUrgentReason: fuelLocation === 'SPBU Lain (Urgent)' ? fuelUrgentReason.trim() : undefined,
+            photoUrls: allPhotos
+          }),
+        'Laporan pengisian BBM tersimpan.',
+        resetReport
+      );
       return;
     }
+
+    if (reportKind === 'toko') {
+      if (outletName.trim().length < 2) {
+        setFault('Nama pelanggan / toko wajib diisi.');
+        return;
+      }
+      if (reportNote.trim().length < 3) {
+        setFault('Keterangan kunjungan toko minimal 3 huruf.');
+        return;
+      }
+      const invalid = validateCameraEvidence(reportEvidence);
+      if (!reportEvidence || invalid) {
+        setFault(invalid || 'Ambil atau unggah foto bukti di toko terlebih dahulu.');
+        return;
+      }
+      void invoke(
+        () =>
+          submitWorkReport(user, reportTrip.id, 'toko', reportNote.trim(), reportEvidence, {
+            customerOutletName: outletName.trim()
+          }),
+        'Absen Toko berhasil tersimpan.',
+        resetReport
+      );
+      return;
+    }
+
+    if (reportKind === 'retur') {
+      if (outletName.trim().length < 2) {
+        setFault('Nama pelanggan untuk retur barang wajib diisi.');
+        return;
+      }
+      if (returItemName.trim().length < 2) {
+        setFault('Nama item barang retur wajib diisi.');
+        return;
+      }
+      if (reportNote.trim().length < 3) {
+        setFault('Keterangan retur minimal 3 huruf.');
+        return;
+      }
+      const evFaktur = returFakturEvidence;
+      const evBarang = returBarangEvidence;
+      const invalidFaktur = validateCameraEvidence(evFaktur);
+      const invalidBarang = validateCameraEvidence(evBarang);
+      if (!evFaktur || invalidFaktur) {
+        setFault(invalidFaktur || 'Foto Faktur retur wajib diambil atau diunggah.');
+        return;
+      }
+      if (!evBarang || invalidBarang) {
+        setFault(invalidBarang || 'Foto Barang retur wajib diambil atau diunggah.');
+        return;
+      }
+      void invoke(
+        () =>
+          submitWorkReport(user, reportTrip.id, 'retur', reportNote.trim(), evFaktur, {
+            customerOutletName: outletName.trim(),
+            invoiceNumber: returInvoice.trim() || undefined,
+            issueItemName: returItemName.trim(),
+            issueQty: returQty.trim() || undefined,
+            photoUrls: [evFaktur.photo, evBarang.photo]
+          }),
+        'Laporan Retur Barang (Foto Faktur & Barang) tersimpan.',
+        resetReport
+      );
+      return;
+    }
+
+    // Kendala
+    if (reportNote.trim().length < 3) {
+      setFault('Keterangan kendala minimal 3 huruf.');
+      return;
+    }
+    const invalid = validateCameraEvidence(reportEvidence);
+    if (!reportEvidence || invalid) {
+      setFault(invalid || 'Ambil atau unggah foto kendala terlebih dahulu.');
+      return;
+    }
+    const kind = reportKind;
+    const evidence = reportEvidence;
     void invoke(
-      () => submitWorkReport(user, reportTrip.id, 'form_kirim', summaryNote, null),
-      mode === 'confirm' ? 'Manifest dikonfirmasi sesuai tagihan.' : 'Laporan selisih / retur tersimpan.',
+      () =>
+        submitWorkReport(user, reportTrip.id, kind, reportNote.trim(), evidence, {
+          kendalaSubType,
+          customerOutletName:
+            kendalaSubType === 'antri_customer' && outletName.trim()
+              ? outletName.trim()
+              : undefined
+        }),
+      'Laporan kendala tersimpan & diteruskan ke SPV.',
       resetReport
     );
   };
@@ -316,7 +554,7 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
   const activeInspectionCamItem = inspectionCameraKey
     ? VEHICLE_CHECKLIST_ITEMS.find(item => item.key === inspectionCameraKey) || null
     : null;
-  const saveCheck = () => {
+  const saveCheck = (departureData?: DepartureValidationData) => {
     if (!taskConfirm) return;
     const target = ongoing.find(t=>t.id===taskConfirm.tripId);
     const slot = target ? slotForUser(target,user) : null;
@@ -338,8 +576,12 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
       );
       return;
     }
-    if (!taskChecks.every(Boolean)) return;
-    void invoke(() => markTask(user,taskConfirm.tripId,'waybill'), 'Validasi surat jalan tersimpan.', () => setTaskConfirm(null));
+    if (!departureData) return;
+    void invoke(
+      () => markTask(user, taskConfirm.tripId, 'waybill', undefined, departureData),
+      'Form Keluar & 4 TTD tersimpan.',
+      () => setTaskConfirm(null)
+    );
   };
   const notice = fault ? <div className="cv66-notice cv66-notice--error" role="alert"><CloudOff size={18}/><span>{fault}</span><button type="button" aria-label="Tutup pesan" onClick={()=>setFault('')}><X size={17}/></button></div>
     : message ? <div className="cv66-notice cv66-notice--success" role="status"><CheckCircle2 size={18}/><span>{message}</span><button type="button" aria-label="Tutup pesan" onClick={()=>setMessage('')}><X size={17}/></button></div> : null;
@@ -384,7 +626,20 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
                         disabled={busy || !activeTrip.odometerStart}
                         onClick={()=>openTaskConfirm('inspection')}
                       />
-                    </> : <TaskRow icon={ClipboardCheck} label="Validasi Surat Jalan" done={Boolean(activeTrip.waybillValidated)} disabled={busy} onClick={()=>openTaskConfirm('waybill')}/>}
+                    </> : (
+                      <TaskRow
+                        icon={ClipboardCheck}
+                        label="Form Keluar & Surat Jalan"
+                        detail={
+                          activeTrip.waybillValidated
+                            ? '4 tanda tangan & surat jalan tervalidasi'
+                            : 'Ringkasan kru, cek dokumen & 4 TTD wajib'
+                        }
+                        done={Boolean(activeTrip.waybillValidated)}
+                        disabled={busy}
+                        onClick={() => openTaskConfirm('waybill')}
+                      />
+                    )}
                   </Panel>
                   <Journey trip={activeTrip} busy={busy} onMove={handleMove}/>
                   <Panel title="Aktivitas" className="cv69-action-panel"><ActionGrid actions={WORK_FOR_SLOT[activeSlot]} busy={busy} onAction={openReport}/></Panel>
@@ -393,31 +648,504 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
               {screen === 'laporan' && <>
                 {!reportKind && <Heading title="Laporan"/>}
                 {!activeTrip || !activeSlot ? <Empty icon={FileText} title="Belum ada kiriman aktif" action={{label:'Lihat Kiriman',run:()=>nav('kiriman')}}/>
-                  : reportKind ? !reportTrip ? <Empty icon={FileText} title="Kiriman tidak lagi aktif" action={{label:'Kembali',run:resetReport}}/> : <Panel><BackButton onClick={()=>{if(!busy){resetReport();clearNotice();}}}/><h2 className="cv66-section-title cv66-report-title">{reportKind === 'form_kirim' ? 'Form Manifest Kiriman' : WORK_LABELS[reportKind]}</h2><p className="cv66-meta">{reportTrip.area} · {reportTrip.fleetLabel}</p>
+                  : reportKind ? !reportTrip ? <Empty icon={FileText} title="Kiriman tidak lagi aktif" action={{label:'Kembali',run:resetReport}}/> : <Panel><BackButton onClick={()=>{if(!busy){resetReport();clearNotice();}}}/><h2 className="cv66-section-title cv66-report-title">{reportKind === 'form_kirim' ? 'Form Kirim & Tagihan' : WORK_LABELS[reportKind]}</h2><p className="cv66-meta">{reportTrip.area} · {reportTrip.fleetLabel}</p>
                     {reportKind === 'form_kirim' ? (
-                      <div className="cv66-form">
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 space-y-2 text-xs">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-slate-500">Outlet / Area</span>
-                            <span className="font-bold text-slate-900">{reportTrip.area}</span>
-                          </div>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-slate-500">No. Tracking / SJ</span>
-                            <span className="font-mono font-semibold text-slate-800">{reportTrip.trackingNumber || reportTrip.id}</span>
-                          </div>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-slate-500">Armada</span>
-                            <span className="font-semibold text-slate-800">{reportTrip.fleetLabel}</span>
+                      <CrewFormKirimManifest
+                        user={user}
+                        trip={reportTrip}
+                        busy={busy}
+                        onSuccess={msg => {
+                          setFault('');
+                          setMessage(msg);
+                        }}
+                        onError={err => setFault(err)}
+                      />
+                    ) : reportKind === 'bbm' ? (
+                      <form className="cv66-form" onSubmit={sendReport}>
+                        <div className="cv66-field">
+                          <span>Lokasi SPBU</span>
+                          <div className="cv75-option-grid cv75-option-grid--3">
+                            {FUEL_STATION_CHOICES.map((choice: FuelStationChoice) => {
+                              const active = fuelLocation === choice;
+                              const urgent = choice === 'SPBU Lain (Urgent)';
+                              return (
+                                <button
+                                  key={choice}
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => setFuelLocation(choice)}
+                                  className={`cv75-option-btn ${
+                                    active ? (urgent ? 'cv75-option-btn--urgent' : 'cv75-option-btn--active') : ''
+                                  }`}
+                                >
+                                  <span className="cv75-option-title">{choice}</span>
+                                  <span className="cv75-option-sub">
+                                    {urgent ? 'Butuh alasan urgent' : 'SPBU Rekanan AKK'}
+                                  </span>
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
-                        <label className="cv66-field"><span>Catatan / Selisih (Opsional jika sesuai)</span><textarea value={reportNote} onChange={e=>setReportNote(e.target.value)} maxLength={1200} rows={3} placeholder="Tulis catatan jika ada selisih atau retur barang" disabled={busy}/></label>
-                        <Button type="button" disabled={busy} loading={busy} onClick={()=>submitManifestDecision('confirm')}><Check size={18}/>Konfirmasi Sesuai Tagihan</Button>
-                        <Button type="button" variant="secondary" disabled={busy} onClick={()=>submitManifestDecision('discrepancy')}>Lapor Selisih / Retur</Button>
-                      </div>
+
+                        {fuelLocation === 'SPBU Lain (Urgent)' && (
+                          <label className="cv66-field">
+                            <span>Alasan SPBU Lain (Urgent) *</span>
+                            <input
+                              type="text"
+                              className="cv75-input"
+                              value={fuelUrgentReason}
+                              onChange={e => setFuelUrgentReason(e.target.value)}
+                              placeholder="Misal: Antrian Farly penuh / solar darurat di jalur"
+                              maxLength={300}
+                              required
+                              disabled={busy}
+                            />
+                          </label>
+                        )}
+
+                        <label className="cv66-field">
+                          <span>Keterangan Pengisian BBM (Nominal / Liter / KM)</span>
+                          <textarea
+                            value={reportNote}
+                            onChange={e => setReportNote(e.target.value)}
+                            maxLength={1200}
+                            rows={3}
+                            placeholder="Contoh: Isi Solar Rp 250.000 · KM 128.450"
+                            disabled={busy}
+                          />
+                        </label>
+
+                        <div className="cv66-field">
+                          <div className="flex items-center justify-between gap-2">
+                            <span>Foto Bukti Struk / Pompa ({bbmPhotos.length}/6)</span>
+                            <span className="cv75-badge cv75-badge--blue">Min 1 Foto</span>
+                          </div>
+                          {bbmPhotos.length > 0 && (
+                            <div className="cv75-photo-grid">
+                              {bbmPhotos.map((ev, idx) => (
+                                <div key={`bbm-ph-${idx}`} className="cv75-photo-thumb">
+                                  <img src={ev.photo} alt={`Foto BBM ${idx + 1}`} />
+                                  <button
+                                    type="button"
+                                    className="cv75-photo-del"
+                                    aria-label={`Hapus foto BBM ${idx + 1}`}
+                                    disabled={busy}
+                                    onClick={() => setBbmPhotos(prev => prev.filter((_, i) => i !== idx))}
+                                  >
+                                    <X size={14} />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {bbmPhotos.length < 6 && (
+                            <div className="cv75-upload-row">
+                              <button
+                                type="button"
+                                className="cv75-upload-btn"
+                                disabled={busy}
+                                onClick={() => startCamera('bbm')}
+                              >
+                                <Camera size={16} />
+                                <span>Buka Kamera</span>
+                              </button>
+                              <label className="cv75-upload-btn" style={{ cursor: busy ? 'default' : 'pointer' }}>
+                                <ImagePlus size={16} />
+                                <span>Unggah Foto</span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  multiple
+                                  disabled={busy}
+                                  style={{ display: 'none' }}
+                                  onChange={e => void handleFileUpload(e, 'bbm')}
+                                />
+                              </label>
+                            </div>
+                          )}
+                        </div>
+
+                        <Button
+                          type="submit"
+                          disabled={
+                            busy ||
+                            cameraOpen ||
+                            bbmPhotos.length === 0 ||
+                            (fuelLocation === 'SPBU Lain (Urgent)' && fuelUrgentReason.trim().length < 3)
+                          }
+                          loading={busy}
+                        >
+                          <Check size={18} />
+                          <span>Simpan Laporan BBM</span>
+                        </Button>
+                      </form>
+                    ) : reportKind === 'kendala' ? (
+                      <form className="cv66-form" onSubmit={sendReport}>
+                        <div className="cv66-field">
+                          <span>Kategori Kendala</span>
+                          <div className="cv75-option-grid">
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => setKendalaSubType('jalan_rute')}
+                              className={`cv75-option-btn ${kendalaSubType === 'jalan_rute' ? 'cv75-option-btn--active' : ''}`}
+                            >
+                              <span className="cv75-option-title">Kendala di Jalan &amp; Rute</span>
+                              <span className="cv75-option-sub">Macet, akses jalan, teknis</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => setKendalaSubType('antri_customer')}
+                              className={`cv75-option-btn ${kendalaSubType === 'antri_customer' ? 'cv75-option-btn--urgent' : ''}`}
+                            >
+                              <span className="cv75-option-title">Antri Bongkar Customer</span>
+                              <span className="cv75-option-sub">Antrean lama di gudang toko</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {kendalaSubType === 'antri_customer' && (
+                          <div className="cv66-field">
+                            <span>Nama Toko / Customer (Opsional)</span>
+                            <input
+                              type="text"
+                              className="cv75-input"
+                              value={outletName}
+                              onChange={e => setOutletName(e.target.value)}
+                              placeholder="Nama toko tempat antri bongkar"
+                              disabled={busy}
+                            />
+                            {tripManifestSuggestions.customers.length > 0 && (
+                              <div className="cv75-chip-wrap">
+                                {tripManifestSuggestions.customers.slice(0, 6).map(cust => (
+                                  <button
+                                    key={cust}
+                                    type="button"
+                                    className={`cv75-chip ${outletName === cust ? 'cv75-chip--active' : ''}`}
+                                    onClick={() => setOutletName(cust)}
+                                  >
+                                    {cust}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        <label className="cv66-field">
+                          <span>Keterangan Kendala *</span>
+                          <textarea
+                            value={reportNote}
+                            onChange={e => setReportNote(e.target.value)}
+                            minLength={3}
+                            maxLength={1200}
+                            required
+                            rows={4}
+                            placeholder="Jelaskan kendala di jalan atau antrean customer"
+                            disabled={busy}
+                          />
+                        </label>
+
+                        {reportEvidence ? (
+                          <EvidencePreview evidence={reportEvidence} disabled={busy} onRetake={() => startCamera('default')} />
+                        ) : (
+                          <div className="cv75-upload-row">
+                            <button type="button" className="cv75-upload-btn" disabled={busy} onClick={() => startCamera('default')}>
+                              <Camera size={16} />
+                              <span>Buka Kamera</span>
+                            </button>
+                            <label className="cv75-upload-btn" style={{ cursor: busy ? 'default' : 'pointer' }}>
+                              <ImagePlus size={16} />
+                              <span>Unggah Foto</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                disabled={busy}
+                                style={{ display: 'none' }}
+                                onChange={e => void handleFileUpload(e, 'default')}
+                              />
+                            </label>
+                          </div>
+                        )}
+
+                        <Button type="submit" disabled={busy || cameraOpen || !reportEvidence || reportNote.trim().length < 3} loading={busy}>
+                          <Check size={18} />
+                          <span>Simpan Laporan Kendala</span>
+                        </Button>
+                      </form>
+                    ) : reportKind === 'toko' ? (
+                      <form className="cv66-form" onSubmit={sendReport}>
+                        <div className="cv66-field">
+                          <span>Nama Pelanggan / Toko *</span>
+                          <input
+                            type="text"
+                            className="cv75-input"
+                            value={outletName}
+                            onChange={e => setOutletName(e.target.value)}
+                            placeholder="Contoh: TK GRAHA FROZEN / BU FERA"
+                            required
+                            disabled={busy}
+                          />
+                          {tripManifestSuggestions.customers.length > 0 && (
+                            <div className="cv75-chip-wrap">
+                              {tripManifestSuggestions.customers.slice(0, 8).map(cust => (
+                                <button
+                                  key={cust}
+                                  type="button"
+                                  className={`cv75-chip ${outletName === cust ? 'cv75-chip--active' : ''}`}
+                                  onClick={() => setOutletName(cust)}
+                                >
+                                  <Store size={12} />
+                                  <span>{cust}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <label className="cv66-field">
+                          <span>Keterangan Kunjungan Toko *</span>
+                          <textarea
+                            value={reportNote}
+                            onChange={e => setReportNote(e.target.value)}
+                            minLength={3}
+                            maxLength={1200}
+                            required
+                            rows={3}
+                            placeholder="Contoh: Tiba di toko, sedang serah terima barang kiriman"
+                            disabled={busy}
+                          />
+                        </label>
+
+                        {reportEvidence ? (
+                          <EvidencePreview evidence={reportEvidence} disabled={busy} onRetake={() => startCamera('default')} />
+                        ) : (
+                          <div className="cv75-upload-row">
+                            <button type="button" className="cv75-upload-btn" disabled={busy} onClick={() => startCamera('default')}>
+                              <Camera size={16} />
+                              <span>Foto di Toko</span>
+                            </button>
+                            <label className="cv75-upload-btn" style={{ cursor: busy ? 'default' : 'pointer' }}>
+                              <ImagePlus size={16} />
+                              <span>Unggah Foto</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                disabled={busy}
+                                style={{ display: 'none' }}
+                                onChange={e => void handleFileUpload(e, 'default')}
+                              />
+                            </label>
+                          </div>
+                        )}
+
+                        <Button
+                          type="submit"
+                          disabled={busy || cameraOpen || !reportEvidence || outletName.trim().length < 2 || reportNote.trim().length < 3}
+                          loading={busy}
+                        >
+                          <Check size={18} />
+                          <span>Simpan Absen Toko</span>
+                        </Button>
+                      </form>
                     ) : (
-                      <form className="cv66-form" onSubmit={sendReport}><label className="cv66-field"><span>Keterangan</span><textarea value={reportNote} onChange={e=>setReportNote(e.target.value)} minLength={3} maxLength={1200} required rows={4} placeholder="Tulis keterangan" disabled={busy}/></label>
-                        {reportEvidence ? <EvidencePreview evidence={reportEvidence} disabled={busy} onRetake={startCamera}/> : <motion.button type="button" className="cv69-camera-entry" disabled={busy} onClick={startCamera} whileTap={busy || reduced ? undefined : {scale:.97}}><CrewArt name="camera" size={56}/><span>Buka Kamera</span><ChevronRight size={20}/></motion.button>}
-                        <Button type="submit" disabled={busy || cameraOpen || !reportEvidence || reportNote.trim().length<3} loading={busy}><Check size={18}/>Simpan Laporan</Button>
+                      /* Retur Barang: Pelanggan, No Faktur, Nama Item, Qty, Foto Faktur & Foto Barang */
+                      <form className="cv66-form" onSubmit={sendReport}>
+                        <div className="cv66-field">
+                          <span>Nama Pelanggan / Toko *</span>
+                          <input
+                            type="text"
+                            className="cv75-input"
+                            value={outletName}
+                            onChange={e => setOutletName(e.target.value)}
+                            placeholder="Nama pelanggan yang melakukan retur"
+                            required
+                            disabled={busy}
+                          />
+                          {tripManifestSuggestions.customers.length > 0 && (
+                            <div className="cv75-chip-wrap">
+                              {tripManifestSuggestions.customers.slice(0, 6).map(cust => (
+                                <button
+                                  key={cust}
+                                  type="button"
+                                  className={`cv75-chip ${outletName === cust ? 'cv75-chip--active' : ''}`}
+                                  onClick={() => {
+                                    setOutletName(cust);
+                                    const matchInv = tripManifestSuggestions.invoices.find(
+                                      inv => inv.namaPelanggan.trim().toLowerCase() === cust.trim().toLowerCase()
+                                    );
+                                    if (matchInv?.noFaktur) setReturInvoice(matchInv.noFaktur);
+                                  }}
+                                >
+                                  {cust}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="cv75-option-grid">
+                          <label className="cv66-field">
+                            <span>No. Faktur</span>
+                            <input
+                              type="text"
+                              className="cv75-input"
+                              list="retur-invoice-options"
+                              value={returInvoice}
+                              onChange={e => setReturInvoice(e.target.value)}
+                              placeholder="FJ02-xxxx"
+                              disabled={busy}
+                            />
+                            <datalist id="retur-invoice-options">
+                              {tripManifestSuggestions.invoices.map(inv => (
+                                <option key={inv.id} value={inv.noFaktur}>
+                                  {inv.namaPelanggan}
+                                </option>
+                              ))}
+                            </datalist>
+                          </label>
+                          <label className="cv66-field">
+                            <span>Qty / Jumlah</span>
+                            <input
+                              type="text"
+                              className="cv75-input"
+                              value={returQty}
+                              onChange={e => setReturQty(e.target.value)}
+                              placeholder="Misal: 2 Dus / 5 Pak"
+                              disabled={busy}
+                            />
+                          </label>
+                        </div>
+
+                        <label className="cv66-field">
+                          <span>Nama Item Barang Retur *</span>
+                          <input
+                            type="text"
+                            className="cv75-input"
+                            value={returItemName}
+                            onChange={e => setReturItemName(e.target.value)}
+                            placeholder="Contoh: Cup 16oz Star / Mika Brownies M"
+                            required
+                            disabled={busy}
+                          />
+                        </label>
+
+                        <label className="cv66-field">
+                          <span>Keterangan Alasan Retur *</span>
+                          <textarea
+                            value={reportNote}
+                            onChange={e => setReportNote(e.target.value)}
+                            minLength={3}
+                            maxLength={1200}
+                            required
+                            rows={3}
+                            placeholder="Misal: Kemasan penyok / salah kirim ukuran oleh toko"
+                            disabled={busy}
+                          />
+                        </label>
+
+                        <div className="cv75-dual-upload">
+                          {/* Slot 1: Foto Faktur */}
+                          <div className="cv75-flat-card space-y-2">
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-xs font-bold text-slate-800">1. Foto Faktur *</span>
+                              <span className={`cv75-badge ${returFakturEvidence ? 'cv75-badge--green' : 'cv75-badge--amber'}`}>
+                                {returFakturEvidence ? 'OK' : 'Wajib'}
+                              </span>
+                            </div>
+                            {returFakturEvidence ? (
+                              <div className="cv75-photo-thumb">
+                                <img src={returFakturEvidence.photo} alt="Foto Faktur Retur" />
+                                <button
+                                  type="button"
+                                  className="cv75-photo-del"
+                                  onClick={() => setReturFakturEvidence(null)}
+                                  aria-label="Hapus foto faktur"
+                                >
+                                  <X size={14} />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="space-y-1.5">
+                                <button type="button" className="cv75-upload-btn" disabled={busy} onClick={() => startCamera('retur_faktur')}>
+                                  <Camera size={15} />
+                                  <span>Kamera Faktur</span>
+                                </button>
+                                <label className="cv75-upload-btn" style={{ cursor: busy ? 'default' : 'pointer' }}>
+                                  <ImagePlus size={15} />
+                                  <span>Unggah Faktur</span>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    disabled={busy}
+                                    style={{ display: 'none' }}
+                                    onChange={e => void handleFileUpload(e, 'retur_faktur')}
+                                  />
+                                </label>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Slot 2: Foto Barang */}
+                          <div className="cv75-flat-card space-y-2">
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-xs font-bold text-slate-800">2. Foto Barang *</span>
+                              <span className={`cv75-badge ${returBarangEvidence ? 'cv75-badge--green' : 'cv75-badge--amber'}`}>
+                                {returBarangEvidence ? 'OK' : 'Wajib'}
+                              </span>
+                            </div>
+                            {returBarangEvidence ? (
+                              <div className="cv75-photo-thumb">
+                                <img src={returBarangEvidence.photo} alt="Foto Barang Retur" />
+                                <button
+                                  type="button"
+                                  className="cv75-photo-del"
+                                  onClick={() => setReturBarangEvidence(null)}
+                                  aria-label="Hapus foto barang"
+                                >
+                                  <X size={14} />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="space-y-1.5">
+                                <button type="button" className="cv75-upload-btn" disabled={busy} onClick={() => startCamera('retur_barang')}>
+                                  <Camera size={15} />
+                                  <span>Kamera Barang</span>
+                                </button>
+                                <label className="cv75-upload-btn" style={{ cursor: busy ? 'default' : 'pointer' }}>
+                                  <ImagePlus size={15} />
+                                  <span>Unggah Barang</span>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    disabled={busy}
+                                    style={{ display: 'none' }}
+                                    onChange={e => void handleFileUpload(e, 'retur_barang')}
+                                  />
+                                </label>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <Button
+                          type="submit"
+                          disabled={
+                            busy ||
+                            cameraOpen ||
+                            !returFakturEvidence ||
+                            !returBarangEvidence ||
+                            outletName.trim().length < 2 ||
+                            returItemName.trim().length < 2 ||
+                            reportNote.trim().length < 3
+                          }
+                          loading={busy}
+                        >
+                          <Check size={18} />
+                          <span>Simpan Retur Barang</span>
+                        </Button>
                       </form>
                     )}</Panel> : <>{tripPicker}<Panel title={activeTrip.area} className="cv66-report-list cv69-action-panel"><ActionGrid actions={WORK_FOR_SLOT[activeSlot]} busy={busy} onAction={openReport}/></Panel></>}
               </>}
@@ -447,112 +1175,134 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
           </>}
           {!claimEnabled && <p className="cv66-required">Pengambilan kiriman belum aktif.</p>}
         </Dialog>}
-        {taskConfirm && (
+        {taskConfirm?.kind === 'inspection' && (
           <Dialog
             key="check"
-            title={taskConfirm.kind === 'inspection' ? 'Cek Armada' : 'Cek Surat Jalan'}
+            title="Cek Armada"
             busy={busy}
             onClose={() => { setTaskConfirm(null); setInspectionCameraKey(null); clearNotice(); }}
           >
             {notice}
-            {taskConfirm.kind === 'inspection' ? (
-              <>
-                <div className={`cv72-check-summary ${!inspectionValidationError ? 'cv72-check-summary--ready' : ''}`}>
-                  <span>Terisi: {inspectionAnsweredCount}/{VEHICLE_CHECKLIST_ITEMS.length}</span>
-                  <span>Foto bukti: {inspectionPhotoCount}/{inspectionPhotoTotal}</span>
-                </div>
-                <div className="cv72-check-list">
-                  {VEHICLE_CHECKLIST_ITEMS.map(item => {
-                    const selectedStatus = inspectionStatuses[item.key] || '';
-                    const evidence = item.requiresPhoto ? inspectionPhotos[item.key] : undefined;
-                    const itemComplete = Boolean(selectedStatus) && (!item.requiresPhoto || Boolean(evidence?.photo));
-                    return (
-                      <div key={item.key} className={`cv72-check-card ${itemComplete ? 'cv72-check-card--done' : ''}`}>
-                        <div className="cv72-check-top" style={{ cursor: 'default' }}>
-                          <span className="cv72-check-label">{item.label}</span>
-                          {item.requiresPhoto && (
-                            <span className={`cv72-photo-badge ${evidence?.photo ? 'cv72-photo-badge--ok' : ''}`}>
-                              <Camera size={12}/>
-                              {evidence?.photo ? 'Foto OK' : 'Wajib Foto'}
-                            </span>
+            <div className={`cv72-check-summary ${!inspectionValidationError ? 'cv72-check-summary--ready' : ''}`}>
+              <span>Terisi: {inspectionAnsweredCount}/{VEHICLE_CHECKLIST_ITEMS.length}</span>
+              <span>Foto bukti: {inspectionPhotoCount}/{inspectionPhotoTotal}</span>
+            </div>
+            <div className="cv72-check-list">
+              {VEHICLE_CHECKLIST_ITEMS.map(item => {
+                const selectedStatus = inspectionStatuses[item.key] || '';
+                const evidence = item.requiresPhoto ? inspectionPhotos[item.key] : undefined;
+                const itemComplete = Boolean(selectedStatus) && (!item.requiresPhoto || Boolean(evidence?.photo));
+                return (
+                  <div key={item.key} className={`cv72-check-card ${itemComplete ? 'cv72-check-card--done' : ''}`}>
+                    <div className="cv72-check-top" style={{ cursor: 'default' }}>
+                      <span className="cv72-check-label">{item.label}</span>
+                      {item.requiresPhoto && (
+                        <span className={`cv72-photo-badge ${evidence?.photo ? 'cv72-photo-badge--ok' : ''}`}>
+                          <Camera size={12}/>
+                          {evidence?.photo ? 'Foto OK' : 'Wajib Foto'}
+                        </span>
+                      )}
+                    </div>
+                    <div className="cv72-choice-row" role="radiogroup" aria-label={item.label}>
+                      {item.options.map((opt, idx) => {
+                        const active = selectedStatus === opt;
+                        const activeClass = active ? (idx === 0 ? 'cv72-choice-btn--ok' : 'cv72-choice-btn--warn') : '';
+                        return (
+                          <button
+                            key={opt}
+                            type="button"
+                            role="radio"
+                            aria-checked={active}
+                            disabled={busy}
+                            className={`cv72-choice-btn ${activeClass}`}
+                            onClick={() => setInspectionStatuses(prev => ({ ...prev, [item.key]: opt }))}
+                          >
+                            {active && <Check size={14}/>}
+                            <span>{opt}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {item.requiresPhoto && (
+                      <div className="cv72-check-photo-row">
+                        {evidence?.photo && (
+                          <img src={evidence.photo} alt={`Bukti ${item.label}`} className="cv72-check-thumb"/>
+                        )}
+                        <div className="cv72-check-photo-actions">
+                          <button
+                            type="button"
+                            className={`cv72-photo-btn ${evidence?.photo ? 'cv72-photo-btn--ghost' : ''}`}
+                            disabled={busy}
+                            onClick={() => { clearNotice(); setInspectionCameraKey(item.key); }}
+                          >
+                            {evidence?.photo ? <RotateCcw size={14}/> : <Camera size={14}/>}
+                            <span>{evidence?.photo ? 'Ambil Ulang' : 'Ambil Foto'}</span>
+                          </button>
+                          {evidence?.photo && (
+                            <span className="cv66-meta">Dokumentasi tersimpan</span>
                           )}
                         </div>
-                        <div className="cv72-choice-row" role="radiogroup" aria-label={item.label}>
-                          {item.options.map((opt, idx) => {
-                            const active = selectedStatus === opt;
-                            const activeClass = active ? (idx === 0 ? 'cv72-choice-btn--ok' : 'cv72-choice-btn--warn') : '';
-                            return (
-                              <button
-                                key={opt}
-                                type="button"
-                                role="radio"
-                                aria-checked={active}
-                                disabled={busy}
-                                className={`cv72-choice-btn ${activeClass}`}
-                                onClick={() => setInspectionStatuses(prev => ({ ...prev, [item.key]: opt }))}
-                              >
-                                {active && <Check size={14}/>}
-                                <span>{opt}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                        {item.requiresPhoto && (
-                          <div className="cv72-check-photo-row">
-                            {evidence?.photo && (
-                              <img src={evidence.photo} alt={`Bukti ${item.label}`} className="cv72-check-thumb"/>
-                            )}
-                            <div className="cv72-check-photo-actions">
-                              <button
-                                type="button"
-                                className={`cv72-photo-btn ${evidence?.photo ? 'cv72-photo-btn--ghost' : ''}`}
-                                disabled={busy}
-                                onClick={() => { clearNotice(); setInspectionCameraKey(item.key); }}
-                              >
-                                {evidence?.photo ? <RotateCcw size={14}/> : <Camera size={14}/>}
-                                <span>{evidence?.photo ? 'Ambil Ulang' : 'Ambil Foto'}</span>
-                              </button>
-                              {evidence?.photo && (
-                                <span className="cv66-meta">Dokumentasi tersimpan</span>
-                              )}
-                            </div>
-                          </div>
-                        )}
                       </div>
-                    );
-                  })}
-                </div>
-                {inspectionValidationError && (
-                  <p className="cv72-check-warning" role="alert">{inspectionValidationError}</p>
-                )}
-                <Button
-                  disabled={busy || Boolean(inspectionCameraKey) || Boolean(inspectionValidationError)}
-                  loading={busy}
-                  onClick={saveCheck}
-                >
-                  <Check size={18}/>Simpan Cek Armada
-                </Button>
-                {!qa && <p className="cv66-meta cv66-gps">Seluruh 7 pilihan & 4 foto bukti wajib lengkap sebelum melanjutkan ke Berangkat.</p>}
-              </>
-            ) : (
-              <>
-                <div className="cv66-checklist">
-                  {['Tujuan dan jumlah surat jalan sesuai','Dokumen lengkap dan siap dibawa'].map((label,i)=>(
-                    <label key={label}>
-                      <input type="checkbox" checked={taskChecks[i]} disabled={busy} onChange={e=>{const checked=e.target.checked;setTaskChecks(v=>i===0?[checked,v[1]]:[v[0],checked]);}}/>
-                      <span>{label}</span>
-                    </label>
-                  ))}
-                </div>
-                <Button disabled={busy || !taskChecks.every(Boolean)} loading={busy} onClick={saveCheck}><Check size={18}/>Simpan</Button>
-                {!qa && <p className="cv66-meta cv66-gps">Waktu dan GPS dicatat.</p>}
-              </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {inspectionValidationError && (
+              <p className="cv72-check-warning" role="alert">{inspectionValidationError}</p>
             )}
+            <Button
+              disabled={busy || Boolean(inspectionCameraKey) || Boolean(inspectionValidationError)}
+              loading={busy}
+              onClick={() => saveCheck()}
+            >
+              <Check size={18}/>Simpan Cek Armada
+            </Button>
+            {!qa && <p className="cv66-meta cv66-gps">Seluruh 7 pilihan & 4 foto bukti wajib lengkap sebelum melanjutkan ke Berangkat.</p>}
           </Dialog>
+        )}
+        {taskConfirm?.kind === 'waybill' && activeTrip && (
+          <DepartureFormModal
+            key="waybill-departure"
+            trip={ongoing.find(t => t.id === taskConfirm.tripId) || activeTrip}
+            actorName={user.fullName || 'Helper'}
+            busy={busy}
+            qa={qa}
+            notice={notice}
+            onClose={() => { setTaskConfirm(null); clearNotice(); }}
+            onSubmit={departureData => saveCheck(departureData)}
+          />
         )}
         {accountOpen && <Dialog key="account" title="Akun" onClose={()=>{setAccountOpen(false);clearNotice();}}><div className="cv66-profile"><span className="cv66-profile-avatar">{initials(user.fullName)}</span><div><span className="cv66-profile-name">{user.fullName||'Kru AKK'}</span><span className="cv66-meta">{user.email}</span></div></div>{!qa && onOpenClassic && <Button variant="secondary" onClick={()=>{setAccountOpen(false);onOpenClassic();}}>Fitur Operasional Lengkap<ArrowUpRight size={18}/></Button>}<Button variant="danger" onClick={()=>logisticsStore.logoutUser()}><LogOut size={18}/>Keluar Akun</Button></Dialog>}
       </AnimatePresence>
-      {cameraOpen && reportTrip && reportKind && <CrewLiveCamera key={`${reportTrip.id}:${reportKind}`} onClose={()=>setCameraOpen(false)} onCapture={evidence=>{setReportEvidence(evidence);setCameraOpen(false);clearNotice();}}/>}
+      {cameraOpen && reportTrip && reportKind && (
+        <CrewLiveCamera
+          key={`${reportTrip.id}:${reportKind}:${cameraTarget}`}
+          title={
+            cameraTarget === 'retur_faktur'
+              ? 'Foto Faktur Retur'
+              : cameraTarget === 'retur_barang'
+              ? 'Foto Barang Retur'
+              : cameraTarget === 'bbm'
+              ? 'Foto Bukti Pengisian BBM'
+              : undefined
+          }
+          onClose={() => setCameraOpen(false)}
+          onCapture={evidence => {
+            if (cameraTarget === 'bbm') {
+              setBbmPhotos(prev => [...prev, evidence].slice(0, 6));
+            } else if (cameraTarget === 'retur_faktur') {
+              setReturFakturEvidence(evidence);
+            } else if (cameraTarget === 'retur_barang') {
+              setReturBarangEvidence(evidence);
+            } else {
+              setReportEvidence(evidence);
+            }
+            setCameraOpen(false);
+            clearNotice();
+          }}
+        />
+      )}
       {taskConfirm?.kind === 'inspection' && activeInspectionCamItem && (
         <CrewLiveCamera
           key={`insp-${taskConfirm.tripId}-${activeInspectionCamItem.key}`}

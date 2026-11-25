@@ -19,7 +19,7 @@ export type NavTab =
   | 'dashboard' | 'driver_portal' | 'driver_reports' | 'analytics_reports'
   | 'operational_dashboard' | 'schedules' | 'portal_validation' | 'integrated_validation' | 'fleets'
   | 'spareparts' | 'maintenance_costs' | 'fuel_efficiency' | 'crew_history'
-  | 'tracking_eval' | 'fleet_forms' | 'sales_dashboard'
+  | 'fleet_forms' | 'sales_dashboard'
   | 'sales_activities' | 'sales_schedules' | 'sales_loading_duration'
   | 'sales_invoice_so' | 'sales_form_kirim' | 'sales_rfid_scanner'
   | 'sales_muat_validation' | 'sales_skill_matrix' | 'sales_jobdesk'
@@ -90,7 +90,6 @@ const SECTIONS: MenuSection[] = [
     { tab: 'portal_validation', label: 'Validasi Kiriman' },
     { tab: 'integrated_validation', label: 'Validasi Rute & Form', keywords: 'three way gps peta faktur helper' },
     { tab: 'driver_reports', label: 'Laporan Driver' },
-    { tab: 'tracking_eval', label: 'Evaluasi GPS' },
     { tab: 'fleet_forms', label: 'Form Armada' },
     { tab: 'fleets', label: 'Armada' },
     { tab: 'crew_history', label: 'Kru & Riwayat' },

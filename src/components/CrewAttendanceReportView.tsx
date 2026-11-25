@@ -27,6 +27,7 @@ import { logisticsStore } from '../services/store';
 import { Schedule } from '../types';
 import { useToast } from '../context/ToastContext';
 import { resolvePreciseCustomerGps } from '../utils/preciseCustomerGps';
+import { listenCrewChanged } from './crew/crewApi';
 
 interface CrewAttendanceReportViewProps {
   onBackToOperationalReports?: () => void;
@@ -129,7 +130,13 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
     void driverReportService.syncWithServer(true);
     const handleUpdate = () => loadAttendanceReports();
     window.addEventListener('driver-report-updated', handleUpdate);
-    return () => window.removeEventListener('driver-report-updated', handleUpdate);
+    const unsubCrew = listenCrewChanged(() => {
+      void driverReportService.syncWithServer(true).then(() => loadAttendanceReports());
+    });
+    return () => {
+      window.removeEventListener('driver-report-updated', handleUpdate);
+      unsubCrew();
+    };
   }, []);
 
   // Fokus 100% pada Absen Tim Kiriman di Pelanggan (category === 'istirahat'), BUKAN Check-In / Check-Out Shift

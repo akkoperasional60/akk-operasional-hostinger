@@ -98,7 +98,7 @@ export default defineConfig(() => {
       'import.meta.env.VITE_BUILD_TARGET': JSON.stringify(buildTarget),
     },
     resolve: {
-      dedupe: ['react', 'react-dom'],
+      dedupe: ['react', 'react-dom', 'react/jsx-runtime', 'react/jsx-dev-runtime'],
       alias: {
         '@': path.resolve(import.meta.dirname || '.'),
       },
@@ -111,9 +111,13 @@ export default defineConfig(() => {
         'react-dom/client',
         'react/jsx-dev-runtime',
         'react/jsx-runtime',
+        'react-is',
         'lucide-react',
         'recharts',
+        'motion',
         'motion/react',
+        '@vis.gl/react-google-maps',
+        'reactflow',
         'firebase/app',
         'firebase/auth',
         'leaflet',

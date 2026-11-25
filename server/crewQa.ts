@@ -267,6 +267,33 @@ export function registerCrewQaRoutes(app: Express, requireAuth: any) {
           t.inspectionDone=true;
         }else if(action==='waybill'){
           if(slot!=='helper')throw err('Validasi SJ hanya untuk Helper.',403);
+          const dv = req.body?.departureValidation;
+          if(dv && typeof dv === 'object'){
+            if(!dv.checks?.waybillMatch || !dv.checks?.documentsReady) throw err('Konfirmasi surat jalan dan dokumen wajib dicentang.',422);
+            for(const k of ['spvLogistik','spvOperasional','security','crew']){
+              const sVal = typeof dv.signatures?.[k]==='string' ? dv.signatures[k].trim() : '';
+              if(!/^data:image\/(png|jpeg|webp);base64,/i.test(sVal) || sVal.length < 120) throw err('Seluruh 4 tanda tangan digital wajib diisi.',422);
+            }
+            t.departureValidation = {
+              summary: {
+                driverName: str(dv.summary?.driverName) || t.driver?.name || '-',
+                helperName: str(dv.summary?.helperName) || t.helper?.name || '-',
+                fleetLabel: str(dv.summary?.fleetLabel) || t.fleetLabel || '-',
+                areaName: str(dv.summary?.areaName) || t.area || '-',
+                recordedAt: new Date().toISOString(),
+                recordedAtWib: str(dv.summary?.recordedAtWib) || '-'
+              },
+              checks: { waybillMatch: true, documentsReady: true },
+              signatures: {
+                spvLogistik: dv.signatures.spvLogistik,
+                spvOperasional: dv.signatures.spvOperasional,
+                security: dv.signatures.security,
+                crew: dv.signatures.crew
+              },
+              signedAt: new Date().toISOString(),
+              signedBy: str(u.full_name)
+            };
+          }
           t.waybillValidated=true;
         }else if(action==='depart'){
           if(!t.driver||!t.helper)throw err('Tim belum lengkap.',409);
@@ -290,8 +317,25 @@ export function registerCrewQaRoutes(app: Express, requireAuth: any) {
           }else{
             const invalid=validateCameraEvidence(evidence);
             if(invalid)throw err(invalid,422);
+            const fuelLocation=type==='bbm'?(str(req.body?.fuelLocation)||'Farly'):undefined;
+            const fuelUrgentReason=type==='bbm'?str(req.body?.fuelUrgentReason):undefined;
+            const customerOutletName=str(req.body?.customerOutletName).slice(0,140)||undefined;
+            const invoiceNumber=str(req.body?.invoiceNumber).slice(0,80)||undefined;
+            const issueItemName=str(req.body?.issueItemName).slice(0,160)||undefined;
+            const issueQty=str(req.body?.issueQty).slice(0,60)||undefined;
+            const kendalaSubType=str(req.body?.kendalaSubType)||undefined;
+            const photoCount=(type==='bbm'||type==='retur')?Math.max(1,Math.min(6,Number(req.body?.photoCount)||1)):1;
             // QA retains metadata only so the test state never grows with base64 images.
-            t.reports=[...rows.slice(-99),{id:`qa-report-${crypto.randomUUID()}`,type,note,by:str(u.full_name),at:new Date().toISOString(),photoAttached:true,photoSource:'camera',photoCapturedAt:evidence.capturedAt,gpsCapturedAt:evidence.gpsCapturedAt,gps:evidence.gps}];
+            t.reports=[...rows.slice(-99),{
+              id:`qa-report-${crypto.randomUUID()}`,type,note,by:str(u.full_name),at:new Date().toISOString(),
+              photoAttached:true,photoSource:'camera',photoCapturedAt:evidence.capturedAt,gpsCapturedAt:evidence.gpsCapturedAt,gps:evidence.gps,photoCount,
+              ...(fuelLocation?{fuelLocation,...(fuelUrgentReason?{fuelUrgentReason}:{})}:{}),
+              ...(customerOutletName?{customerOutletName}:{}),
+              ...(invoiceNumber?{invoiceNumber}:{}),
+              ...(issueItemName?{issueItemName}:{}),
+              ...(issueQty?{issueQty}:{}),
+              ...(kendalaSubType?{kendalaSubType}:{})
+            }];
           }
         }
         t.updatedAt=new Date().toISOString();
@@ -314,6 +358,7 @@ export function registerCrewQaRoutes(app: Express, requireAuth: any) {
         delete t.inspectionDone;
         delete t.inspectionChecklist;
         delete t.waybillValidated;
+        delete t.departureValidation;
         t.reports = [];
         t.updatedAt = new Date().toISOString();
       });

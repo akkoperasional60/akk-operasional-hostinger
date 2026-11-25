@@ -31,6 +31,7 @@ import { driverChecklistService } from '../services/driverChecklistService';
 import { MAINTENANCE_COMPONENT_RULES, getMaintenanceRuleForItem, MaintenanceComponentRule } from '../services/maintenanceGuidanceService';
 import { logisticsStore } from '../services/store';
 import { useToast } from '../context/ToastContext';
+import { listenCrewChanged } from './crew/crewApi';
 
 interface FleetChecklistReportViewProps {
   onBackToOperationalReports?: () => void;
@@ -79,11 +80,15 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
       setChecklists(driverChecklistService.getChecklists());
     };
     window.addEventListener('driver-checklist-updated', handleUpdate);
+    const unsubCrew = listenCrewChanged(() => {
+      void driverChecklistService.syncFromServer().then(setChecklists);
+    });
     const interval = setInterval(() => {
       void driverChecklistService.syncFromServer().then(setChecklists);
     }, 10000);
     return () => {
       window.removeEventListener('driver-checklist-updated', handleUpdate);
+      unsubCrew();
       clearInterval(interval);
     };
   }, []);

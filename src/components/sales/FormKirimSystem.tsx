@@ -44,6 +44,7 @@ import {
 import { branchStore, BranchRecord } from '../../services/branchStore';
 import { logisticsStore } from '../../services/store';
 import { OFFICIAL_DESTINATION_AREAS, standardizeAreaName } from '../../utils/areaNormalizer';
+import { listenCrewChanged } from '../crew/crewApi';
 
 type SortField = 'default' | 'nilaiFaktur' | 'coly' | 'namaPelanggan' | 'noFaktur' | 'alamatPelanggan';
 type SortDirection = 'asc' | 'desc';
@@ -728,9 +729,13 @@ export const SalesFormKirimTab: React.FC = () => {
     const unsubBranch = branchStore.subscribe(() => {
       setBranches(branchStore.getBranches());
     });
+    const unsubCrew = listenCrewChanged(() => {
+      void formKirimStore.hydrateFromServer(true);
+    });
     return () => {
       unsubForm();
       unsubBranch();
+      unsubCrew();
     };
   }, []);
 
@@ -3072,8 +3077,12 @@ export const FinanceValidasiFormKirimTab: React.FC = () => {
     };
     const intervalId = window.setInterval(refreshFromServer, 25000);
     window.addEventListener('focus', refreshFromServer);
+    const unsubCrew = listenCrewChanged(() => {
+      void formKirimStore.hydrateFromServer(true);
+    });
     return () => {
       unsubForm();
+      unsubCrew();
       window.clearInterval(intervalId);
       window.removeEventListener('focus', refreshFromServer);
     };

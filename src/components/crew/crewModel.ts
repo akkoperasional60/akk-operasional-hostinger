@@ -90,6 +90,33 @@ export function validateVehicleChecklist(entries: unknown): string | null {
   return null;
 }
 
+export type DepartureSignatureKey = 'spvLogistik' | 'spvOperasional' | 'security' | 'crew';
+export type FuelStationChoice = 'Farly' | 'Gajah Mada' | 'SPBU Lain (Urgent)';
+export const FUEL_STATION_CHOICES: readonly FuelStationChoice[] = [
+  'Farly',
+  'Gajah Mada',
+  'SPBU Lain (Urgent)'
+] as const;
+
+export interface DepartureValidationData {
+  summary: {
+    driverName: string;
+    helperName: string;
+    fleetLabel: string;
+    areaName: string;
+    recordedAt: string;
+    recordedAtWib: string;
+  };
+  checks: {
+    waybillMatch: boolean;
+    documentsReady: boolean;
+  };
+  signatures: Record<DepartureSignatureKey, string>;
+  signedAt: string;
+  signedBy?: string;
+  gps?: { latitude: number; longitude: number; accuracy: number };
+}
+
 export interface FieldTrip {
   id: string;
   branchId: string;
@@ -108,6 +135,7 @@ export interface FieldTrip {
   inspectionDone?: boolean;
   inspectionChecklist?: InspectionChecklistEntry[];
   waybillValidated?: boolean;
+  departureValidation?: DepartureValidationData;
   reports: FieldReport[];
   source: 'qa' | 'live';
   schedule?: Schedule;
@@ -151,6 +179,7 @@ export function readQaTrips(): FieldTrip[] {
         phase: t.phase === 'returned' || t.phase === 'going' ? t.phase : 'waiting',
         createdAt: t.createdAt || '', departedAt: t.departedAt, returnedAt: t.returnedAt,
         odometerStart: t.odometerStart, inspectionDone: t.inspectionDone, waybillValidated: t.waybillValidated,
+        departureValidation: t.departureValidation || undefined,
         reports: Array.isArray(t.reports) ? t.reports : [], source: 'qa' as const
       }));
   } catch { return []; }
@@ -243,6 +272,7 @@ export function normalizeLiveSchedule(s: Schedule): FieldTrip | null {
     inspectionDone: Boolean((s as any).crewInspectionDone),
     inspectionChecklist: Array.isArray((s as any).crewInspectionChecklist) ? (s as any).crewInspectionChecklist : undefined,
     waybillValidated: Boolean((s as any).crewWaybillValidated),
+    departureValidation: (s as any).departureValidation || undefined,
     reports: [], source: 'live', schedule: s
   };
 }
@@ -266,6 +296,7 @@ export async function fetchQaTrips(): Promise<FieldTrip[]> {
     inspectionDone:!!t.inspectionDone,
     inspectionChecklist:Array.isArray(t.inspectionChecklist)?t.inspectionChecklist:undefined,
     waybillValidated:!!t.waybillValidated,
+    departureValidation:t.departureValidation || undefined,
     reports:Array.isArray(t.reports)?t.reports:[],source:'qa'
   }));
 }

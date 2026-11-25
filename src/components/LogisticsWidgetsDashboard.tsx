@@ -72,7 +72,7 @@ const DEFAULT_WIDGET_CONFIGS: WidgetConfig[] = [
   },
   {
     id: 'w-sla-performance',
-    tab: 'tracking_eval',
+    tab: 'integrated_validation',
     title: 'Ketepatan Waktu & SLA Delivery',
     subTitle: 'Ketepatan jam keberangkatan gate-out dan ketepatan tiba di area toko',
     category: 'Jadwal & Kiriman',
@@ -132,7 +132,7 @@ const DEFAULT_WIDGET_CONFIGS: WidgetConfig[] = [
   },
   {
     id: 'w-tracking-eval',
-    tab: 'tracking_eval',
+    tab: 'integrated_validation',
     title: 'Evaluasi Jalur GPS & Kecepatan',
     subTitle: 'Jarak tempuh total (KM), rata-rata kecepatan armada & kepatuhan rute',
     category: 'Monitoring GPS',
@@ -350,7 +350,7 @@ export const LogisticsWidgetsDashboard: React.FC<LogisticsWidgetsDashboardProps>
     if (preset === 'all') {
       setTempWidgets(prev => prev.map(w => ({ ...w, enabled: true })));
     } else if (preset === 'distribution') {
-      const distributionTabs: NavTab[] = ['schedules', 'driver_portal', 'driver_reports', 'tracking_eval'];
+      const distributionTabs: NavTab[] = ['schedules', 'driver_portal', 'driver_reports', 'integrated_validation'];
       setTempWidgets(prev =>
         prev.map(w => ({
           ...w,

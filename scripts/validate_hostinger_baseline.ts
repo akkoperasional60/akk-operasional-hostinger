@@ -62,7 +62,7 @@ const forbiddenText = [
 const sourceExt = new Set(['.ts', '.tsx', '.js', '.jsx', '.json', '.md', '.html']);
 function walk(dir: string) {
   for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (['node_modules', '.git', 'dist', 'dist-portal', 'dist-driver'].includes(ent.name)) continue;
+    if (['node_modules', '.git', 'dist', 'dist-portal', 'dist-driver', 'akk-operasional-hostinger-main'].includes(ent.name)) continue;
     const full = path.join(dir, ent.name);
     if (ent.isDirectory()) walk(full);
     else if (sourceExt.has(path.extname(ent.name))) {

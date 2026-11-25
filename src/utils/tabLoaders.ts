@@ -40,8 +40,6 @@ export const loadFuelEfficiencyManagement = () => loadOnce('FuelEfficiencyManage
   import('../components/FuelEfficiencyManagement').then(m => ({ default: m.FuelEfficiencyManagement })));
 export const loadUserManagement = () => loadOnce('UserManagement', () =>
   import('../components/UserManagement').then(m => ({ default: m.UserManagement })));
-export const loadExcelTrackingEvaluator = () => loadOnce('ExcelTrackingEvaluator', () =>
-  import('../components/ExcelTrackingEvaluator').then(m => ({ default: m.ExcelTrackingEvaluator })));
 export const loadCustomerMapping = () => loadOnce('CustomerMapping', () =>
   import('../components/CustomerMapping').then(m => ({ default: m.CustomerMapping })));
 export const loadFleetFormCenter = () => loadOnce('FleetFormCenter', () =>
@@ -98,7 +96,6 @@ export function getLoaderForTab(tab: NavTab): (() => Promise<any>) | null {
     case 'spareparts': return loadSparePartManagement;
     case 'maintenance_costs': return loadFleetMaintenanceCostManagement;
     case 'fuel_efficiency': return loadFuelEfficiencyManagement;
-    case 'tracking_eval': return loadExcelTrackingEvaluator;
     case 'customer_map': return loadCustomerMapping;
     case 'fleet_forms': return loadFleetFormCenter;
     case 'sales_dashboard':

@@ -34,6 +34,7 @@ import { branchStore } from '../../services/branchStore';
 import { useToast } from '../../context/ToastContext';
 import { ExifMetadataBadge } from '../../utils/exifMetadata';
 import { resolvePreciseCustomerGps } from '../../utils/preciseCustomerGps';
+import { listenCrewChanged } from '../crew/crewApi';
 
 type IssueCategoryFilter = 'all' | 'salah_muat' | 'lebih_muat' | 'kurang_muat' | 'retur';
 type ValidationStatusFilter = 'all' | 'pending' | 'verified' | 'follow_up' | 'resolved';
@@ -256,6 +257,9 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
 
     const handleUpdate = () => loadReports();
     window.addEventListener('driver-report-updated', handleUpdate);
+    const unsubCrew = listenCrewChanged(() => {
+      void driverReportService.syncWithServer(true).then(() => loadReports());
+    });
     const poll = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       void driverReportService.syncWithServer(false).then(() => loadReports());
@@ -263,6 +267,7 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
 
     return () => {
       window.removeEventListener('driver-report-updated', handleUpdate);
+      unsubCrew();
       clearInterval(poll);
     };
   }, []);
@@ -1084,7 +1089,52 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
 
                   {/* Right Photo Preview + Actions */}
                   <div className="flex flex-row lg:flex-col items-center lg:items-end justify-between gap-2.5 shrink-0">
-                    {photos.length > 0 ? (
+                    {photos.length >= 2 ? (
+                      <div className="flex items-center gap-2">
+                        {photos.slice(0, 2).map((pUrl, pIdx) => {
+                          const slotLabel =
+                            rep.category === 'retur'
+                              ? pIdx === 0
+                                ? 'Foto Faktur'
+                                : 'Foto Barang'
+                              : `Foto #${pIdx + 1}`;
+                          return (
+                            <button
+                              key={`${rep.id}-thumb-${pIdx}`}
+                              type="button"
+                              onClick={() => {
+                                setPhotoModalReport(rep);
+                                setPhotoModalIndex(pIdx);
+                              }}
+                              title={`Klik untuk memperbesar ${slotLabel}`}
+                              className="relative w-20 h-20 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-950 group cursor-pointer"
+                            >
+                              <img
+                                src={pUrl}
+                                alt={slotLabel}
+                                className="w-full h-full object-cover group-hover:scale-105 transition"
+                              />
+                              <div className="absolute inset-x-0 bottom-0 bg-slate-950/80 text-white text-[9px] font-bold py-0.5 px-1 flex items-center justify-center gap-1 truncate">
+                                <Camera className="w-2.5 h-2.5 shrink-0" />
+                                <span className="truncate">{slotLabel}</span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                        {photos.length > 2 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPhotoModalReport(rep);
+                              setPhotoModalIndex(2);
+                            }}
+                            className="h-20 px-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-700 dark:text-slate-200 cursor-pointer"
+                          >
+                            +{photos.length - 2}
+                          </button>
+                        )}
+                      </div>
+                    ) : photos.length > 0 ? (
                       <button
                         type="button"
                         onClick={() => {
@@ -1154,6 +1204,9 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
               <div>
                 <h3 className="text-sm font-black text-white">
                   Bukti Foto • {getCategoryMeta(photoModalReport.category).label}
+                  {photoModalReport.category === 'retur' && activeModalPhotos.length > 1
+                    ? ` (${photoModalIndex === 0 ? 'Foto Faktur' : photoModalIndex === 1 ? 'Foto Barang' : `Foto #${photoModalIndex + 1}`})`
+                    : ''}
                 </h3>
                 <p className="text-[11px] text-slate-400">
                   {photoModalReport.driverName} (Armada: {resolveFleetInitial(photoModalReport)}) • {photoModalReport.issueItemName || '-'}
@@ -1182,18 +1235,31 @@ export const MuatReturValidationTab: React.FC<MuatReturValidationTabProps> = ({
 
             {activeModalPhotos.length > 1 && (
               <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                {activeModalPhotos.map((u, idx) => (
-                  <button
-                    key={`val-photo-${idx}`}
-                    type="button"
-                    onClick={() => setPhotoModalIndex(idx)}
-                    className={`w-14 h-14 rounded-xl overflow-hidden border-2 shrink-0 cursor-pointer ${
-                      idx === photoModalIndex ? 'border-blue-500' : 'border-slate-700 opacity-70'
-                    }`}
-                  >
-                    <img src={u} alt={`Foto ${idx + 1}`} className="w-full h-full object-cover" />
-                  </button>
-                ))}
+                {activeModalPhotos.map((u, idx) => {
+                  const thumbLabel =
+                    photoModalReport.category === 'retur'
+                      ? idx === 0
+                        ? 'Foto Faktur'
+                        : idx === 1
+                        ? 'Foto Barang'
+                        : `Foto #${idx + 1}`
+                      : `Foto ${idx + 1}`;
+                  return (
+                    <button
+                      key={`val-photo-${idx}`}
+                      type="button"
+                      onClick={() => setPhotoModalIndex(idx)}
+                      className={`relative w-20 h-16 rounded-xl overflow-hidden border-2 shrink-0 cursor-pointer ${
+                        idx === photoModalIndex ? 'border-blue-500' : 'border-slate-700 opacity-70'
+                      }`}
+                    >
+                      <img src={u} alt={thumbLabel} className="w-full h-full object-cover" />
+                      <span className="absolute inset-x-0 bottom-0 bg-slate-950/80 text-white text-[9px] font-bold py-0.5 text-center truncate px-1">
+                        {thumbLabel}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>

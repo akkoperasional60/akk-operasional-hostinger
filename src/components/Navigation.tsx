@@ -4,7 +4,7 @@ import { UserRole, UserProfile } from '../types';
 import { logisticsStore } from '../services/store';
 import { AkkLogo } from './AkkLogo';
 
-export type NavTab = 'dashboard' | 'operational_dashboard' | 'schedules' | 'fleets' | 'crew_history' | 'tracking_eval' | 'customer_map' | 'architecture' | 'hr_dashboard';
+export type NavTab = 'dashboard' | 'operational_dashboard' | 'schedules' | 'fleets' | 'crew_history' | 'customer_map' | 'architecture' | 'hr_dashboard';
 
 interface NavigationProps {
   currentTab: NavTab;
@@ -55,13 +55,12 @@ export const Navigation: React.FC<NavigationProps> = ({ currentTab, onSelectTab,
     { id: 'schedules' as NavTab, label: 'Jadwal & Penugasan', icon: Calendar, badge: '5 Aktif' },
     { id: 'fleets' as NavTab, label: 'Armada & Kru Supir', icon: Truck, badge: null },
     { id: 'crew_history' as NavTab, label: 'Histori & Otorisasi Kru', icon: History, badge: 'Rotasi Wilayah' },
-    { id: 'tracking_eval' as NavTab, label: 'Evaluasi Jalur (Excel)', icon: FileSpreadsheet, badge: 'SheetJS' },
     { id: 'customer_map' as NavTab, label: 'Pemetaan Toko Retail', icon: Map, badge: '10 Outlet' },
     { id: 'hr_dashboard' as NavTab, label: 'Dashboard HR', icon: Users, badge: null },
     { id: 'architecture' as NavTab, label: 'Skema Database & SQL', icon: Database, badge: 'DB' },
   ].filter(item => {
     if (currentUser.role === 'sales_admin') {
-      return item.id === 'dashboard' || item.id === 'tracking_eval';
+      return item.id === 'dashboard';
     }
     if (currentUser.role === 'driver' || currentUser.role === 'spv_logistik') {
       return item.id !== 'architecture';

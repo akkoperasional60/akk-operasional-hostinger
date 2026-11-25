@@ -7,11 +7,20 @@ import {
   RetailStore,
   FuelLog,
   CrewDeliveryHistory,
-  TrackingEvaluation
+  TrackingEvaluation,
+  TracksolidBottomSummary
 } from '../types';
 import { logisticsStore } from './store';
 import { driverReportService, DriverHelperReport } from './driverReportService';
-import { DEFAULT_TRACKSOLID_BOTTOM_SUMMARY } from '../components/ExcelTrackingEvaluator';
+
+export const DEFAULT_TRACKSOLID_BOTTOM_SUMMARY: TracksolidBottomSummary = {
+  trips: 26,
+  totalMileageKm: 301.95,
+  duration: '09:06:11',
+  avgSpeedKmh: 33.17,
+  maxSpeedKmh: 79.00,
+  totalFuelConsumptionLiters: 0.00
+};
 
 export interface AnalyticsFilterParams {
   startDate: string; // YYYY-MM-DD or ''

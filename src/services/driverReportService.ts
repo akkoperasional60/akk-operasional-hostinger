@@ -49,8 +49,9 @@ export interface DriverHelperReport {
   gpsValidatedBy?: string;
   gpsValidatedAt?: string;
   gpsValidationNote?: string;
-  // Data Pengisian BBM (Solar) di Farly / Gajah Mada
+  // Data Pengisian BBM (Solar) di Farly / Gajah Mada / SPBU Lain (Urgent)
   fuelLocation?: 'Farly' | 'Gajah Mada' | 'SPBU Lain (Urgent)' | string;
+  fuelUrgentReason?: string;
   fuelLiters?: string;
   exifMetadata?: {
     DateTimeOriginal: string;
@@ -444,6 +445,10 @@ class DriverReportService {
         const nextValidationNote = inc.validationNote || existing.validationNote;
         const nextGpsValidationStatus = inc.gpsValidationStatus || existing.gpsValidationStatus;
         const nextGpsValidationNote = inc.gpsValidationNote || existing.gpsValidationNote;
+        const nextOutlet = inc.customerOutletName || existing.customerOutletName;
+        const nextInvoice = inc.invoiceNumber || existing.invoiceNumber;
+        const nextItemName = inc.issueItemName || existing.issueItemName;
+        const nextItemQty = inc.issueQty || existing.issueQty;
 
         const isDiff =
           nextSolution !== existing.solution ||
@@ -456,7 +461,11 @@ class DriverReportService {
           nextValidationDecision !== existing.validationDecision ||
           nextValidationNote !== existing.validationNote ||
           nextGpsValidationStatus !== existing.gpsValidationStatus ||
-          nextGpsValidationNote !== existing.gpsValidationNote;
+          nextGpsValidationNote !== existing.gpsValidationNote ||
+          nextOutlet !== existing.customerOutletName ||
+          nextInvoice !== existing.invoiceNumber ||
+          nextItemName !== existing.issueItemName ||
+          nextItemQty !== existing.issueQty;
 
         if (isDiff) {
           const merged: DriverHelperReport = {
@@ -474,6 +483,13 @@ class DriverReportService {
             gpsValidatedBy: inc.gpsValidatedBy || existing.gpsValidatedBy,
             gpsValidatedAt: inc.gpsValidatedAt || existing.gpsValidatedAt,
             status: nextStatus,
+            checkoutTimeFormatted: nextCheckout,
+            customerOutletName: nextOutlet,
+            invoiceNumber: nextInvoice,
+            issueItemName: nextItemName,
+            issueQty: nextItemQty,
+            fuelLocation: inc.fuelLocation || existing.fuelLocation,
+            fuelUrgentReason: inc.fuelUrgentReason || existing.fuelUrgentReason,
             photoUrl: inc.photoUrl || existing.photoUrl,
             photoUrls: (Array.isArray(inc.photoUrls) && inc.photoUrls.length > 0) ? inc.photoUrls : existing.photoUrls
           };

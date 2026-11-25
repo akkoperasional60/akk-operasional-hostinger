@@ -18,6 +18,27 @@ interface CrewApiOptions {
   saveReport: (report: any) => Promise<void>;
   getReports: () => Promise<any[]>;
   getSchedulesPayload?: () => Promise<any> | any;
+  resolveFleetInfo?: (trip: any) => Promise<{
+    fleetId?: string;
+    plateNumber: string;
+    vehicleType?: string;
+    initialCode?: string;
+    fuelLevelPercent?: number;
+  }>;
+  syncFleetChecklist?: (params: {
+    trip: any;
+    actor: any;
+    checklist: any[];
+    odometerKm: number;
+    now: string;
+  }) => Promise<void>;
+  upsertDepartureShift?: (params: {
+    trip: any;
+    action: 'depart' | 'arrive';
+    actor: any;
+    now: string;
+    gps: { latitude: number; longitude: number; accuracy: number };
+  }) => Promise<void>;
 }
 
 type Position = 'driver' | 'helper';
@@ -296,6 +317,59 @@ function validateAndNormalizeChecklist(raw: unknown) {
   return normalized;
 }
 
+const DEPARTURE_SIGNATURE_KEYS = ['spvLogistik', 'spvOperasional', 'security', 'crew'] as const;
+
+function validateAndNormalizeDepartureForm(raw: unknown, trip: any, actor: any, now: string, gps: { latitude: number; longitude: number; accuracy: number }) {
+  if (!raw || typeof raw !== 'object') {
+    throw Object.assign(new Error('Form Keluar beserta 4 tanda tangan digital wajib dilengkapi.'), { status: 422 });
+  }
+  const input = raw as any;
+  if (!input.checks?.waybillMatch || !input.checks?.documentsReady) {
+    throw Object.assign(new Error('Checklist verifikasi surat jalan dan kelengkapan dokumen wajib dicentang.'), { status: 422 });
+  }
+  const signatures: Record<string, string> = {};
+  for (const key of DEPARTURE_SIGNATURE_KEYS) {
+    const val = typeof input.signatures?.[key] === 'string' ? input.signatures[key].trim() : '';
+    if (!/^data:image\/(png|jpeg|webp);base64,/i.test(val) || val.length < 120) {
+      throw Object.assign(new Error('Seluruh 4 kotak tanda tangan (SPV Logistik, SPV Operasional, Security, Driver/Helper) wajib diisi.'), { status: 422 });
+    }
+    if (val.length > 500_000) {
+      throw Object.assign(new Error('Ukuran gambar tanda tangan terlalu besar.'), { status: 413 });
+    }
+    signatures[key] = val;
+  }
+  const wibTime = new Date(now).toLocaleTimeString('id-ID', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Asia/Jakarta',
+    hour12: false
+  }).replace('.', ':');
+  const wibDate = new Date(now).toLocaleDateString('id-ID', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'Asia/Jakarta'
+  });
+  return {
+    summary: {
+      driverName: clean(input.summary?.driverName) || clean(trip?.portalCrew?.name || trip?.crew?.name) || '-',
+      helperName: clean(input.summary?.helperName) || clean(trip?.portalCrewHelper?.name || trip?.crewHelper?.name) || '-',
+      fleetLabel: clean(input.summary?.fleetLabel) || clean(trip?.fleet?.initialCode || trip?.armada || trip?.fleet?.plateNumber) || '-',
+      areaName: clean(input.summary?.areaName) || clean(trip?.areaName || trip?.store?.storeName) || '-',
+      recordedAt: now,
+      recordedAtWib: clean(input.summary?.recordedAtWib) || `${wibTime} WIB · ${wibDate}`
+    },
+    checks: {
+      waybillMatch: true,
+      documentsReady: true
+    },
+    signatures,
+    signedAt: now,
+    signedBy: clean(actor?.full_name || actor?.fullName) || 'Kru AKK',
+    gps
+  };
+}
+
 export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): void {
   const readBranchStateUserPerms = async (userId: string): Promise<Record<string, any> | null> => {
     if (!userId) return null;
@@ -524,9 +598,19 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
           await conn.execute('UPDATE schedules SET status=?,actual_arrival=?,payload_json=?,updated_at=NOW() WHERE id=?',
             [trip.status, trip.actualArrival ? new Date(trip.actualArrival).toISOString().slice(0, 19).replace('T', ' ') : null, JSON.stringify(trip), trip.id]);
         }
-        return { scheduleId: trip.id, action, status: trip.status, at: now, gpsAccuracy: gps.accuracy };
+        return { scheduleId: trip.id, action, status: trip.status, at: now, gpsAccuracy: gps.accuracy, tripSnapshot: JSON.parse(JSON.stringify(trip)) };
       });
-      return res.json({ success: true, ...result });
+      if (opts.upsertDepartureShift && result.tripSnapshot) {
+        await opts.upsertDepartureShift({
+          trip: result.tripSnapshot,
+          action,
+          actor,
+          now: result.at,
+          gps
+        }).catch(err => console.warn('[Crew Shift Sync Warning]', err?.message || err));
+      }
+      const { tripSnapshot: _omitTripSnapshot, ...clientResult } = result;
+      return res.json({ success: true, ...clientResult });
     } catch (error: any) {
       const status = Number(error?.status) || 503;
       return res.status(status).json({ success: false, error: status === 503 ? 'Perubahan status gagal disimpan.' : error.message });
@@ -550,6 +634,8 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
         const slot = currentCrewPosition(trip, actor);
         if (!slot) throw Object.assign(new Error('Belum mengambil posisi pada kiriman ini.'), { status: 403 });
         if (String(trip.status || 'scheduled') !== 'scheduled') throw Object.assign(new Error('Persiapan hanya bisa dicatat sebelum berangkat.'), { status: 409 });
+        const now = new Date().toISOString();
+        let normalizedChecklist: any[] | undefined;
         if (task === 'km') {
           if (slot !== 'driver') throw Object.assign(new Error('KM awal hanya tugas Driver.'), { status: 403 });
           const value = Number(req.body.value);
@@ -559,14 +645,16 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
         } else if (task === 'inspection') {
           if (slot !== 'driver') throw Object.assign(new Error('Checklist kendaraan hanya tugas Driver.'), { status: 403 });
           if (!trip.crewOdometerStart) throw Object.assign(new Error('Isi KM awal terlebih dahulu sebelum mengisi checklist kendaraan.'), { status: 409 });
-          const normalizedChecklist = validateAndNormalizeChecklist(req.body?.checklist);
+          normalizedChecklist = validateAndNormalizeChecklist(req.body?.checklist);
           trip.crewInspectionChecklist = normalizedChecklist;
           trip.crewInspectionDone = true;
         } else {
-          if (slot !== 'helper') throw Object.assign(new Error('Surat jalan hanya tugas Helper.'), { status: 403 });
+          if (slot !== 'helper') throw Object.assign(new Error('Form Keluar & Surat jalan hanya tugas Helper.'), { status: 403 });
+          if (req.body?.departureValidation) {
+            trip.departureValidation = validateAndNormalizeDepartureForm(req.body.departureValidation, trip, actor, now, gps);
+          }
           trip.crewWaybillValidated = true;
         }
-        const now = new Date().toISOString();
         trip.crewFieldEvents = (Array.isArray(trip.crewFieldEvents) ? trip.crewFieldEvents : []).slice(-(MAX_REPORT_EVENTS - 1));
         trip.crewFieldEvents.push({
           action: task, actorId: clean(actor.id), actorName: clean(actor.full_name), position: slot,
@@ -577,9 +665,23 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
         if (conn) {
           await conn.execute('UPDATE schedules SET payload_json=?,updated_at=NOW() WHERE id=?', [JSON.stringify(trip), trip.id]);
         }
-        return { task, at: now };
+        return {
+          task,
+          at: now,
+          normalizedChecklist,
+          tripSnapshot: task === 'inspection' ? JSON.parse(JSON.stringify(trip)) : undefined
+        };
       });
-      return res.json({ success: true, ...result });
+      if (task === 'inspection' && opts.syncFleetChecklist && result.tripSnapshot && result.normalizedChecklist) {
+        await opts.syncFleetChecklist({
+          trip: result.tripSnapshot,
+          actor,
+          checklist: result.normalizedChecklist,
+          odometerKm: Number(result.tripSnapshot.crewOdometerStart || 0),
+          now: result.at
+        }).catch(err => console.warn('[Crew Checklist Sync Warning]', err?.message || err));
+      }
+      return res.json({ success: true, task: result.task, at: result.at });
     } catch (e: any) {
       const status = Number(e?.status) || 503;
       return res.status(status).json({ success: false, error: status === 503 ? 'Gagal menyimpan tugas di database.' : e.message });
@@ -596,8 +698,37 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
     if (!['bbm', 'kendala', 'toko', 'retur', 'form_kirim'].includes(kind) || note.length < 3 || note.length > 1200) {
       return res.status(400).json({ success: false, error: 'Jenis atau keterangan laporan tidak valid.' });
     }
+    const fuelLocation = kind === 'bbm' ? (clean(report.fuelLocation) || 'Farly') : undefined;
+    const fuelUrgentReason = kind === 'bbm' ? clean(report.fuelUrgentReason) : undefined;
+    if (kind === 'bbm') {
+      if (!['Farly', 'Gajah Mada', 'SPBU Lain (Urgent)'].includes(fuelLocation || '')) {
+        return res.status(400).json({ success: false, error: 'Lokasi SPBU wajib dipilih (Farly, Gajah Mada, atau SPBU Lain Urgent).' });
+      }
+      if (fuelLocation === 'SPBU Lain (Urgent)' && (!fuelUrgentReason || fuelUrgentReason.length < 3 || fuelUrgentReason.length > 400)) {
+        return res.status(422).json({ success: false, error: 'Alasan pengisian SPBU Lain (Urgent) wajib diisi minimal 3 huruf.' });
+      }
+    }
+    const customerOutletName = clean(report.customerOutletName).slice(0, 140);
+    const invoiceNumber = clean(report.invoiceNumber).slice(0, 80);
+    const issueItemName = clean(report.issueItemName).slice(0, 160);
+    const issueQty = clean(report.issueQty).slice(0, 60);
+    const kendalaSubType = clean(report.kendalaSubType);
+    if (kind === 'toko' && customerOutletName.length < 2) {
+      return res.status(422).json({ success: false, error: 'Nama pelanggan / toko wajib diisi pada Absen Toko.' });
+    }
+    if (kind === 'retur' && (!customerOutletName || !issueItemName)) {
+      return res.status(422).json({ success: false, error: 'Nama pelanggan dan nama item barang retur wajib diisi.' });
+    }
     const gps = checkLocation({ latitude: report.gpsLatitude, longitude: report.gpsLongitude, accuracy: report.gpsAccuracy });
     if (!gps) return res.status(422).json({ success: false, error: 'GPS aktual wajib tersedia.' });
+    const rawPhotoUrls = Array.isArray(report.photoUrls) ? report.photoUrls : [];
+    const validatedPhotoUrls: string[] = [];
+    for (const candidate of rawPhotoUrls.slice(0, 6)) {
+      if (typeof candidate !== 'string' || candidate.length < 80 || candidate.length > 3_500_000 || !/^data:image\/(jpeg|png|webp);base64,/i.test(candidate)) {
+        return res.status(422).json({ success: false, error: 'Salah satu foto unggahan tidak valid atau terlalu besar.' });
+      }
+      validatedPhotoUrls.push(candidate);
+    }
     const photo = typeof report.photoUrl === 'string' ? report.photoUrl : '';
     const capture = { photo, source: report.photoSource, capturedAt: report.photoCapturedAt, gpsCapturedAt: report.gpsCapturedAt,
       gps: { latitude: report.gpsLatitude, longitude: report.gpsLongitude, accuracy: report.gpsAccuracy } };
@@ -608,6 +739,7 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
     if (photo && (photo.length > 3_500_000 || !/^data:image\/(jpeg|png|webp);base64,/i.test(photo))) {
       return res.status(413).json({ success: false, error: 'Foto terlalu besar atau format tidak didukung.' });
     }
+    const finalPhotoUrls = validatedPhotoUrls.length > 0 ? validatedPhotoUrls : (photo ? [photo] : []);
     if (!isDatabaseConfigured() && !isPreviewRuntime) return res.status(503).json({ success: false, error: 'Database belum terhubung.' });
     try {
       const payload = await readSchedulesPayload();
@@ -620,17 +752,62 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
       if (position === 'driver' && ['toko', 'retur', 'form_kirim'].includes(kind) || position === 'helper' && kind === 'bbm') {
         return res.status(403).json({ success: false, error: 'Laporan bukan tugas posisi ini.' });
       }
+      const fleetResolved = opts.resolveFleetInfo
+        ? await opts.resolveFleetInfo(trip).catch(() => null)
+        : null;
+      const canonicalPlate = fleetResolved?.plateNumber || trip.fleet?.plateNumber || trip.armada || '-';
+      const areaName = trip.areaName || trip.store?.storeName || '-';
       const timestamp = new Date().toISOString();
+      const dateStr = new Date(timestamp).toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' });
+      const timeWib = new Date(timestamp).toLocaleTimeString('id-ID', {
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Asia/Jakarta',
+        hour12: false
+      }).replace('.', ':') + ' WIB';
+      const categoryMap: Record<string, string> = {
+        bbm: 'isi_bbm',
+        kendala: 'kendala_jalan',
+        toko: 'istirahat',
+        retur: 'retur',
+        form_kirim: 'akhir_kiriman'
+      };
+      const reportNotes =
+        kind === 'bbm' && fuelLocation === 'SPBU Lain (Urgent)' && fuelUrgentReason
+          ? `[SPBU Lain (Urgent): ${fuelUrgentReason}] ${note}`
+          : kind === 'toko' && customerOutletName && !note.includes('[ABSEN KIRIMAN PELANGGAN:')
+          ? `[ABSEN KIRIMAN PELANGGAN: ${customerOutletName}] ${note}`
+          : note;
+      const isAntriQueue = kind === 'kendala' && (kendalaSubType === 'antri_customer' || /antri/i.test(note));
       const row = {
-        id: `crew-v65-${crypto.randomUUID()}`, scheduleId: trip.id, trackingNumber: trip.trackingNumber,
-        reportType: kind, type: kind, userRole: position === 'driver' ? 'Driver' : 'Helper',
-        driverName: trip.crew?.name || '-', helperName: trip.crewHelper?.name || '-',
+        id: `crew-v65-${crypto.randomUUID()}`, scheduleId: trip.id, deliveryId: trip.id, trackingNumber: trip.trackingNumber,
+        reportType: kind, type: kind, category: categoryMap[kind] || 'kendala_jalan',
+        userRole: position === 'driver' ? 'Driver' : 'Helper',
+        driverId: clean(trip.crew?.id || actor.id),
+        driverName: trip.crew?.name || clean(actor.full_name) || '-', helperName: trip.crewHelper?.name || '-',
         userId: clean(actor.id), actorName: clean(actor.full_name),
-        plateNumber: trip.armada || trip.fleet?.plateNumber || '-', area: trip.areaName || trip.store?.storeName || '-',
-        notes: note, note, photoUrl: photo, photoSource: photo ? 'camera' : 'manifest_no_photo',
+        plateNumber: canonicalPlate, area: areaName, areaName,
+        ...(kind === 'bbm' ? { fuelLocation, ...(fuelUrgentReason ? { fuelUrgentReason } : {}) } : {}),
+        ...(customerOutletName ? { customerOutletName } : {}),
+        ...(invoiceNumber ? { invoiceNumber } : {}),
+        ...(issueItemName ? { issueItemName } : {}),
+        ...(issueQty ? { issueQty } : {}),
+        ...(isAntriQueue
+          ? {
+              customerQueueStatus: 'sedang_mengantri',
+              customerQueueStartIso: timestamp,
+              customerQueueStartFormatted: timeWib
+            }
+          : {}),
+        notes: reportNotes, note: reportNotes, photoUrl: photo || finalPhotoUrls[0] || '', photoUrls: finalPhotoUrls,
+        photoSource: photo ? 'camera' : 'manifest_no_photo',
         photoCapturedAt: capture.capturedAt || timestamp, gpsCapturedAt: capture.gpsCapturedAt || timestamp,
         gpsLatitude: gps.latitude, gpsLongitude: gps.longitude, gpsAccuracy: gps.accuracy,
-        timestamp, status: 'submitted', source: 'crew_v65'
+        latitude: gps.latitude, longitude: gps.longitude,
+        gmapsUrl: `https://maps.google.com/?q=${gps.latitude},${gps.longitude}`,
+        date: dateStr, timestamp,
+        status: kind === 'kendala' || kind === 'retur' ? 'pending' : 'verified',
+        source: 'crew_v65'
       };
       await opts.saveReport(row);
       return res.json({ success: true, reportId: row.id });
@@ -669,6 +846,7 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
         delete trip.crewInspectionDone;
         delete trip.crewInspectionChecklist;
         delete trip.crewWaybillValidated;
+        delete trip.departureValidation;
         trip.crewFieldEvents = [];
         trip.crewClaimAudit = [];
         trip.crewClaimVersion = Number(trip.crewClaimVersion || 0) + 1;

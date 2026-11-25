@@ -27,7 +27,6 @@ import {
   loadFleetMaintenanceCostManagement,
   loadFuelEfficiencyManagement,
   loadUserManagement,
-  loadExcelTrackingEvaluator,
   loadCustomerMapping,
   loadFleetFormCenter,
   loadSupabaseSqlArchitecture,
@@ -66,7 +65,6 @@ const SparePartManagement = lazyWithRetry(loadSparePartManagement);
 const FleetMaintenanceCostManagement = lazyWithRetry(loadFleetMaintenanceCostManagement);
 const FuelEfficiencyManagement = lazyWithRetry(loadFuelEfficiencyManagement);
 const UserManagement = lazyWithRetry(loadUserManagement);
-const ExcelTrackingEvaluator = lazyWithRetry(loadExcelTrackingEvaluator);
 const CustomerMapping = lazyWithRetry(loadCustomerMapping);
 const FleetFormCenter = lazyWithRetry(loadFleetFormCenter);
 const SupabaseSqlArchitecture = lazyWithRetry(loadSupabaseSqlArchitecture);
@@ -691,7 +689,6 @@ export default function App() {
       case 'maintenance_costs': return 'Biaya Servis & Pemeliharaan Armada';
       case 'fuel_efficiency': return 'Efisiensi Bahan Bakar (BBM) & Konsumsi Armada';
       case 'crew_history': return 'Riwayat Pengiriman & Audit SLA Kru';
-      case 'tracking_eval': return 'Audit Evaluasi Muat & Bongkar (Excel)';
       case 'fleet_forms': return 'Formulir Pengadaan Armada';
       case 'sales_dashboard': return 'Dashboard Admin Penjualan';
       case 'sales_activities': return 'Sales Hub: Aktivitas Harian Admin';
@@ -1088,10 +1085,6 @@ export default function App() {
             <UserManagement
               onNavigateToE2E={() => setCurrentTab('e2e_testing')}
             />
-          )}
-
-          {currentTab === 'tracking_eval' && (
-            <ExcelTrackingEvaluator />
           )}
 
           {currentTab === 'customer_map' && (

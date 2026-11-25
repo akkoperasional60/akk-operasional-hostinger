@@ -85,7 +85,6 @@ const getTabContextName = (tab?: string): string => {
     case 'customer_map': return 'Pemetaan Toko';
     case 'fleet_forms': return 'Formulir Armada';
     case 'crew_history': return 'Audit SLA & Kru';
-    case 'tracking_eval': return 'Evaluasi Muat (Excel)';
     case 'users': return 'Manajemen Pengguna';
     default:
       if (tab?.startsWith('sales_')) return 'Sales & Penjualan';
@@ -155,14 +154,6 @@ const getTabQuickReplies = (tab?: string, lastMessage?: string): QuickReply[] =>
       { id: 'ch_riwayat', label: 'Riwayat Pengiriman', prompt: 'Bagaimana cara mencari riwayat pengiriman masa lalu berdasarkan nama sopir?', icon: <History size={12} className="text-blue-400" /> },
       { id: 'ch_terbaik', label: 'Kinerja Kru Terbaik', prompt: 'Siapa kru driver dengan catatan pengiriman tercepat dan tanpa komplain?', icon: <Users size={12} className="text-emerald-400" /> },
       { id: 'ch_terlambat', label: 'Laporan Terlambat', prompt: 'Berapa total kejadian keterlambatan pengiriman dalam 30 hari terakhir?', icon: <AlertTriangle size={12} className="text-rose-400" /> },
-    ];
-  }
-
-  if (tab === 'tracking_eval') {
-    return [
-      { id: 'te_eval', label: 'Evaluasi Excel', prompt: 'Bagaimana cara mengunggah dan menganalisis file Excel tracking muat-bongkar?', icon: <FileSpreadsheet size={12} className="text-emerald-400" /> },
-      { id: 'te_durasi', label: 'Laporan Durasi Muat', prompt: 'Berapa rata-rata waktu yang dibutuhkan dari truk masuk hingga selesai muat?', icon: <Clock size={12} className="text-amber-400" /> },
-      { id: 'te_deviasi', label: 'Deviasi Waktu', prompt: 'Bagaimana mengidentifikasi deviasi waktu bongkar muat yang melebihi standar?', icon: <AlertTriangle size={12} className="text-rose-400" /> },
     ];
   }
 

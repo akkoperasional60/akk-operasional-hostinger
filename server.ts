@@ -3449,6 +3449,14 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
     inMemoryShiftsLoadedFromDb = true;
     if (!isDatabaseConfigured()) {
+      const diskShifts = readPersistentAppState('driver_shifts_v2');
+      if (Array.isArray(diskShifts)) {
+        inMemoryDriverShifts = diskShifts.map(sanitizeShiftRecord);
+      }
+      const diskPins = readPersistentAppState('driver_pins_v2');
+      if (diskPins && typeof diskPins === 'object') {
+        inMemoryDriverPins = diskPins;
+      }
       return { shifts: inMemoryDriverShifts, pins: inMemoryDriverPins };
     }
     try {
@@ -3500,7 +3508,13 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     if (pinsMap) {
       inMemoryDriverPins = { ...pinsMap };
     }
-    if (!isDatabaseConfigured()) return;
+    if (!isDatabaseConfigured()) {
+      writePersistentAppState('driver_shifts_v2', inMemoryDriverShifts);
+      if (pinsMap) {
+        writePersistentAppState('driver_pins_v2', inMemoryDriverPins);
+      }
+      return;
+    }
     try {
       await mysqlQuery(
         `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
@@ -4702,6 +4716,60 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   setCrewQaChangedListener((tripId) => broadcastCrewSyncEvent('crew_qa', tripId));
   registerCrewQaRoutes(app, requireAuth);
   // Only these endpoints can claim a vacant live slot using a locked transaction.
+  const resolveFleetInfoForTrip = async (trip: any): Promise<{
+    fleetId?: string;
+    plateNumber: string;
+    vehicleType?: string;
+    initialCode?: string;
+    fuelLevelPercent?: number;
+  }> => {
+    const directPlate = sanitizeOperationalPlate(trip?.fleet?.plateNumber);
+    const armadaRaw = String(trip?.armada || '').trim();
+    const armadaNorm = armadaRaw.toLowerCase();
+    const fleetId = String(trip?.fleetId || trip?.fleet?.id || '').trim();
+
+    let candidates: any[] = Object.values(inMemoryFleetsFallback);
+    if (isDatabaseConfigured()) {
+      try {
+        const dbRows = await mysqlQuery<any[]>("SELECT id, plate_number, vehicle_type, fuel_level_percent, payload_json FROM fleets");
+        if (Array.isArray(dbRows) && dbRows.length > 0) {
+          candidates = dbRows.map((r: any) => {
+            const p = parseJsonColumn(r.payload_json) || {};
+            return {
+              id: r.id,
+              plateNumber: r.plate_number,
+              vehicleType: r.vehicle_type,
+              fuelLevelPercent: Number(r.fuel_level_percent ?? 80),
+              initialCode: p.initialCode || ''
+            };
+          });
+        }
+      } catch {}
+    }
+
+    const matched = candidates.find((f: any) => {
+      if (!f) return false;
+      if (fleetId && String(f.id || '').trim() === fleetId) return true;
+      const pClean = String(f.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+      if (directPlate !== '-' && pClean && directPlate.replace(/\s+/g, '').toUpperCase() === pClean) return true;
+      if (armadaNorm) {
+        const initNorm = String(f.initialCode || '').trim().toLowerCase();
+        if (initNorm && (initNorm === armadaNorm || armadaNorm.includes(initNorm))) return true;
+        if (pClean && armadaRaw.replace(/\s+/g, '').toUpperCase().includes(pClean)) return true;
+      }
+      return false;
+    });
+
+    const resolvedPlate = sanitizeOperationalPlate(matched?.plateNumber || directPlate !== '-' ? (matched?.plateNumber || directPlate) : armadaRaw);
+    return {
+      fleetId: matched?.id || fleetId || undefined,
+      plateNumber: resolvedPlate,
+      vehicleType: matched?.vehicleType || trip?.fleet?.vehicleType || armadaRaw || 'Armada Kiriman',
+      initialCode: matched?.initialCode || trip?.fleet?.initialCode || '',
+      fuelLevelPercent: Number(matched?.fuelLevelPercent ?? trip?.fleet?.fuelLevelPercent ?? 80)
+    };
+  };
+
   registerCrewClaimRoutes(app, {
     requireAuth,
     getSchedulesPayload: () => inMemorySchedulesPayload || readPersistentAppState('schedules_payload'),
@@ -4729,6 +4797,281 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       }
       broadcastDriverReportEvent('report_upserted', report);
       broadcastCrewSyncEvent('crew_report', report?.scheduleId);
+    },
+    resolveFleetInfo: resolveFleetInfoForTrip,
+    syncFleetChecklist: async ({ trip, actor, checklist, odometerKm, now }) => {
+      const fleetInfo = await resolveFleetInfoForTrip(trip);
+      const byKey = new Map<string, any>();
+      (Array.isArray(checklist) ? checklist : []).forEach((item: any) => {
+        if (item?.key) byKey.set(String(item.key), item);
+      });
+      const isOkStatus = (raw?: string) => {
+        const v = String(raw || '').trim().toLowerCase();
+        return v === 'normal' || v === 'bersih' || v === 'ada' || v === 'ok';
+      };
+      const oli = byKey.get('oli_mesin');
+      const rad = byKey.get('air_radiator');
+      const aki = byKey.get('air_aki');
+      const rem = byKey.get('rem_minyak_rem');
+      const kabin = byKey.get('kebersihan_kabin');
+      const inv = byKey.get('inventaris_mobil');
+      const ban = byKey.get('ban_cadangan');
+
+      const stdSpecs = [
+        {
+          category: 'mesin_fluida', categoryLabel: 'Mesin & Cairan Fluida', name: 'Oli Mesin',
+          description: 'Periksa volume dan kondisi warna oli mesin pada dipstick berada di batas aman',
+          status: isOkStatus(oli?.status) ? 'ok' : 'issue',
+          note: isOkStatus(oli?.status) ? '' : `Temuan kru: ${oli?.status || 'Tidak Normal'}`,
+          photoUrl: oli?.photo
+        },
+        {
+          category: 'mesin_fluida', categoryLabel: 'Mesin & Cairan Fluida', name: 'Air Radiator',
+          description: 'Periksa level air radiator (coolant) pada tabung reservoir dan pastikan tutup rapat',
+          status: isOkStatus(rad?.status) ? 'ok' : 'issue',
+          note: isOkStatus(rad?.status) ? '' : `Temuan kru: ${rad?.status || 'Tidak Normal'}`,
+          photoUrl: rad?.photo
+        },
+        {
+          category: 'mesin_fluida', categoryLabel: 'Mesin & Cairan Fluida', name: 'Foto Oli Mesin & Air Radiator',
+          description: 'Ambil foto bukti fisik pengecekan oli mesin dan air radiator armada',
+          status: isOkStatus(oli?.status) && isOkStatus(rad?.status) && Boolean(oli?.photo || rad?.photo) ? 'ok' : 'issue',
+          note: isOkStatus(oli?.status) && isOkStatus(rad?.status) ? '' : 'Periksa kondisi oli mesin / air radiator pada foto bukti',
+          photoUrl: oli?.photo || rad?.photo
+        },
+        {
+          category: 'lampu_listrik', categoryLabel: 'Kelistrikan & Accu', name: 'Air Accu',
+          description: 'Periksa batas level cairan air accu (aki) berada di antara garis Upper dan Lower',
+          status: isOkStatus(aki?.status) ? 'ok' : 'issue',
+          note: isOkStatus(aki?.status) ? '' : `Temuan kru: ${aki?.status || 'Tidak Normal'}`
+        },
+        {
+          category: 'rem_roda', categoryLabel: 'Rem & Roda', name: 'Rem Mobil & Minyak Rem',
+          description: 'Periksa fungsi pijakan rem mobil pakem serta level minyak rem pada tabung master',
+          status: isOkStatus(rem?.status) ? 'ok' : 'issue',
+          note: isOkStatus(rem?.status) ? '' : `Temuan kru: ${rem?.status || 'Tidak Normal'}`,
+          photoUrl: rem?.photo
+        },
+        {
+          category: 'rem_roda', categoryLabel: 'Rem & Roda', name: 'Foto Minyak Rem',
+          description: 'Ambil foto bukti fisik level tabung minyak rem armada',
+          status: isOkStatus(rem?.status) && Boolean(rem?.photo) ? 'ok' : 'issue',
+          note: isOkStatus(rem?.status) ? '' : 'Periksa kondisi rem / minyak rem pada foto bukti',
+          photoUrl: rem?.photo
+        },
+        {
+          category: 'fisik_dokumen', categoryLabel: 'Kabin & Inventaris', name: 'Kebersihan Kabin',
+          description: 'Pastikan ruang kabin pengemudi bersih, rapi, dan bebas dari sampah/kotoran',
+          status: isOkStatus(kabin?.status) ? 'ok' : 'issue',
+          note: isOkStatus(kabin?.status) ? '' : `Temuan kru: ${kabin?.status || 'Tidak Bersih'}`,
+          photoUrl: kabin?.photo
+        },
+        {
+          category: 'fisik_dokumen', categoryLabel: 'Kabin & Inventaris', name: 'Inventaris Mobil',
+          description: 'Periksa kelengkapan inventaris wajib mobil (dongkrak, kunci roda, dokumen jalan)',
+          status: isOkStatus(inv?.status) ? 'ok' : 'issue',
+          note: isOkStatus(inv?.status) ? '' : `Temuan kru: ${inv?.status || 'Tidak Normal'}`
+        },
+        {
+          category: 'rem_roda', categoryLabel: 'Rem & Roda', name: 'Ban Cadangan',
+          description: 'Pastikan ban cadangan terpasang kuat dan memiliki tekanan angin siap pakai',
+          status: isOkStatus(ban?.status) ? 'ok' : 'issue',
+          note: isOkStatus(ban?.status) ? '' : `Temuan kru: ${ban?.status || 'Tidak Ada'}`
+        }
+      ];
+
+      const items = stdSpecs.map((spec, idx) => ({
+        id: `item-${trip.id}-${idx + 1}`,
+        ...spec
+      }));
+      const passedCount = items.filter(i => i.status === 'ok').length;
+      const issueCount = items.filter(i => i.status === 'issue').length;
+      const overallStatus = issueCount === 0 ? 'passed' : issueCount <= 2 ? 'warning' : 'failed';
+      const nowDate = new Date(now);
+      const dateStr = nowDate.toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' });
+      const timeStr = nowDate.toLocaleTimeString('id-ID', {
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Asia/Jakarta',
+        hour12: false
+      }).replace('.', ':');
+
+      const driverName = String(trip?.portalCrew?.name || trip?.crew?.name || actor?.full_name || 'Driver AKK').trim();
+      const areaName = String(trip?.areaName || trip?.store?.storeName || 'Operasional DC').trim();
+      const newChecklist = {
+        id: `CHK-CREW-${trip.id}`,
+        driverId: String(trip?.portalCrew?.id || trip?.crewId || actor?.id || ''),
+        driverName,
+        fleetId: fleetInfo.fleetId || `fleet-${trip.id}`,
+        plateNumber: fleetInfo.plateNumber,
+        vehicleType: fleetInfo.vehicleType || 'Armada Kiriman',
+        date: dateStr,
+        time: timeStr,
+        odometerKm: Number(odometerKm || trip?.crewOdometerStart || 0),
+        fuelLevelPercent: fleetInfo.fuelLevelPercent ?? 80,
+        inspectionType: 'pre_trip',
+        overallStatus,
+        passedCount,
+        issueCount,
+        items,
+        notes: `Checklist Portal Driver (${areaName}) · ${passedCount}/${items.length} komponen OK`,
+        driverSignature: `${driverName} (Portal Kru)`,
+        checkerName: 'Portal Driver AKK',
+        checkerSigned: true,
+        synced: true,
+        createdAt: now
+      };
+
+      const current = await getPersistedChecklists();
+      const idx = current.findIndex((c: any) => c && c.id === newChecklist.id);
+      if (idx >= 0) {
+        current[idx] = newChecklist;
+      } else {
+        current.unshift(newChecklist);
+      }
+      await savePersistedChecklists(current.slice(0, 150)).catch(() => {
+        inMemoryFleetChecklists = current.slice(0, 150);
+      });
+      broadcastCrewSyncEvent('crew_checklist', trip.id);
+    },
+    upsertDepartureShift: async ({ trip, action, actor, now, gps }) => {
+      const [{ shifts }, reports] = await Promise.all([
+        loadDriverShiftsFromDbIfNeeded(),
+        loadDriverReportsFromDbIfNeeded()
+      ]);
+      const fleetInfo = await resolveFleetInfoForTrip(trip);
+      const nowDate = new Date(now);
+      const dateStr = nowDate.toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' });
+      const timeClock = nowDate.toLocaleTimeString('id-ID', {
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Asia/Jakarta',
+        hour12: false
+      }).replace('.', ':');
+      const timeWib = `${timeClock} WIB`;
+      const shiftId = `SHF-CREW-${trip.id}`;
+      const reportId = `RPT-SHF-CREW-${trip.id}`;
+
+      const driverId = String(trip?.portalCrew?.id || trip?.crewId || actor?.id || '').trim();
+      const driverName = String(trip?.portalCrew?.name || trip?.crew?.name || actor?.full_name || 'Driver AKK').trim();
+      const helperId = String(trip?.portalCrewHelper?.id || trip?.crewHelperId || '').trim() || undefined;
+      const helperName = String(trip?.portalCrewHelper?.name || trip?.crewHelper?.name || '').trim() || undefined;
+      const areaName = String(trip?.areaName || trip?.store?.storeName || 'Operasional DC').trim();
+
+      const nextShifts = [...shifts];
+      const existingShiftIdx = nextShifts.findIndex((s: any) => s && s.id === shiftId);
+      if (action === 'depart') {
+        const shiftRecord = sanitizeShiftRecord({
+          id: shiftId,
+          driverId,
+          driverName,
+          helper1Id: helperId,
+          helper1Name: helperName,
+          fleetId: fleetInfo.fleetId || `fleet-${trip.id}`,
+          plateNumber: fleetInfo.plateNumber,
+          checkinRole: 'driver',
+          checkinTime: now,
+          checkinTimeFormatted: timeWib,
+          date: dateStr,
+          status: 'checked_in',
+          selectedArea: areaName,
+          locationName: areaName,
+          latitude: gps.latitude,
+          longitude: gps.longitude,
+          verificationMethod: 'gps',
+          notes: `Berangkat via Portal Kru (${String(actor?.full_name || driverName).trim()}) · ${areaName}`,
+          createdAt: now
+        });
+        if (existingShiftIdx >= 0) {
+          nextShifts[existingShiftIdx] = { ...nextShifts[existingShiftIdx], ...shiftRecord };
+        } else {
+          nextShifts.unshift(shiftRecord);
+        }
+      } else {
+        const existingShift = existingShiftIdx >= 0 ? nextShifts[existingShiftIdx] : null;
+        const depTime = trip?.actualDeparture ? new Date(trip.actualDeparture) : nowDate;
+        const depWib = `${depTime.toLocaleTimeString('id-ID', {
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZone: 'Asia/Jakarta',
+          hour12: false
+        }).replace('.', ':')} WIB`;
+        const shiftRecord = sanitizeShiftRecord({
+          ...(existingShift || {}),
+          id: shiftId,
+          driverId: existingShift?.driverId || driverId,
+          driverName: existingShift?.driverName || driverName,
+          helper1Id: existingShift?.helper1Id || helperId,
+          helper1Name: existingShift?.helper1Name || helperName,
+          fleetId: existingShift?.fleetId || fleetInfo.fleetId || `fleet-${trip.id}`,
+          plateNumber: existingShift?.plateNumber && existingShift.plateNumber !== '-' ? existingShift.plateNumber : fleetInfo.plateNumber,
+          checkinRole: existingShift?.checkinRole || 'driver',
+          checkinTime: existingShift?.checkinTime || trip?.actualDeparture || now,
+          checkinTimeFormatted: existingShift?.checkinTimeFormatted || depWib,
+          checkoutTime: now,
+          checkoutTimeFormatted: timeWib,
+          date: existingShift?.date || dateStr,
+          status: 'checked_out',
+          selectedArea: existingShift?.selectedArea || areaName,
+          locationName: existingShift?.locationName || areaName,
+          notes: `${existingShift?.notes || `Berangkat via Portal Kru · ${areaName}`} | Tiba di Gudang: ${timeWib}`,
+          createdAt: existingShift?.createdAt || trip?.actualDeparture || now
+        });
+        if (existingShiftIdx >= 0) {
+          nextShifts[existingShiftIdx] = shiftRecord;
+        } else {
+          nextShifts.unshift(shiftRecord);
+        }
+      }
+      await persistDriverShiftsToDb(nextShifts);
+
+      const nextReports = [...reports];
+      const existingRepIdx = nextReports.findIndex((r: any) => r && (r.id === reportId || r.shiftId === shiftId));
+      const existingRep = existingRepIdx >= 0 ? nextReports[existingRepIdx] : null;
+      const depIso = trip?.actualDeparture || existingRep?.timestamp || now;
+      const depWibStr =
+        existingRep?.checkinTimeFormatted ||
+        `${new Date(depIso).toLocaleTimeString('id-ID', {
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZone: 'Asia/Jakarta',
+          hour12: false
+        }).replace('.', ':')} WIB`;
+
+      const shiftReport = sanitizeReportRecord({
+        ...(existingRep || {}),
+        id: existingRep?.id || reportId,
+        shiftId,
+        scheduleId: trip.id,
+        deliveryId: trip.id,
+        timestamp: existingRep?.timestamp || depIso,
+        date: existingRep?.date || dateStr,
+        driverId,
+        driverName,
+        helperName: helperName || existingRep?.helperName || '-',
+        userRole: 'Driver',
+        plateNumber: fleetInfo.plateNumber,
+        category: 'presensi_shift',
+        areaName,
+        checkinTimeFormatted: action === 'depart' ? timeWib : depWibStr,
+        ...(action === 'arrive' ? { checkoutTimeFormatted: timeWib } : {}),
+        latitude: gps.latitude,
+        longitude: gps.longitude,
+        gmapsUrl: `https://maps.google.com/?q=${gps.latitude},${gps.longitude}`,
+        notes: action === 'depart'
+          ? `Check-In Keberangkatan Portal Kru (${areaName})`
+          : `Check-In & Check-Out Selesai di Gudang (${areaName}) · Pulang ${timeWib}`,
+        status: 'verified'
+      });
+
+      if (existingRepIdx >= 0) {
+        nextReports[existingRepIdx] = shiftReport;
+      } else {
+        nextReports.unshift(shiftReport);
+      }
+      await persistDriverReportsToDb(nextReports);
+      broadcastDriverReportEvent('report_upserted', shiftReport);
+      broadcastCrewSyncEvent('crew_shift', trip.id);
     }
   });
 
@@ -5504,6 +5847,17 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
 
   // REST API for Driver Vehicle Checklists (Synced across Mobile Portal & Admin PC via Hostinger MySQL app_state)
   const getPersistedChecklists = async (): Promise<any[]> => {
+    if (!isDatabaseConfigured()) {
+      const disk = readPersistentAppState('fleet_checklists_v1');
+      if (Array.isArray(disk)) {
+        inMemoryFleetChecklists = disk.map((c: any) =>
+          c && typeof c === 'object' ? { ...c, plateNumber: sanitizeOperationalPlate(c.plateNumber) } : c
+        );
+      }
+      return inMemoryFleetChecklists.map((c: any) =>
+        c && typeof c === 'object' ? { ...c, plateNumber: sanitizeOperationalPlate(c.plateNumber) } : c
+      );
+    }
     try {
       const rows = await mysqlQuery<any[]>("SELECT state_json FROM app_state WHERE state_key = 'fleet_checklists_v1' LIMIT 1");
       if (rows.length > 0 && rows[0].state_json) {
@@ -5523,6 +5877,10 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
 
   const savePersistedChecklists = async (list: any[]): Promise<void> => {
     inMemoryFleetChecklists = list;
+    if (!isDatabaseConfigured()) {
+      writePersistentAppState('fleet_checklists_v1', list);
+      return;
+    }
     await mysqlQuery(
       "INSERT INTO app_state (state_key, state_json) VALUES ('fleet_checklists_v1', ?) ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()",
       [JSON.stringify(list)]
@@ -8422,6 +8780,7 @@ Kembalikan HANYA JSON valid:
         });
       }
 
+      broadcastCrewSyncEvent('form_kirim_save');
       return res.json({
         success: true,
         records: nextRecords,
@@ -8496,6 +8855,7 @@ Kembalikan HANYA JSON valid:
         await persistFormKirimToDbAndDisk(nextList);
       }
 
+      broadcastCrewSyncEvent('form_kirim_workspace');
       return res.json({
         success: true,
         workspace: inMemoryFormKirimWorkspace,
@@ -8568,6 +8928,7 @@ Kembalikan HANYA JSON valid:
       const nextList = [...inMemoryFormKirimRecords];
       nextList[idx] = updatedRecord;
       await persistFormKirimToDbAndDisk(nextList);
+      broadcastCrewSyncEvent('form_kirim_driver', targetId);
 
       return res.json({ success: true, record: updatedRecord });
     } catch (err: any) {
@@ -8640,6 +9001,7 @@ Kembalikan HANYA JSON valid:
       const nextList = [...inMemoryFormKirimRecords];
       nextList[idx] = updatedRecord;
       await persistFormKirimToDbAndDisk(nextList);
+      broadcastCrewSyncEvent('form_kirim_finance', targetId);
 
       return res.json({ success: true, record: updatedRecord });
     } catch (err: any) {

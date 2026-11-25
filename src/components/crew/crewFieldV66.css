@@ -376,3 +376,76 @@ html.dark #akk-crew-v66 .cv72-photo-btn{color:#bfd7ff!important}
 #akk-crew-v66 .cv66-dialog-heading{position:sticky;top:-16px;z-index:15;background:var(--cv-surface);padding:4px 0 8px;margin-top:-4px}
 #akk-crew-v66 .cv66-dialog-close{min-width:44px!important;min-height:44px!important;width:44px!important;height:44px!important;border-radius:12px!important;position:relative;z-index:25;touch-action:manipulation;user-select:none;-webkit-tap-highlight-color:transparent;pointer-events:auto!important;cursor:pointer!important}
 #akk-crew-v66 .cv66-dialog-close:active{transform:scale(0.93)!important;background:var(--cv-line)!important}
+
+/* V75: Flat / Modern Clean Design extensions (.cv75-*) */
+#akk-crew-v66 .cv75-flat-card{background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:12px}
+html.dark #akk-crew-v66 .cv75-flat-card{background:#18283e;border-color:#2d4059}
+#akk-crew-v66 .cv75-summary-card{display:flex;flex-direction:column;gap:10px;background:#f8fafc}
+html.dark #akk-crew-v66 .cv75-summary-card{background:#142235}
+#akk-crew-v66 .cv75-summary-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+#akk-crew-v66 .cv75-clock{font-size:11px!important;font-weight:700;color:#2563eb;font-variant-numeric:tabular-nums}
+#akk-crew-v66 .cv75-summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+#akk-crew-v66 .cv75-summary-item{display:flex;flex-direction:column;gap:2px;background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;padding:7px 9px;min-width:0}
+html.dark #akk-crew-v66 .cv75-summary-item{background:#192a40;border-color:#2d4059}
+#akk-crew-v66 .cv75-summary-label{display:inline-flex;align-items:center;gap:4px;font-size:10.5px!important;font-weight:600;color:#64748b}
+#akk-crew-v66 .cv75-summary-val{font-size:12.5px!important;font-weight:700;color:#0f172a;overflow-wrap:anywhere}
+html.dark #akk-crew-v66 .cv75-summary-val{color:#f1f5f9}
+#akk-crew-v66 .cv75-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:8px;font-size:10.5px!important;font-weight:700!important;line-height:1.3;white-space:nowrap}
+#akk-crew-v66 .cv75-badge--blue{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}
+#akk-crew-v66 .cv75-badge--green{background:#ecfdf5;color:#047857;border:1px solid #a7f3d0}
+#akk-crew-v66 .cv75-badge--amber{background:#fffbeb;color:#b45309;border:1px solid #fde68a}
+#akk-crew-v66 .cv75-badge--rose{background:#fff1f2;color:#be123c;border:1px solid #fecdd3}
+#akk-crew-v66 .cv75-badge--slate{background:#f1f5f9;color:#475569;border:1px solid #cbd5e1}
+
+#akk-crew-v66 .cv75-sig-section{display:flex;flex-direction:column;gap:8px}
+#akk-crew-v66 .cv75-sig-section-head{display:flex;align-items:center;justify-content:space-between;font-size:12.5px!important;font-weight:700;color:var(--cv-ink)}
+#akk-crew-v66 .cv75-sig-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+@media(max-width:400px){#akk-crew-v66 .cv75-sig-grid{grid-template-columns:minmax(0,1fr)}}
+#akk-crew-v66 .cv75-sig-card{display:flex;flex-direction:column;gap:6px;padding:8px;border:1px solid #e2e8f0;border-radius:12px;background:#ffffff}
+html.dark #akk-crew-v66 .cv75-sig-card{background:#18283e;border-color:#2d4059}
+#akk-crew-v66 .cv75-sig-card--signed{border-color:#86efac;background:#f0fdf4}
+html.dark #akk-crew-v66 .cv75-sig-card--signed{border-color:#15803d;background:#132a20}
+#akk-crew-v66 .cv75-sig-head{display:flex;align-items:flex-start;justify-content:space-between;gap:6px}
+#akk-crew-v66 .cv75-sig-meta{display:flex;flex-direction:column;min-width:0}
+#akk-crew-v66 .cv75-sig-title{font-size:12px!important;font-weight:700;color:var(--cv-ink);line-height:1.25}
+#akk-crew-v66 .cv75-sig-role{font-size:10px!important;color:#64748b;line-height:1.25}
+#akk-crew-v66 .cv75-sig-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}
+#akk-crew-v66 .cv75-clear-btn{display:grid;place-items:center;width:26px;height:26px;border-radius:8px!important;border:1px solid #e2e8f0!important;background:#f8fafc!important;color:#475569!important;padding:0}
+#akk-crew-v66 .cv75-sig-pad-wrap{position:relative;width:100%;height:108px;border:1px dashed #cbd5e1;border-radius:10px;overflow:hidden;background:#ffffff}
+#akk-crew-v66 .cv75-sig-canvas{display:block;width:100%;height:108px;touch-action:none;cursor:crosshair}
+#akk-crew-v66 .cv75-sig-placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:5px;pointer-events:none;font-size:11px!important;color:#94a3b8;font-weight:500}
+
+#akk-crew-v66 .cv75-input,#akk-crew-v66 .cv75-select{width:100%;min-width:0;min-height:42px;background:#ffffff!important;color:#0f172a!important;border:1px solid #cbd5e1!important;border-radius:10px!important;padding:9px 11px!important;font-size:14px!important;font-weight:500!important;line-height:1.4!important}
+html.dark #akk-crew-v66 .cv75-input,html.dark #akk-crew-v66 .cv75-select{background:#111e30!important;color:#f1f5f9!important;border-color:#34465d!important}
+#akk-crew-v66 .cv75-option-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+#akk-crew-v66 .cv75-option-grid--3{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media(max-width:420px){#akk-crew-v66 .cv75-option-grid--3{grid-template-columns:minmax(0,1fr)}}
+#akk-crew-v66 .cv75-option-btn{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:10px 11px;border-radius:12px!important;border:1px solid #e2e8f0!important;background:#ffffff!important;color:#334155!important;text-align:left;min-height:48px}
+html.dark #akk-crew-v66 .cv75-option-btn{background:#18283e!important;border-color:#2d4059!important;color:#e2e8f0!important}
+#akk-crew-v66 .cv75-option-btn--active{border-color:#2563eb!important;background:#eff6ff!important;color:#1d4ed8!important}
+#akk-crew-v66 .cv75-option-btn--urgent{border-color:#e11d48!important;background:#fff1f2!important;color:#be123c!important}
+#akk-crew-v66 .cv75-option-title{font-size:13px!important;font-weight:700!important}
+#akk-crew-v66 .cv75-option-sub{font-size:11px!important;font-weight:500;opacity:.82}
+
+#akk-crew-v66 .cv75-chip-wrap{display:flex;flex-wrap:wrap;gap:6px}
+#akk-crew-v66 .cv75-chip{display:inline-flex;align-items:center;gap:4px;padding:6px 10px;border-radius:10px!important;border:1px solid #e2e8f0!important;background:#f8fafc!important;color:#334155!important;font-size:12px!important;font-weight:600!important}
+#akk-crew-v66 .cv75-chip--active{border-color:#2563eb!important;background:#eff6ff!important;color:#1d4ed8!important}
+
+#akk-crew-v66 .cv75-photo-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+#akk-crew-v66 .cv75-photo-thumb{position:relative;aspect-ratio:4/3;border-radius:10px;overflow:hidden;border:1px solid #e2e8f0;background:#0f172a}
+#akk-crew-v66 .cv75-photo-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+#akk-crew-v66 .cv75-photo-del{position:absolute;top:4px;right:4px;width:26px;height:26px;display:grid;place-items:center;border-radius:8px!important;border:1px solid #e2e8f0!important;background:#ffffffeb!important;color:#be123c!important;padding:0}
+#akk-crew-v66 .cv75-dual-upload{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+@media(max-width:400px){#akk-crew-v66 .cv75-dual-upload{grid-template-columns:minmax(0,1fr)}}
+#akk-crew-v66 .cv75-upload-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:42px;padding:8px 12px;border-radius:10px!important;border:1px dashed #93c5fd!important;background:#f8fafc!important;color:#1d4ed8!important;font-size:12.5px!important;font-weight:650!important;width:100%}
+#akk-crew-v66 .cv75-upload-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+
+#akk-crew-v66 .cv75-manifest-list{display:flex;flex-direction:column;gap:8px}
+#akk-crew-v66 .cv75-invoice-card{display:flex;flex-direction:column;gap:8px;padding:11px;border-radius:12px;border:1px solid #e2e8f0;background:#ffffff}
+html.dark #akk-crew-v66 .cv75-invoice-card{background:#18283e;border-color:#2d4059}
+#akk-crew-v66 .cv75-invoice-card--done{border-color:#86efac;background:#f0fdf4}
+#akk-crew-v66 .cv75-invoice-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+#akk-crew-v66 .cv75-pay-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+#akk-crew-v66 .cv75-pay-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:36px;padding:5px 8px;border-radius:9px!important;border:1px solid #cbd5e1!important;background:#ffffff!important;color:#334155!important;font-size:12px!important;font-weight:700!important}
+#akk-crew-v66 .cv75-pay-btn--active{border-color:#2563eb!important;background:#2563eb!important;color:#ffffff!important}
+

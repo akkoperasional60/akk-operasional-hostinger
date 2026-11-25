@@ -59,6 +59,7 @@ import {
   FormKirimGpsLockEntry
 } from '../services/formKirimStore';
 import { getAreaScheduleTiming } from '../utils/areaScheduleRules';
+import { listenCrewChanged } from './crew/crewApi';
 
 export type DateFilterMode = 'single_date' | 'this_week' | 'this_month' | 'all';
 
@@ -227,6 +228,24 @@ export const DriverReportsManagement: React.FC = () => {
     return cleanedArea || 'Rute Pengiriman DC';
   };
 
+  const resolveFuelLocation = (rep: DriverHelperReport): 'Farly' | 'Gajah Mada' | 'SPBU Lain (Urgent)' => {
+    if (
+      rep.fuelLocation === 'Farly' ||
+      rep.fuelLocation === 'Gajah Mada' ||
+      rep.fuelLocation === 'SPBU Lain (Urgent)'
+    ) {
+      return rep.fuelLocation;
+    }
+    const combined = `${rep.notes || ''} ${rep.areaName || ''}`.toLowerCase();
+    if (combined.includes('urgent') || combined.includes('spbu lain') || Boolean(rep.fuelUrgentReason)) {
+      return 'SPBU Lain (Urgent)';
+    }
+    if (combined.includes('gajah mada')) {
+      return 'Gajah Mada';
+    }
+    return 'Farly';
+  };
+
   // Sub-menu switcher: Laporan Kendala Lapangan | Laporan Absen Tim Kiriman | Laporan Check-In & Check-Out | Laporan Pengisian BBM (Solar) | Laporan Checklist Armada | Laporan GPS Form Kirim
   const [activeSubMenu, setActiveSubMenu] = useState<'operasional' | 'absen_tim_kiriman' | 'checkin_checkout' | 'pengisian_bbm' | 'checklist_armada' | 'peringatan_offline' | 'validasi_jadwal_portal' | 'validasi_rute_form' | 'retur_muat_salah'>('operasional');
   const [isLogisticsMenuOpen, setIsLogisticsMenuOpen] = useState(false);
@@ -393,9 +412,20 @@ export const DriverReportsManagement: React.FC = () => {
     window.addEventListener('driver-report-updated', handleReportUpdate);
     window.addEventListener('driver-shift-updated', handleReportUpdate);
     window.addEventListener('akk-driver-schedule-realtime', handleScheduleRealtime);
+    let crewSyncTimer: number | null = null;
+    const unsubCrew = listenCrewChanged(() => {
+      if (crewSyncTimer) window.clearTimeout(crewSyncTimer);
+      crewSyncTimer = window.setTimeout(() => {
+        driverReportService.syncWithServer(true).then(() => loadReports()).catch(() => {});
+        void driverShiftService.syncFromServer().then(() => loadReports());
+        void formKirimStore.hydrateFromServer(true);
+      }, 280);
+    });
     return () => {
       clearInterval(pollInterval);
+      if (crewSyncTimer) window.clearTimeout(crewSyncTimer);
       unsubFormKirim();
+      unsubCrew();
       window.removeEventListener('driver-report-updated', handleReportUpdate);
       window.removeEventListener('driver-shift-updated', handleReportUpdate);
       window.removeEventListener('akk-driver-schedule-realtime', handleScheduleRealtime);
@@ -1269,7 +1299,7 @@ export const DriverReportsManagement: React.FC = () => {
       r.notes.toLowerCase().includes('pengisian bbm')
     );
     return raw.filter(r => {
-      const resolvedLoc = r.fuelLocation || (r.notes.toLowerCase().includes('gajah mada') || r.areaName.toLowerCase().includes('gajah mada') ? 'Gajah Mada' : 'Farly');
+      const resolvedLoc = resolveFuelLocation(r);
       if (fuelLocationFilter !== 'all' && resolvedLoc !== fuelLocationFilter) return false;
       if (fuelSearchQuery.trim()) {
         const q = fuelSearchQuery.toLowerCase().trim();
@@ -1280,6 +1310,7 @@ export const DriverReportsManagement: React.FC = () => {
           plateWithInit.includes(q) ||
           areaKirim.includes(q) ||
           resolvedLoc.toLowerCase().includes(q) ||
+          (r.fuelUrgentReason || '').toLowerCase().includes(q) ||
           r.notes.toLowerCase().includes(q)
         );
       }
@@ -1732,11 +1763,11 @@ export const DriverReportsManagement: React.FC = () => {
                     Laporan Pengisian BBM (Solar) Armada
                   </h2>
                   <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-500/30">
-                    Lokasi: Farly &amp; Gajah Mada
+                    Lokasi: Farly, Gajah Mada &amp; SPBU Lain
                   </span>
                 </div>
                 <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-                  Dokumentasi pengisian BBM (Solar) armada beserta foto bukti berstempel dan lokasi SPBU (Farly / Gajah Mada).
+                  Dokumentasi pengisian BBM (Solar) armada beserta foto bukti berstempel dan lokasi SPBU (Farly, Gajah Mada, atau SPBU Lain Urgent).
                 </p>
               </div>
             </div>
@@ -1753,17 +1784,20 @@ export const DriverReportsManagement: React.FC = () => {
                 type="button"
                 onClick={() => {
                   if (fuelReportsList.length === 0) return;
-                  const headers = ['Tanggal', 'Waktu', 'Nama Driver', 'Nomor Kendaraan', 'Area Kirim', 'Lokasi SPBU', 'Status'];
+                  const headers = ['Tanggal', 'Waktu', 'Nama Driver', 'Nomor Kendaraan', 'Area Kirim', 'Lokasi SPBU', 'Alasan Urgent', 'Jumlah Foto', 'Status'];
                   const rows = fuelReportsList.map(r => {
-                    const loc = r.fuelLocation || (r.notes.toLowerCase().includes('gajah mada') ? 'Gajah Mada' : 'Farly');
+                    const loc = resolveFuelLocation(r);
                     const areaKirim = resolveFuelAreaKirim(r);
+                    const photoCnt = r.photoUrls?.length || (r.photoUrl ? 1 : 0);
                     return [
                       r.date || getLocalDateStr(r.timestamp),
                       new Date(r.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
                       `"${r.driverName}"`,
                       `"${formatPlateWithInitial(r.plateNumber)}"`,
                       `"${areaKirim}"`,
-                      `"SPBU ${loc}"`,
+                      `"${loc === 'SPBU Lain (Urgent)' ? loc : `SPBU ${loc}`}"`,
+                      `"${(r.fuelUrgentReason || '').replace(/"/g, '""')}"`,
+                      photoCnt,
                       r.status === 'verified' ? 'Terverifikasi' : 'Tercatat'
                     ];
                   });
@@ -1783,8 +1817,8 @@ export const DriverReportsManagement: React.FC = () => {
             </div>
           </div>
 
-          {/* 3 Summary KPI Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* 4 Summary KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex items-center justify-between">
               <div>
                 <span className="text-xs font-bold text-slate-500 dark:text-slate-400 block">
@@ -1808,7 +1842,7 @@ export const DriverReportsManagement: React.FC = () => {
                   Lokasi: Farly
                 </span>
                 <div className="text-2xl font-black text-amber-600 dark:text-amber-400 font-mono mt-1">
-                  {reports.filter(r => r.category === 'isi_bbm' && (r.fuelLocation === 'Farly' || (!r.fuelLocation && !r.notes.toLowerCase().includes('gajah mada')))).length}
+                  {reports.filter(r => r.category === 'isi_bbm' && resolveFuelLocation(r) === 'Farly').length}
                 </div>
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">
                   Pengisian Solar di SPBU Farly
@@ -1825,7 +1859,7 @@ export const DriverReportsManagement: React.FC = () => {
                   Lokasi: Gajah Mada
                 </span>
                 <div className="text-2xl font-black text-blue-600 dark:text-blue-400 font-mono mt-1">
-                  {reports.filter(r => r.category === 'isi_bbm' && (r.fuelLocation === 'Gajah Mada' || r.notes.toLowerCase().includes('gajah mada'))).length}
+                  {reports.filter(r => r.category === 'isi_bbm' && resolveFuelLocation(r) === 'Gajah Mada').length}
                 </div>
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">
                   Pengisian Solar di SPBU Gajah Mada
@@ -1833,6 +1867,23 @@ export const DriverReportsManagement: React.FC = () => {
               </div>
               <div className="w-11 h-11 rounded-2xl bg-blue-50 dark:bg-blue-500/15 flex items-center justify-center text-blue-600 dark:text-blue-400">
                 <MapPin className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-rose-600 dark:text-rose-400 block">
+                  SPBU Lain (Urgent)
+                </span>
+                <div className="text-2xl font-black text-rose-600 dark:text-rose-400 font-mono mt-1">
+                  {reports.filter(r => r.category === 'isi_bbm' && resolveFuelLocation(r) === 'SPBU Lain (Urgent)').length}
+                </div>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Pengisian darurat luar SPBU mitra
+                </span>
+              </div>
+              <div className="w-11 h-11 rounded-2xl bg-rose-50 dark:bg-rose-500/15 flex items-center justify-center text-rose-600 dark:text-rose-400">
+                <AlertTriangle className="w-5 h-5" />
               </div>
             </div>
           </div>
@@ -1892,8 +1943,9 @@ export const DriverReportsManagement: React.FC = () => {
                     </tr>
                   ) : (
                     fuelReportsList.map((rep, idx) => {
-                      const loc = rep.fuelLocation || (rep.notes.toLowerCase().includes('gajah mada') ? 'Gajah Mada' : 'Farly');
+                      const loc = resolveFuelLocation(rep);
                       const areaKirim = resolveFuelAreaKirim(rep);
+                      const fuelPhotoCount = rep.photoUrls?.length || (rep.photoUrl ? 1 : 0);
                       return (
                         <tr key={rep.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
                           <td className="py-3 px-4 text-center font-mono text-slate-500 font-bold">{idx + 1}</td>
@@ -1919,25 +1971,32 @@ export const DriverReportsManagement: React.FC = () => {
                               <span>{areaKirim}</span>
                             </span>
                           </td>
-                          <td className="py-3 px-4 whitespace-nowrap">
-                            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border ${
-                              loc === 'Gajah Mada'
+                          <td className="py-3 px-4">
+                            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border whitespace-nowrap ${
+                              loc === 'SPBU Lain (Urgent)'
+                                ? 'bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-500/30'
+                                : loc === 'Gajah Mada'
                                 ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/30'
                                 : 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/30'
                             }`}>
                               <MapPin className="w-3 h-3" />
-                              <span>SPBU {loc}</span>
+                              <span>{loc === 'SPBU Lain (Urgent)' ? loc : `SPBU ${loc}`}</span>
                             </span>
+                            {loc === 'SPBU Lain (Urgent)' && rep.fuelUrgentReason && (
+                              <div className="mt-1 text-[11px] text-rose-700 dark:text-rose-300 font-medium max-w-xs">
+                                Alasan: {rep.fuelUrgentReason}
+                              </div>
+                            )}
                           </td>
                           <td className="py-3 px-4 text-center whitespace-nowrap">
-                            {rep.photoUrl ? (
+                            {fuelPhotoCount > 0 ? (
                               <button
                                 type="button"
                                 onClick={() => setSelectedPhotoModal(rep)}
                                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-500/15 hover:bg-blue-100 dark:hover:bg-blue-500/25 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30 text-[11px] font-bold cursor-pointer transition"
                               >
                                 <Camera className="w-3.5 h-3.5" />
-                                <span>Lihat Foto</span>
+                                <span>{fuelPhotoCount > 1 ? `Lihat ${fuelPhotoCount} Foto` : 'Lihat Foto'}</span>
                               </button>
                             ) : (
                               <span className="text-slate-400 text-[11px]">-</span>

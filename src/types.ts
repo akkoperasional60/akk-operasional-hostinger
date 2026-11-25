@@ -228,6 +228,29 @@ export interface Schedule {
   isChecklistBypassed?: boolean;
   checklistBypassedBy?: string;
   checklistBypassedAt?: string;
+  departureValidation?: {
+    summary: {
+      driverName: string;
+      helperName: string;
+      fleetLabel: string;
+      areaName: string;
+      recordedAt: string;
+      recordedAtWib: string;
+    };
+    checks: {
+      waybillMatch: boolean;
+      documentsReady: boolean;
+    };
+    signatures: {
+      spvLogistik: string;
+      spvOperasional: string;
+      security: string;
+      crew: string;
+    };
+    signedAt: string;
+    signedBy?: string;
+    gps?: { latitude: number; longitude: number; accuracy: number };
+  };
 }
 
 export interface CrewDeliveryHistory {
