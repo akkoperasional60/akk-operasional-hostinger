@@ -398,13 +398,13 @@ const ValidationDatePicker: React.FC<ValidationDatePickerProps> = ({ value, onCh
         type="button"
         onClick={() => setIsOpen(prev => !prev)}
         aria-label="Pilih tanggal validasi"
-        className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold transition cursor-pointer whitespace-nowrap shrink-0 ${
+        className={`inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer whitespace-nowrap shrink-0 ${
           isOpen
-            ? 'bg-blue-50 dark:bg-blue-500/15 border-blue-500 text-blue-700 dark:text-blue-300 ring-2 ring-blue-500/20'
-            : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 hover:border-slate-300 dark:hover:border-slate-700'
+            ? 'bg-white dark:bg-[#162234] border-blue-500 text-blue-700 dark:text-blue-300 ring-2 ring-blue-500/15'
+            : 'bg-white dark:bg-[#162234] border-slate-200 dark:border-[#24344D] text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800/70 hover:border-slate-300 dark:hover:border-slate-600'
         }`}
       >
-        <Calendar className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+        <Calendar className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
         <span className="tabular-nums">{formatIsoToIndonesianDisplay(value)}</span>
         <ChevronDown
           className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-150 ${isOpen ? 'rotate-180 text-blue-500' : ''}`}
@@ -417,7 +417,7 @@ const ValidationDatePicker: React.FC<ValidationDatePickerProps> = ({ value, onCh
           <div
             ref={popoverRef}
             style={{ top: coords.top, left: coords.left }}
-            className="fixed z-[9999] w-72 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-3 animate-in fade-in zoom-in-95 duration-150"
+            className="fixed z-[9999] w-72 rounded-xl bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] shadow-lg p-3 animate-in fade-in zoom-in-95 duration-150"
           >
             {/* Header Nav */}
             <div className="flex items-center justify-between mb-2.5">
@@ -599,14 +599,14 @@ const ValidationBranchDropdown: React.FC<ValidationBranchDropdownProps> = ({
         type="button"
         onClick={() => setIsOpen(prev => !prev)}
         aria-label="Filter cabang operasional"
-        className={`inline-flex items-center justify-between gap-2 min-w-[165px] px-3 py-2 rounded-xl border text-xs font-semibold transition cursor-pointer whitespace-nowrap shrink-0 ${
+        className={`inline-flex items-center justify-between gap-2 min-w-[172px] px-3.5 py-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer whitespace-nowrap shrink-0 ${
           isOpen
-            ? 'bg-blue-50 dark:bg-blue-500/15 border-blue-500 text-blue-700 dark:text-blue-300 ring-2 ring-blue-500/20'
-            : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 hover:border-slate-300 dark:hover:border-slate-700'
+            ? 'bg-white dark:bg-[#162234] border-blue-500 text-blue-700 dark:text-blue-300 ring-2 ring-blue-500/15'
+            : 'bg-white dark:bg-[#162234] border-slate-200 dark:border-[#24344D] text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800/70 hover:border-slate-300 dark:hover:border-slate-600'
         }`}
       >
-        <span className="inline-flex items-center gap-1.5 truncate">
-          <Building2 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+        <span className="inline-flex items-center gap-2 truncate">
+          <Building2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
           <span className="truncate">{activeOption.name}</span>
         </span>
         <ChevronDown
@@ -620,7 +620,7 @@ const ValidationBranchDropdown: React.FC<ValidationBranchDropdownProps> = ({
           <div
             ref={menuRef}
             style={{ top: coords.top, left: coords.left, width: coords.width }}
-            className="fixed z-[9999] rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-1.5 animate-in fade-in zoom-in-95 duration-150"
+            className="fixed z-[9999] rounded-xl bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] shadow-lg p-1.5 animate-in fade-in zoom-in-95 duration-150"
           >
             <div className="px-2.5 py-1.5 text-[10px] font-bold text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-800 mb-1">
               Pilih Cabang Operasional
@@ -1193,31 +1193,31 @@ export const SchedulePortalValidationReport: React.FC<SchedulePortalValidationRe
   };
 
   return (
-    <div className="space-y-3 animate-in fade-in duration-200">
-      {/* Header Card */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-        <div className="flex items-start sm:items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-500/15 border border-indigo-200 dark:border-indigo-500/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+    <div className="akk-flat-validation bg-slate-50 dark:bg-[#0F172A] rounded-xl space-y-5 animate-in fade-in duration-200">
+      {/* 1. Header Halaman */}
+      <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-xl p-5 sm:p-6 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="flex items-start sm:items-center gap-3.5">
+          <div className="w-11 h-11 rounded-xl bg-indigo-50 dark:bg-indigo-500/15 border border-indigo-100 dark:border-indigo-500/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
             <FileCheck2 className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white tracking-tight">
+            <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white tracking-tight">
               Validasi Portal Driver &amp; Helper
             </h2>
-            <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
               Perbandingan kesesuaian Jadwal Pengiriman dengan Check-In Portal Driver &amp; Helper.
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap shrink-0">
+        <div className="flex items-center gap-2.5 flex-wrap shrink-0">
           {onBack && (
             <button
               type="button"
               onClick={onBack}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold border border-slate-200 dark:border-slate-700 transition cursor-pointer whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-white dark:bg-[#162234] hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs sm:text-sm font-semibold border border-slate-200 dark:border-[#24344D] transition cursor-pointer whitespace-nowrap shrink-0"
             >
-              <ArrowLeft className="w-3.5 h-3.5" />
+              <ArrowLeft className="w-4 h-4 text-slate-500" />
               <span>{backLabel}</span>
             </button>
           )}
@@ -1226,9 +1226,9 @@ export const SchedulePortalValidationReport: React.FC<SchedulePortalValidationRe
             type="button"
             onClick={() => void refreshAllFromMySql()}
             disabled={isSyncing}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold border border-slate-200 dark:border-slate-700 transition cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white dark:bg-[#162234] hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs sm:text-sm font-semibold border border-slate-200 dark:border-[#24344D] transition cursor-pointer disabled:opacity-50 whitespace-nowrap shrink-0"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-blue-500' : ''}`} />
+            <RefreshCw className={`w-4 h-4 text-slate-500 ${isSyncing ? 'animate-spin text-blue-600' : ''}`} />
             <span>{isSyncing ? 'Menyegarkan...' : 'Segarkan'}</span>
           </button>
 
@@ -1236,66 +1236,74 @@ export const SchedulePortalValidationReport: React.FC<SchedulePortalValidationRe
             type="button"
             onClick={handleExportExcel}
             disabled={filteredRows.length === 0}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-200 dark:disabled:bg-slate-800 text-white disabled:text-slate-400 text-xs font-bold shadow-xs transition cursor-pointer disabled:cursor-not-allowed whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white text-xs sm:text-sm font-semibold border border-green-700 transition cursor-pointer disabled:cursor-not-allowed whitespace-nowrap shrink-0"
           >
-            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <FileSpreadsheet className="w-4 h-4" />
             <span>Export Excel</span>
           </button>
         </div>
       </div>
 
-      {/* KPI Cards (Ringkas: Total Diperiksa, Cocok, Tidak Cocok) */}
-      <div className="grid grid-cols-3 gap-2.5">
+      {/* 2. Baris Metrik Validasi (Grid 3 Kolom) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <button
           type="button"
           onClick={() => setStatusFilter('all')}
-          className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+          className={`p-5 rounded-xl border text-left transition cursor-pointer shadow-xs ${
             statusFilter === 'all'
-              ? 'bg-blue-50 dark:bg-blue-500/15 border-blue-400 dark:border-blue-500/50'
-              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300'
+              ? 'bg-white dark:bg-[#162234] border-blue-500 ring-1 ring-blue-500/20'
+              : 'bg-white dark:bg-[#162234] border-slate-200 dark:border-[#24344D] hover:border-slate-300 dark:hover:border-slate-600'
           }`}
         >
-          <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Total Diperiksa</div>
-          <div className="text-xl font-bold text-slate-900 dark:text-white mt-0.5 tabular-nums">{kpiStats.total}</div>
+          <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            Total Diperiksa
+          </div>
+          <div className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white mt-2 tabular-nums">
+            {kpiStats.total}
+          </div>
         </button>
 
         <button
           type="button"
           onClick={() => setStatusFilter('cocok')}
-          className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+          className={`p-5 rounded-xl border text-left transition cursor-pointer shadow-xs ${
             statusFilter === 'cocok'
-              ? 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-400 dark:border-emerald-500/50'
-              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-emerald-300'
+              ? 'bg-white dark:bg-[#162234] border-green-500 ring-1 ring-green-500/20'
+              : 'bg-white dark:bg-[#162234] border-slate-200 dark:border-[#24344D] hover:border-green-300 dark:hover:border-green-700'
           }`}
         >
-          <div className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
-            <CheckCircle2 className="w-3.5 h-3.5" />
+          <div className="text-xs font-semibold text-green-600 dark:text-green-400 flex items-center gap-1.5">
+            <CheckCircle2 className="w-4 h-4" />
             <span>Cocok</span>
           </div>
-          <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-0.5 tabular-nums">{kpiStats.cocok}</div>
+          <div className="text-2xl sm:text-3xl font-bold text-green-600 dark:text-green-400 mt-2 tabular-nums">
+            {kpiStats.cocok}
+          </div>
         </button>
 
         <button
           type="button"
           onClick={() => setStatusFilter('tidak_cocok')}
-          className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+          className={`p-5 rounded-xl border text-left transition cursor-pointer shadow-xs ${
             statusFilter === 'tidak_cocok'
-              ? 'bg-rose-50 dark:bg-rose-500/15 border-rose-400 dark:border-rose-500/50'
-              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-rose-300'
+              ? 'bg-white dark:bg-[#162234] border-red-500 ring-1 ring-red-500/20'
+              : 'bg-white dark:bg-[#162234] border-slate-200 dark:border-[#24344D] hover:border-red-300 dark:hover:border-red-700'
           }`}
         >
-          <div className="text-[11px] font-semibold text-rose-700 dark:text-rose-400 flex items-center gap-1">
-            <AlertTriangle className="w-3.5 h-3.5" />
+          <div className="text-xs font-semibold text-red-500 dark:text-red-400 flex items-center gap-1.5">
+            <AlertTriangle className="w-4 h-4" />
             <span>Tidak Cocok</span>
           </div>
-          <div className="text-xl font-bold text-rose-600 dark:text-rose-400 mt-0.5 tabular-nums">{kpiStats.tidakCocok}</div>
+          <div className="text-2xl sm:text-3xl font-bold text-red-500 dark:text-red-400 mt-2 tabular-nums">
+            {kpiStats.tidakCocok}
+          </div>
         </button>
       </div>
 
-      {/* Filter Bar */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 shadow-xs flex flex-col md:flex-row md:items-center gap-2.5">
+      {/* 3. Baris Pencarian & Filter */}
+      <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-xl p-4 sm:p-5 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-3.5">
         <div className="relative flex-1 min-w-0">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             id="validation-portal-search"
             name="validationPortalSearch"
@@ -1304,18 +1312,18 @@ export const SchedulePortalValidationReport: React.FC<SchedulePortalValidationRe
             onChange={e => setSearchQuery(e.target.value)}
             placeholder="Cari nama kru, area kiriman, atau plat armada..."
             aria-label="Cari nama kru, area kiriman, atau plat armada"
-            className="w-full pl-10 pr-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-blue-500"
+            className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-100 dark:bg-[#0F172A] border border-transparent focus:bg-white dark:focus:bg-[#162234] focus:border-blue-500 text-xs sm:text-sm text-slate-800 dark:text-white placeholder:text-slate-400 focus:outline-none transition"
           />
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Tanggal:</span>
+        <div className="flex items-center gap-3 flex-wrap shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Tanggal:</span>
             <ValidationDatePicker value={selectedDate} onChange={setSelectedDate} />
           </div>
 
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Cabang:</span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Cabang:</span>
             <ValidationBranchDropdown
               value={selectedBranchId}
               options={branches.map(b => ({ id: b.id, name: b.name, city: b.city }))}
@@ -1325,35 +1333,37 @@ export const SchedulePortalValidationReport: React.FC<SchedulePortalValidationRe
         </div>
       </div>
 
-      {/* Compact Comparison Table (Tanpa Input Check-In Portal & Tanpa Progres Lapangan) */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
+      {/* 4. Area Konten Utama */}
+      <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-xl shadow-xs overflow-hidden">
         {isSyncing && filteredRows.length === 0 ? (
-          <div className="p-4 space-y-2">
+          <div className="p-6 space-y-2.5">
             {[1, 2, 3, 4].map(n => (
               <div
                 key={n}
-                className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800/70 animate-pulse"
+                className="h-11 rounded-xl bg-slate-100 dark:bg-slate-800/70 animate-pulse"
               />
             ))}
           </div>
         ) : filteredRows.length === 0 ? (
-          <div className="py-10 px-4 text-center space-y-1.5">
-            <FileCheck2 className="w-8 h-8 text-slate-400 mx-auto" />
-            <div className="text-sm font-bold text-slate-700 dark:text-slate-200">
+          <div className="py-16 px-6 text-center space-y-2.5">
+            <div className="w-12 h-12 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-[#24344D] flex items-center justify-center mx-auto">
+              <FileCheck2 className="w-6 h-6 text-slate-400" />
+            </div>
+            <div className="text-sm sm:text-base font-bold text-slate-800 dark:text-slate-100">
               Belum Ada Data Jadwal maupun Check-In Portal pada {formatIsoToIndonesianDisplay(selectedDate)}
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-lg mx-auto leading-relaxed">
               Pilih tanggal lain atau pastikan jadwal pengiriman sudah diinput dan Driver/Helper sudah melakukan Check-In Mandiri di Portal.
             </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
+            <table className="w-full text-left border-collapse text-xs sm:text-sm">
               <thead>
-                <tr className="bg-slate-50 dark:bg-slate-950/90 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                  <th className="py-2 px-3">Kru &amp; Cabang</th>
-                  <th className="py-2 px-3">Jadwal Resmi (Admin)</th>
-                  <th className="py-2 px-3">Status Validasi</th>
+                <tr className="bg-slate-50 dark:bg-slate-900/80 border-b border-slate-200 dark:border-[#24344D] text-[11px] sm:text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  <th className="py-3 px-4 sm:px-5">Kru &amp; Cabang</th>
+                  <th className="py-3 px-4 sm:px-5">Jadwal Resmi (Admin)</th>
+                  <th className="py-3 px-4 sm:px-5">Status Validasi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
@@ -1362,16 +1372,16 @@ export const SchedulePortalValidationReport: React.FC<SchedulePortalValidationRe
                     key={row.rowKey}
                     className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors align-middle"
                   >
-                    <td className="py-1.5 px-3">
-                      <div className="font-bold text-slate-900 dark:text-white leading-tight">
+                    <td className="py-3 px-4 sm:px-5">
+                      <div className="font-semibold text-slate-900 dark:text-white leading-tight">
                         {row.crewName}
                       </div>
-                      <div className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight mt-0.5 flex items-center gap-1.5 flex-wrap">
+                      <div className="text-xs text-slate-500 dark:text-slate-400 leading-tight mt-1 flex items-center gap-1.5 flex-wrap">
                         <span>{row.branchName}</span>
                         {row.portalTime && (
                           <>
                             <span aria-hidden="true">·</span>
-                            <span className="font-mono tabular-nums text-emerald-600 dark:text-emerald-400">
+                            <span className="font-mono tabular-nums text-green-600 dark:text-green-400">
                               Check-In {row.portalTime}
                             </span>
                           </>
@@ -1379,44 +1389,44 @@ export const SchedulePortalValidationReport: React.FC<SchedulePortalValidationRe
                       </div>
                     </td>
 
-                    <td className="py-1.5 px-3">
+                    <td className="py-3 px-4 sm:px-5">
                       {row.scheduleId ? (
-                        <div className="space-y-0.5 leading-tight">
+                        <div className="space-y-1 leading-tight">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                            <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
                               {row.scheduledRoleLabel}
                             </span>
                             <span aria-hidden="true" className="text-slate-300 dark:text-slate-600">·</span>
-                            <span className="font-mono tabular-nums font-bold text-blue-600 dark:text-blue-400">
+                            <span className="font-mono tabular-nums font-semibold text-blue-600 dark:text-blue-400">
                               {row.scheduledArmada}
                             </span>
                           </div>
-                          <div className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center gap-1">
-                            <MapPin className="w-3 h-3 text-rose-500 shrink-0" />
+                          <div className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                            <MapPin className="w-3.5 h-3.5 text-red-500 shrink-0" />
                             <span>{row.scheduledArea}</span>
                           </div>
                         </div>
                       ) : (
-                        <span className="text-[11px] text-slate-400 italic">Belum ada di Jadwal Admin</span>
+                        <span className="text-xs text-slate-400 italic">Belum ada di Jadwal Admin</span>
                       )}
                     </td>
 
-                    <td className="py-1.5 px-3">
+                    <td className="py-3 px-4 sm:px-5">
                       {row.status === 'cocok' ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30 font-bold text-[11px]">
-                          <CheckCircle2 className="w-3 h-3" />
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-green-50 dark:bg-green-500/15 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-500/30 font-semibold text-xs">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
                           <span>Cocok</span>
                         </span>
                       ) : (
-                        <div className="space-y-0.5 leading-tight">
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-500/30 font-bold text-[11px]">
-                            <XCircle className="w-3 h-3" />
+                        <div className="space-y-1 leading-tight">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-500/30 font-semibold text-xs">
+                            <XCircle className="w-3.5 h-3.5" />
                             <span>
                               Tidak Cocok{row.mismatchReasonLabel ? ` · ${row.mismatchReasonLabel}` : ''}
                             </span>
                           </span>
                           {row.mismatchDetails.length > 0 && (
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
+                            <div className="text-xs text-slate-500 dark:text-slate-400 leading-tight">
                               {row.mismatchDetails.join(' · ')}
                             </div>
                           )}
@@ -1430,20 +1440,21 @@ export const SchedulePortalValidationReport: React.FC<SchedulePortalValidationRe
           </div>
         )}
       </div>
-      {/* Reset Kiriman Portal (Khusus Super Admin) */}
+
+      {/* 5. Zona Reset (Khusus Super Admin) */}
       {isSuperAdmin && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
-          <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+        <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-xl shadow-xs overflow-hidden">
+          <div className="px-5 sm:px-6 py-4 border-b border-slate-200 dark:border-[#24344D] flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <RotateCcw className="w-4 h-4 text-rose-600 dark:text-rose-400" />
+              <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <RotateCcw className="w-4 h-4 text-red-500 dark:text-red-400 shrink-0" />
                 <span>Reset Kiriman Portal (Khusus Super Admin)</span>
               </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
                 Mengembalikan kiriman ke kondisi awal agar kru dapat memilih kiriman kembali pada tanggal terpilih.
               </p>
             </div>
-            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400 tabular-nums">
               {portalTripsForReset.length} kiriman terisi
             </span>
           </div>
@@ -1451,10 +1462,10 @@ export const SchedulePortalValidationReport: React.FC<SchedulePortalValidationRe
           {resetFeedback && (
             <div
               role="status"
-              className={`mx-4 mt-3 px-3 py-2 rounded-xl text-xs font-semibold border ${
+              className={`mx-5 sm:mx-6 mt-4 px-4 py-2.5 rounded-xl text-xs font-semibold border ${
                 resetFeedback.type === 'success'
-                  ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30'
-                  : 'bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-500/30'
+                  ? 'bg-green-50 dark:bg-green-500/15 text-green-700 dark:text-green-300 border-green-200 dark:border-green-500/30'
+                  : 'bg-red-50 dark:bg-red-500/15 text-red-700 dark:text-red-300 border-red-200 dark:border-red-500/30'
               }`}
             >
               {resetFeedback.text}
@@ -1462,19 +1473,19 @@ export const SchedulePortalValidationReport: React.FC<SchedulePortalValidationRe
           )}
 
           {portalTripsForReset.length === 0 ? (
-            <div className="px-4 py-5 text-xs text-slate-500 dark:text-slate-400">
+            <div className="px-5 sm:px-6 py-5 text-xs sm:text-sm text-slate-500 dark:text-slate-400">
               Tidak ada kiriman portal yang sudah dipilih atau berjalan pada {formatIsoToIndonesianDisplay(selectedDate)}.
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
+              <table className="w-full text-left border-collapse text-xs sm:text-sm">
                 <thead>
-                  <tr className="bg-slate-50 dark:bg-slate-950/90 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                    <th className="py-2 px-3">Area &amp; Armada</th>
-                    <th className="py-2 px-3">Driver</th>
-                    <th className="py-2 px-3">Helper</th>
-                    <th className="py-2 px-3">Status</th>
-                    <th className="py-2 px-3 text-right">Aksi</th>
+                  <tr className="bg-slate-50 dark:bg-slate-900/80 border-b border-slate-200 dark:border-[#24344D] text-[11px] sm:text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    <th className="py-3 px-4 sm:px-5">Area &amp; Armada</th>
+                    <th className="py-3 px-4 sm:px-5">Driver</th>
+                    <th className="py-3 px-4 sm:px-5">Helper</th>
+                    <th className="py-3 px-4 sm:px-5">Status</th>
+                    <th className="py-3 px-4 sm:px-5 text-right">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
@@ -1487,23 +1498,23 @@ export const SchedulePortalValidationReport: React.FC<SchedulePortalValidationRe
                         : 'Belum berangkat';
                     return (
                       <tr key={trip.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
-                        <td className="py-2 px-3">
-                          <div className="font-bold text-slate-900 dark:text-white">{trip.area}</div>
-                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                        <td className="py-3 px-4 sm:px-5">
+                          <div className="font-semibold text-slate-900 dark:text-white">{trip.area}</div>
+                          <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 tabular-nums">
                             {trip.fleetLabel} · {trip.departureTime} WIB
                           </div>
                         </td>
-                        <td className="py-2 px-3 text-slate-700 dark:text-slate-200">{trip.driver?.name || '-'}</td>
-                        <td className="py-2 px-3 text-slate-700 dark:text-slate-200">{trip.helper?.name || '-'}</td>
-                        <td className="py-2 px-3 font-semibold text-slate-700 dark:text-slate-200">{phaseLabel}</td>
-                        <td className="py-2 px-3 text-right">
+                        <td className="py-3 px-4 sm:px-5 text-slate-700 dark:text-slate-200">{trip.driver?.name || '-'}</td>
+                        <td className="py-3 px-4 sm:px-5 text-slate-700 dark:text-slate-200">{trip.helper?.name || '-'}</td>
+                        <td className="py-3 px-4 sm:px-5 font-medium text-slate-700 dark:text-slate-200">{phaseLabel}</td>
+                        <td className="py-3 px-4 sm:px-5 text-right">
                           {confirmResetId === trip.id ? (
-                            <div className="inline-flex items-center gap-1.5">
+                            <div className="inline-flex items-center gap-2">
                               <button
                                 type="button"
                                 disabled={resetBusy}
                                 onClick={() => void handleResetPortalTrip(trip.id)}
-                                className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] cursor-pointer disabled:opacity-50"
+                                className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold text-xs cursor-pointer disabled:opacity-50 transition"
                               >
                                 {resetBusy ? 'Mereset...' : 'Konfirmasi Reset'}
                               </button>
@@ -1511,7 +1522,7 @@ export const SchedulePortalValidationReport: React.FC<SchedulePortalValidationRe
                                 type="button"
                                 disabled={resetBusy}
                                 onClick={() => setConfirmResetId(null)}
-                                className="px-2.5 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-[11px] cursor-pointer"
+                                className="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-medium text-xs cursor-pointer transition"
                               >
                                 Batal
                               </button>
@@ -1521,9 +1532,9 @@ export const SchedulePortalValidationReport: React.FC<SchedulePortalValidationRe
                               type="button"
                               disabled={resetBusy}
                               onClick={() => setConfirmResetId(trip.id)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-500/15 hover:bg-rose-100 dark:hover:bg-rose-500/25 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-500/30 font-bold text-[11px] cursor-pointer"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-red-50 dark:hover:bg-red-500/15 text-red-600 dark:text-red-300 border border-red-200 dark:border-red-500/30 font-semibold text-xs cursor-pointer transition"
                             >
-                              <RotateCcw className="w-3 h-3" />
+                              <RotateCcw className="w-3.5 h-3.5" />
                               <span>Reset Seperti Semula</span>
                             </button>
                           )}

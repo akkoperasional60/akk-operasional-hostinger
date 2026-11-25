@@ -80,6 +80,8 @@ export const loadMasterCabang = () => loadOnce('MasterCabang', () =>
   import('../components/MasterCabang').then(m => ({ default: m.MasterCabang })));
 export const loadSchedulePortalValidationReport = () => loadOnce('SchedulePortalValidationReport', () =>
   import('../components/SchedulePortalValidationReport').then(m => ({ default: m.SchedulePortalValidationReport })));
+export const loadIntegratedRouteValidation = () => loadOnce('IntegratedRouteValidation', () =>
+  import('../components/IntegratedRouteValidation').then(m => ({ default: m.IntegratedRouteValidation })));
 
 export function getLoaderForTab(tab: NavTab): (() => Promise<any>) | null {
   switch (tab) {
@@ -90,6 +92,7 @@ export function getLoaderForTab(tab: NavTab): (() => Promise<any>) | null {
     case 'analytics_reports': return loadAnalyticsReportingModule;
     case 'schedules': return loadScheduleManagement;
     case 'portal_validation': return loadSchedulePortalValidationReport;
+    case 'integrated_validation': return loadIntegratedRouteValidation;
     case 'fleets':
     case 'crew_history': return loadFleetCrewManagement;
     case 'spareparts': return loadSparePartManagement;

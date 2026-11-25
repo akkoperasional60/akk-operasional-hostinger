@@ -1,33 +1,47 @@
-/* AKK Workspace — clean 2026 redesign.
+/* AKK Workspace — Portal Driver Unified Design System.
  * Shared visual layer for every React module. No data, routes, or permission changes.
  * All visible menu links are rendered by Sidebar.tsx using existing NavTab IDs.
  */
 :root {
-  --akk-ui-primary: #2563eb;
-  --akk-ui-primary-deep: #1d4ed8;
-  --akk-ui-ink: #162238;
-  --akk-ui-muted: #52627a;
-  --akk-ui-border: #e5ebf3;
+  --akk-ui-primary: #1764db;
+  --akk-ui-primary-deep: #1454bb;
+  --akk-ui-ink: #18283d;
+  --akk-ui-muted: #5a6b80;
+  --akk-ui-border: #e4eaf2;
   --akk-ui-sidebar: #ffffff;
   --akk-ui-subtle: #f3f6fb;
-  --akk-ui-selected: #ecf3ff;
-  --akk-ui-overlay: rgba(11, 23, 45, .50);
-  --akk-ui-shadow: 0 14px 48px rgba(14, 30, 64, .075);
+  --akk-ui-selected: #e9f2ff;
+  --akk-ui-green: #08774e;
+  --akk-ui-green-soft: #e4f7ed;
+  --akk-ui-amber: #925500;
+  --akk-ui-amber-soft: #fff2db;
+  --akk-ui-danger: #b42338;
+  --akk-ui-danger-soft: #ffedf0;
+  --akk-ui-overlay: rgba(7, 23, 42, .48);
+  --akk-ui-shadow: 0 4px 14px rgba(24, 55, 93, .038);
+  --akk-ui-shadow-elevated: 0 18px 46px rgba(14, 34, 68, .12);
 }
 html.dark {
-  --akk-ui-primary: #69a7ff;
-  --akk-ui-primary-deep: #3b82f6;
-  --akk-ui-ink: #eaf1fa;
-  --akk-ui-muted: #9aacbf;
-  --akk-ui-border: #243246;
-  --akk-ui-sidebar: #111d2e;
-  --akk-ui-subtle: #1a2b40;
-  --akk-ui-selected: #213b5d;
-  --akk-ui-overlay: rgba(0, 5, 17, .68);
-  --akk-ui-shadow: 0 14px 48px rgba(0, 0, 0, .22);
+  --akk-ui-primary: #3079ea;
+  --akk-ui-primary-deep: #2062ca;
+  --akk-ui-ink: #edf4ff;
+  --akk-ui-muted: #b2c1d3;
+  --akk-ui-border: #2b3b50;
+  --akk-ui-sidebar: #192a40;
+  --akk-ui-subtle: #111d2c;
+  --akk-ui-selected: #253e64;
+  --akk-ui-green: #85dfb5;
+  --akk-ui-green-soft: #203e37;
+  --akk-ui-amber: #ffd18a;
+  --akk-ui-amber-soft: #483923;
+  --akk-ui-danger: #ffb4bf;
+  --akk-ui-danger-soft: #472c3a;
+  --akk-ui-overlay: rgba(4, 10, 22, .68);
+  --akk-ui-shadow: 0 6px 18px rgba(0, 0, 0, .20);
+  --akk-ui-shadow-elevated: 0 18px 48px rgba(0, 0, 0, .36);
 }
 
-/* ---- App-wide visual consistency (all departments) ---- */
+/* ---- App-wide visual consistency (all departments, Portal Driver aesthetic) ---- */
 body.akk-clean-ui {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -39,14 +53,14 @@ body.akk-clean-ui input,
 body.akk-clean-ui select,
 body.akk-clean-ui textarea { font-family: inherit; }
 body.akk-clean-ui :is(button, input, select, textarea):focus-visible {
-  outline: 2px solid #438cf9;
+  outline: 2px solid #236ae2;
   outline-offset: 2px;
 }
 body.akk-clean-ui button:not(:disabled) { touch-action: manipulation; }
 body.akk-clean-ui button:disabled { cursor: not-allowed; }
 body.akk-clean-ui :is(h1, h2, h3, h4) {
-  line-height: 1.3;
-  letter-spacing: -.018em;
+  line-height: 1.28;
+  letter-spacing: -.022em;
   text-wrap: pretty;
 }
 body.akk-clean-ui h1 { letter-spacing: -.035em; }
@@ -55,15 +69,15 @@ body.akk-clean-ui :where(input:not([type='checkbox']):not([type='radio']), selec
   transition: border-color .16s ease, box-shadow .16s ease, background-color .16s ease;
 }
 body.akk-clean-ui :where(input, select, textarea):not(:disabled):focus {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, .08);
+  border-color: var(--akk-ui-primary);
+  box-shadow: 0 0 0 3px rgba(23, 100, 219, .12);
 }
 body.akk-clean-ui :where(table) {
   font-variant-numeric: tabular-nums;
   border-collapse: separate;
   border-spacing: 0;
 }
-body.akk-clean-ui :where(th) { letter-spacing: .004em; line-height: 1.45; }
+body.akk-clean-ui :where(th) { letter-spacing: .01em; line-height: 1.45; }
 body.akk-clean-ui :where(td) { line-height: 1.5; }
 body.akk-clean-ui :where(th, td) { vertical-align: middle; }
 body.akk-clean-ui :where(.overflow-x-auto, .overflow-y-auto) {
@@ -71,15 +85,14 @@ body.akk-clean-ui :where(.overflow-x-auto, .overflow-y-auto) {
   scrollbar-color: rgba(120, 141, 171, .42) transparent;
 }
 body.akk-clean-ui :where(.rounded-2xl, .rounded-xl) {
-  transition-property: background-color, border-color, box-shadow;
+  transition-property: background-color, border-color, box-shadow, transform;
   transition-duration: 170ms;
   transition-timing-function: ease;
 }
-/* More room for reading in desktop dashboard modules without touching the data grids. */
 @media (min-width: 1024px) {
   body.akk-clean-ui :where(header.sticky) {
     border-bottom-color: var(--akk-ui-border);
-    box-shadow: 0 1px 10px rgba(8, 23, 46, .025);
+    box-shadow: 0 2px 12px rgba(24, 55, 93, .03);
   }
   body.akk-clean-ui :where(main) { min-width: 0; }
 }
@@ -92,20 +105,20 @@ body.akk-clean-ui :where(.rounded-2xl, .rounded-xl) {
   body.akk-clean-ui :where(.overflow-x-auto) { overscroll-behavior-inline: contain; }
 }
 
-/* Shared page surfaces and data-heavy views: consistent hierarchy across modules. */
+/* Shared page surfaces aligned with Portal Driver palette */
 html.dark body.akk-clean-ui {
-  --neu-bg: #0b1220;
-  --neu-surface: #111d2e;
-  --neu-surface-hover: #18283b;
-  --neu-surface-raised: #1b2b41;
-  --neu-border: #26364a;
+  --neu-bg: #111d2c;
+  --neu-surface: #192a40;
+  --neu-surface-hover: #1f334c;
+  --neu-surface-raised: #223854;
+  --neu-border: #2b3b50;
 }
 html.light body.akk-clean-ui {
-  --neu-bg: #f5f7fb;
+  --neu-bg: #f3f6fb;
   --neu-surface: #ffffff;
-  --neu-surface-hover: #f7f9fd;
+  --neu-surface-hover: #f6f9fe;
   --neu-surface-raised: #ffffff;
-  --neu-border: #e7edf5;
+  --neu-border: #e4eaf2;
 }
 body.akk-clean-ui #root > div.min-h-screen {
   background: var(--neu-bg);
@@ -115,32 +128,392 @@ body.akk-clean-ui #root main {
   min-width: 0;
   isolation: isolate;
 }
-body.akk-clean-ui #root main :where(.shadow-2xl, .shadow-xl) {
+
+/* Portal Driver Card Geometry & Soft Depth (excludes isolated dark scanner, crew portal, leaflet, flat schedule, flat validation, flat reports, flat threeway) */
+body.akk-clean-ui #root main :where(.rounded-2xl):not(#akk-crew-v66):not(#akk-crew-v66 *):not(.wms-handheld-dark):not(.wms-handheld-dark *):not(.leaflet-container *):not(.akk-flat-schedule):not(.akk-flat-schedule *):not(.akk-flat-validation):not(.akk-flat-validation *):not(.akk-flat-reports):not(.akk-flat-reports *):not(.akk-flat-threeway):not(.akk-flat-threeway *) {
+  border-radius: 19px;
+}
+body.akk-clean-ui #root main :where(div.rounded-xl, section.rounded-xl, article.rounded-xl):not(#akk-crew-v66):not(#akk-crew-v66 *):not(.wms-handheld-dark):not(.wms-handheld-dark *):not(.leaflet-container *):not(.akk-flat-schedule):not(.akk-flat-schedule *):not(.akk-flat-validation):not(.akk-flat-validation *):not(.akk-flat-reports):not(.akk-flat-reports *):not(.akk-flat-threeway):not(.akk-flat-threeway *):not([class*='w-7']):not([class*='w-8']):not([class*='w-9']):not([class*='w-10']):not([class*='w-11']):not([class*='w-12']) {
+  border-radius: 17px;
+}
+body.akk-clean-ui #root main :where(.shadow-2xl, .shadow-xl):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule):not(.akk-flat-schedule *):not(.akk-flat-validation):not(.akk-flat-validation *):not(.akk-flat-reports):not(.akk-flat-reports *):not(.akk-flat-threeway):not(.akk-flat-threeway *) {
+  box-shadow: var(--akk-ui-shadow-elevated);
+}
+body.akk-clean-ui #root main :where(.shadow-md, .shadow-sm, .shadow-xs, .shadow-2xs):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule):not(.akk-flat-schedule *):not(.akk-flat-validation):not(.akk-flat-validation *):not(.akk-flat-reports):not(.akk-flat-reports *):not(.akk-flat-threeway):not(.akk-flat-threeway *) {
   box-shadow: var(--akk-ui-shadow);
 }
-body.akk-clean-ui #root main :where(button[class*='bg-blue-600'], button[class*='bg-emerald-600']) {
+
+/* Portal Driver Pill Buttons & Primary Gradients (preserves compact icon buttons, 7-col calendar cells, flat scopes) */
+body.akk-clean-ui #root main :where(
+  button[class*='px-2.5'],
+  button[class*='px-3'],
+  button[class*='px-3.5'],
+  button[class*='px-4'],
+  button[class*='px-5'],
+  button[class*='px-6']
+):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.leaflet-container *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not([class*='grid-cols-7'] button):not([class*='rounded-md']):not([class*='rounded-sm']) {
+  border-radius: 999px !important;
+}
+
+body.akk-clean-ui #root main :where(
+  button[class*='bg-blue-600'],
+  button[class*='bg-indigo-600'],
+  button[class*='bg-cyan-600']
+):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not([class*='grid-cols-7'] button) {
+  background-image: linear-gradient(105deg, #1764db, #247beb) !important;
+  background-color: #1764db !important;
+  border-color: transparent !important;
+  color: #ffffff !important;
   font-weight: 700;
   letter-spacing: -.012em;
-  transition: background-color .16s ease, box-shadow .16s ease, transform .16s ease;
+  box-shadow: 0 3px 10px rgba(23, 100, 219, .18) !important;
+  transition: filter .16s ease, box-shadow .16s ease, transform .16s ease;
 }
-body.akk-clean-ui #root main :where(button[class*='bg-blue-600'], button[class*='bg-emerald-600']):not(:disabled):hover {
-  box-shadow: 0 5px 14px rgba(36, 93, 191, .16);
+body.akk-clean-ui #root main :where(
+  button[class*='bg-blue-600'],
+  button[class*='bg-indigo-600'],
+  button[class*='bg-cyan-600']
+):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(:disabled):hover {
+  filter: brightness(0.96);
+  box-shadow: 0 6px 16px rgba(23, 100, 219, .24) !important;
   transform: translateY(-1px);
 }
-body.akk-clean-ui #root main :where(button[class*='bg-blue-600'], button[class*='bg-emerald-600']):not(:disabled):active {
+
+body.akk-clean-ui #root main :where(button[class*='bg-emerald-600']):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *) {
+  background-image: linear-gradient(105deg, #08774e, #109464) !important;
+  background-color: #08774e !important;
+  border-color: transparent !important;
+  color: #ffffff !important;
+  font-weight: 700;
+  letter-spacing: -.012em;
+  box-shadow: 0 3px 10px rgba(8, 119, 78, .18) !important;
+  transition: filter .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+body.akk-clean-ui #root main :where(button[class*='bg-emerald-600']):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(:disabled):hover {
+  filter: brightness(0.96);
+  box-shadow: 0 6px 16px rgba(8, 119, 78, .24) !important;
+  transform: translateY(-1px);
+}
+body.akk-clean-ui #root main :where(button[class*='bg-blue-600'], button[class*='bg-emerald-600'], button[class*='bg-indigo-600'], button[class*='bg-cyan-600']):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(:disabled):active {
   transform: translateY(0);
 }
-body.akk-clean-ui #root main :where(tbody tr):not([aria-selected='true']):hover {
-  background-color: rgba(114, 151, 206, .055);
+
+/* Portal Driver Soft Hero Banner Gradient */
+body.akk-clean-ui #root main :where(
+  .bg-gradient-to-r[class*='from-blue-600'],
+  .bg-gradient-to-br[class*='from-blue-600'],
+  .bg-gradient-to-r[class*='from-indigo-600'],
+  .bg-gradient-to-br[class*='from-indigo-600']
+):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *) {
+  background-image: linear-gradient(120deg, #1454c2 0%, #1768db 65%, #3597ef 100%) !important;
 }
+
+/* Portal Driver Pill Search Bars & Clean Inputs */
+body.akk-clean-ui #root main :where(input[placeholder*='Cari'], input[type='search']):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *) {
+  border-radius: 999px !important;
+}
+body.akk-clean-ui #root main :where(input:not([type='checkbox']):not([type='radio']):not([placeholder*='Cari']):not([type='search']), select, textarea):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *) {
+  border-radius: 13px;
+}
+
+/* Portal Driver Modal Dialogs */
+body.akk-clean-ui div.fixed.inset-0 > :where(div, section):not(#akk-crew-v66):not(.akk-clean-mobile-layer *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *) {
+  border-radius: 24px;
+}
+
+/* Portal Driver Data Tables */
+body.akk-clean-ui #root main :where(thead th):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *) {
+  background-color: var(--akk-ui-subtle);
+  color: var(--akk-ui-muted);
+  border-bottom: 1px solid var(--akk-ui-border);
+}
+body.akk-clean-ui #root main :where(tbody tr):not([aria-selected='true']):not(#akk-crew-v66 *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):hover {
+  background-color: rgba(23, 100, 219, .045);
+}
+
+/* Flat / Modern Clean Design scope for Jadwal Pengiriman & Penugasan Armada */
+body.akk-clean-ui #root main .akk-flat-schedule :where(.rounded-2xl, .rounded-xl, .rounded-3xl),
+body.akk-clean-ui .akk-flat-schedule :where(.rounded-2xl, .rounded-xl, .rounded-3xl) {
+  box-shadow: none !important;
+}
+body.akk-clean-ui div.fixed.inset-0.akk-flat-schedule > :where(div, section) {
+  border-radius: 16px !important;
+  box-shadow: 0 8px 30px rgba(15, 23, 42, 0.12) !important;
+}
+body.akk-clean-ui #root main .akk-flat-schedule :where(
+  button[class*='px-2.5'],
+  button[class*='px-3'],
+  button[class*='px-3.5'],
+  button[class*='px-4'],
+  button[class*='px-5'],
+  button[class*='px-6']
+):not([class*='rounded-full']):not([class*='grid-cols-7'] button),
+body.akk-clean-ui .akk-flat-schedule :where(
+  button[class*='px-2.5'],
+  button[class*='px-3'],
+  button[class*='px-3.5'],
+  button[class*='px-4'],
+  button[class*='px-5'],
+  button[class*='px-6']
+):not([class*='rounded-full']):not([class*='grid-cols-7'] button) {
+  border-radius: 12px !important;
+}
+body.akk-clean-ui #root main .akk-flat-schedule :where(
+  button[class*='bg-blue-600'],
+  button[class*='bg-indigo-600'],
+  button[class*='bg-cyan-600'],
+  button[class*='bg-[#2563EB]'],
+  button[class*='bg-emerald-600']
+),
+body.akk-clean-ui .akk-flat-schedule :where(
+  button[class*='bg-blue-600'],
+  button[class*='bg-indigo-600'],
+  button[class*='bg-cyan-600'],
+  button[class*='bg-[#2563EB]'],
+  button[class*='bg-emerald-600']
+) {
+  background-image: none !important;
+  background-color: #2563eb !important;
+  border-color: #1d4ed8 !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+body.akk-clean-ui #root main .akk-flat-schedule :where(
+  button[class*='bg-blue-600'],
+  button[class*='bg-indigo-600'],
+  button[class*='bg-cyan-600'],
+  button[class*='bg-[#2563EB]'],
+  button[class*='bg-emerald-600']
+):not(:disabled):hover,
+body.akk-clean-ui .akk-flat-schedule :where(
+  button[class*='bg-blue-600'],
+  button[class*='bg-indigo-600'],
+  button[class*='bg-cyan-600'],
+  button[class*='bg-[#2563EB]'],
+  button[class*='bg-emerald-600']
+):not(:disabled):hover {
+  background-color: #1d4ed8 !important;
+  border-color: #1e40af !important;
+  filter: none !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+body.akk-clean-ui #root main .akk-flat-schedule :where(input:not([type='checkbox']):not([type='radio']), select, textarea),
+body.akk-clean-ui .akk-flat-schedule :where(input:not([type='checkbox']):not([type='radio']), select, textarea) {
+  border-radius: 12px !important;
+  box-shadow: none !important;
+}
+body.akk-clean-ui #root main .akk-flat-schedule :where(thead th),
+body.akk-clean-ui .akk-flat-schedule :where(thead th) {
+  background-color: #f8fafc;
+  color: #475569;
+  border-bottom: 1px solid #e2e8f0;
+}
+html.dark body.akk-clean-ui #root main .akk-flat-schedule :where(thead th),
+html.dark body.akk-clean-ui .akk-flat-schedule :where(thead th) {
+  background-color: #1e293b;
+  color: #94a3b8;
+  border-bottom: 1px solid #24344d;
+}
+
+/* Flat / Modern Clean Design scope for Validasi Portal Driver & Helper */
+body.akk-clean-ui #root main .akk-flat-validation :where(.rounded-2xl, .rounded-xl, .rounded-3xl),
+body.akk-clean-ui .akk-flat-validation :where(.rounded-2xl, .rounded-xl, .rounded-3xl) {
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+}
+body.akk-clean-ui #root main .akk-flat-validation :where(
+  button[class*='px-2.5'],
+  button[class*='px-3'],
+  button[class*='px-3.5'],
+  button[class*='px-4'],
+  button[class*='px-5'],
+  button[class*='px-6']
+):not([class*='rounded-full']):not([class*='grid-cols-7'] button),
+body.akk-clean-ui .akk-flat-validation :where(
+  button[class*='px-2.5'],
+  button[class*='px-3'],
+  button[class*='px-3.5'],
+  button[class*='px-4'],
+  button[class*='px-5'],
+  button[class*='px-6']
+):not([class*='rounded-full']):not([class*='grid-cols-7'] button) {
+  border-radius: 10px !important;
+}
+body.akk-clean-ui #root main .akk-flat-validation :where(button[class*='bg-green-600']) {
+  background-image: none !important;
+  background-color: #16a34a !important;
+  border-color: #15803d !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+body.akk-clean-ui #root main .akk-flat-validation :where(button[class*='bg-green-600']):not(:disabled):hover {
+  background-color: #15803d !important;
+  filter: none !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+body.akk-clean-ui #root main .akk-flat-validation :where(button[class*='bg-green-600']):disabled {
+  background-image: none !important;
+  background-color: #dcfce7 !important;
+  border-color: #bbf7d0 !important;
+  color: #15803d !important;
+  opacity: 0.72;
+}
+body.akk-clean-ui #root main .akk-flat-validation :where(input:not([type='checkbox']):not([type='radio']), select, textarea),
+body.akk-clean-ui .akk-flat-validation :where(input:not([type='checkbox']):not([type='radio']), select, textarea) {
+  border-radius: 12px !important;
+  box-shadow: none !important;
+}
+body.akk-clean-ui #root main .akk-flat-validation :where(thead th),
+body.akk-clean-ui .akk-flat-validation :where(thead th) {
+  background-color: #f8fafc;
+  color: #475569;
+  border-bottom: 1px solid #e2e8f0;
+}
+html.dark body.akk-clean-ui #root main .akk-flat-validation :where(thead th),
+html.dark body.akk-clean-ui .akk-flat-validation :where(thead th) {
+  background-color: #1e293b;
+  color: #94a3b8;
+  border-bottom: 1px solid #24344d;
+}
+
+/* Flat / Modern Clean Design scope for Laporan & Kendala Kiriman Kru */
+body.akk-clean-ui #root main .akk-flat-reports :where(.rounded-2xl, .rounded-xl, .rounded-3xl),
+body.akk-clean-ui .akk-flat-reports :where(.rounded-2xl, .rounded-xl, .rounded-3xl) {
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+}
+body.akk-clean-ui #root main .akk-flat-reports :where(
+  button[class*='px-2.5'],
+  button[class*='px-3'],
+  button[class*='px-3.5'],
+  button[class*='px-4'],
+  button[class*='px-5'],
+  button[class*='px-6']
+):not([class*='rounded-full']):not([class*='grid-cols-7'] button),
+body.akk-clean-ui .akk-flat-reports :where(
+  button[class*='px-2.5'],
+  button[class*='px-3'],
+  button[class*='px-3.5'],
+  button[class*='px-4'],
+  button[class*='px-5'],
+  button[class*='px-6']
+):not([class*='rounded-full']):not([class*='grid-cols-7'] button) {
+  border-radius: 12px !important;
+}
+body.akk-clean-ui #root main .akk-flat-reports :where(button[class*='bg-green-600']) {
+  background-image: none !important;
+  background-color: #16a34a !important;
+  border-color: #15803d !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+body.akk-clean-ui #root main .akk-flat-reports :where(button[class*='bg-green-600']):not(:disabled):hover {
+  background-color: #15803d !important;
+  filter: none !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+body.akk-clean-ui #root main .akk-flat-reports :where(input:not([type='checkbox']):not([type='radio']), select, textarea),
+body.akk-clean-ui .akk-flat-reports :where(input:not([type='checkbox']):not([type='radio']), select, textarea) {
+  border-radius: 12px !important;
+  box-shadow: none !important;
+}
+body.akk-clean-ui #root main .akk-flat-reports :where(thead th),
+body.akk-clean-ui .akk-flat-reports :where(thead th) {
+  background-color: #f8fafc;
+  color: #475569;
+  border-bottom: 1px solid #e2e8f0;
+}
+html.dark body.akk-clean-ui #root main .akk-flat-reports :where(thead th),
+html.dark body.akk-clean-ui .akk-flat-reports :where(thead th) {
+  background-color: #1e293b;
+  color: #94a3b8;
+  border-bottom: 1px solid #24344d;
+}
+
+/* Flat / Modern Clean Design scope for Validasi Terintegrasi Three-Way Matching */
+body.akk-clean-ui #root main .akk-flat-threeway :where(.rounded-2xl, .rounded-xl, .rounded-3xl),
+body.akk-clean-ui .akk-flat-threeway :where(.rounded-2xl, .rounded-xl, .rounded-3xl) {
+  box-shadow: none !important;
+}
+body.akk-clean-ui div.fixed.inset-0.akk-flat-threeway > :where(div, section) {
+  border-radius: 16px !important;
+  box-shadow: 0 8px 30px rgba(15, 23, 42, 0.12) !important;
+}
+body.akk-clean-ui #root main .akk-flat-threeway :where(
+  button[class*='px-2.5'],
+  button[class*='px-3'],
+  button[class*='px-3.5'],
+  button[class*='px-4'],
+  button[class*='px-5'],
+  button[class*='px-6']
+):not([class*='rounded-full']):not([class*='grid-cols-7'] button),
+body.akk-clean-ui .akk-flat-threeway :where(
+  button[class*='px-2.5'],
+  button[class*='px-3'],
+  button[class*='px-3.5'],
+  button[class*='px-4'],
+  button[class*='px-5'],
+  button[class*='px-6']
+):not([class*='rounded-full']):not([class*='grid-cols-7'] button) {
+  border-radius: 10px !important;
+}
+body.akk-clean-ui #root main .akk-flat-threeway :where(button[class*='bg-blue-600']) {
+  background-image: none !important;
+  background-color: #2563eb !important;
+  border-color: #1d4ed8 !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+body.akk-clean-ui #root main .akk-flat-threeway :where(button[class*='bg-blue-600']):not(:disabled):hover {
+  background-color: #1d4ed8 !important;
+  filter: none !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+body.akk-clean-ui #root main .akk-flat-threeway :where(button[class*='bg-green-600']) {
+  background-image: none !important;
+  background-color: #16a34a !important;
+  border-color: #15803d !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+body.akk-clean-ui #root main .akk-flat-threeway :where(button[class*='bg-green-600']):not(:disabled):hover {
+  background-color: #15803d !important;
+  filter: none !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+body.akk-clean-ui #root main .akk-flat-threeway :where(input:not([type='checkbox']):not([type='radio']), select, textarea),
+body.akk-clean-ui .akk-flat-threeway :where(input:not([type='checkbox']):not([type='radio']), select, textarea) {
+  border-radius: 10px !important;
+  box-shadow: none !important;
+}
+body.akk-clean-ui #root main .akk-flat-threeway :where(thead th),
+body.akk-clean-ui .akk-flat-threeway :where(thead th) {
+  background-color: #f8fafc;
+  color: #475569;
+  border-bottom: 1px solid #e2e8f0;
+}
+html.dark body.akk-clean-ui #root main .akk-flat-threeway :where(thead th),
+html.dark body.akk-clean-ui .akk-flat-threeway :where(thead th) {
+  background-color: #1e293b;
+  color: #94a3b8;
+  border-bottom: 1px solid #24344d;
+}
+
 body.akk-clean-ui #root main :where(label) { letter-spacing: -.005em; }
 body.akk-clean-ui #root main :where(.truncate) { min-width: 0; }
 body.akk-clean-ui #root header.sticky h1 {
-  font-size: 15px;
-  font-weight: 720;
-  letter-spacing: -.023em;
+  font-size: 16px;
+  font-weight: 750;
+  letter-spacing: -.025em;
 }
-/* Screen transitions only on new content mounts; avoids constant looping animations. */
 @media (prefers-reduced-motion: no-preference) {
   body.akk-clean-ui #root main > div:first-child,
   body.akk-clean-ui #root main > section:first-child {
@@ -148,7 +521,8 @@ body.akk-clean-ui #root header.sticky h1 {
   }
 }
 @keyframes akkWorkspaceEnter { from { opacity: .82; } to { opacity: 1; } }
-/* ---- Navigation shell: flat 2-level architecture, no pop-out flyouts ---- */
+
+/* ---- Navigation shell: Portal Driver Light/Dark Rail & Sidebar ---- */
 .akk-clean-sidebar,
 .akk-clean-mobile-panel {
   --akk-nav-padding-x: 18px;
@@ -163,7 +537,7 @@ body.akk-clean-ui #root header.sticky h1 {
   background: var(--akk-ui-sidebar);
   color: var(--akk-ui-ink);
   border-right: 1px solid var(--akk-ui-border);
-  box-shadow: 4px 0 28px rgba(9, 20, 48, .025);
+  box-shadow: 4px 0 28px rgba(24, 55, 93, .035);
   transition: width .26s cubic-bezier(.2,.9,.2,1), background-color .18s ease;
 }
 .akk-clean-sidebar.is-minimized { width: 80px; --akk-nav-padding-x: 10px; }
@@ -181,13 +555,22 @@ body.akk-clean-ui #root header.sticky h1 {
 .akk-clean-mobile-home { border: 0; padding: 0; text-align: left; background: none; cursor: pointer; color: inherit; min-width: 0; }
 .akk-clean-logo-button { display: flex; align-items: center; flex: 1; overflow: hidden; }
 .akk-clean-logo-button > * { min-width: 0; }
-.akk-clean-brand-title { display:flex; flex-direction:column; gap:1px; margin-left:9px; overflow:hidden; }
-.akk-clean-brand-title strong { font-size:18px; line-height:1.08; letter-spacing:-.055em; font-weight:840; color:var(--akk-ui-ink); }
-.akk-clean-brand-title small { font-size:10px; letter-spacing:.06em; font-weight:620; color:var(--akk-ui-muted); }
+.akk-clean-logo-tile {
+  display: grid; place-items: center;
+  width: 40px; height: 40px; flex-shrink: 0;
+  border-radius: 14px;
+  background: #e5f0ff;
+}
+html.dark .akk-clean-logo-tile {
+  background: var(--akk-ui-selected);
+}
+.akk-clean-brand-title { display:flex; flex-direction:column; gap:1px; margin-left:10px; overflow:hidden; }
+.akk-clean-brand-title strong { font-size:16px; line-height:1.15; letter-spacing:-.035em; font-weight:800; color:var(--akk-ui-ink); }
+.akk-clean-brand-title small { font-size:11px; letter-spacing:.02em; font-weight:500; color:var(--akk-ui-muted); }
 .akk-clean-brand-actions { display: flex; gap: 5px; flex: 0 0 auto; }
 .akk-clean-icon-button {
-  display: inline-grid; place-items: center; width: 37px; height: 37px;
-  flex-shrink: 0; border-radius: 11px;
+  display: inline-grid; place-items: center; width: 38px; height: 38px;
+  flex-shrink: 0; border-radius: 999px;
   border: 1px solid transparent; background: transparent;
   color: var(--akk-ui-muted); cursor: pointer;
   transition: background-color .15s ease, color .15s ease, transform .15s ease;
@@ -210,10 +593,10 @@ body.akk-clean-ui #root header.sticky h1 {
 .akk-clean-sidebar.is-minimized .akk-clean-brand-actions {
   margin: 0 auto;
 }
-.akk-clean-search-area { margin: 16px var(--akk-nav-padding-x) 6px; position: relative; flex-shrink: 0; }
+.akk-clean-search-area { margin: 15px var(--akk-nav-padding-x) 6px; position: relative; flex-shrink: 0; }
 .akk-clean-search {
-  width: 100%; height: 42px; padding: 0 58px 0 38px !important;
-  border: 1px solid var(--akk-ui-border) !important; border-radius: 12px;
+  width: 100%; height: 42px; padding: 0 58px 0 40px !important;
+  border: 1px solid var(--akk-ui-border) !important; border-radius: 999px !important;
   background: var(--akk-ui-subtle) !important; color: var(--akk-ui-ink) !important;
   font-size: 13px; font-weight: 500;
   box-shadow: none !important;
@@ -221,24 +604,24 @@ body.akk-clean-ui #root header.sticky h1 {
   transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
 }
 .akk-clean-search::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
-.akk-clean-search::placeholder { color: var(--akk-ui-muted) !important; opacity: .85; }
+.akk-clean-search::placeholder { color: var(--akk-ui-muted) !important; opacity: .9; }
 .akk-clean-search:focus {
   background: var(--akk-ui-sidebar) !important;
   border-color: var(--akk-ui-primary) !important;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, .14) !important;
+  box-shadow: 0 0 0 3px rgba(23, 100, 219, .14) !important;
 }
-.akk-clean-search-icon { position: absolute; top: 12.5px; left: 13px; color: var(--akk-ui-muted); pointer-events: none; }
+.akk-clean-search-icon { position: absolute; top: 12.5px; left: 14px; color: var(--akk-ui-muted); pointer-events: none; }
 .akk-clean-shortcut {
-  position: absolute; right: 10px; top: 10px;
+  position: absolute; right: 12px; top: 10px;
   font-size: 10px; font-weight: 600; line-height: 20px;
   color: var(--akk-ui-muted); border: 1px solid var(--akk-ui-border);
-  background: var(--akk-ui-sidebar); border-radius: 6px;
-  padding: 0 6px; min-width: 38px; text-align: center; pointer-events: none;
+  background: var(--akk-ui-sidebar); border-radius: 999px;
+  padding: 0 8px; min-width: 38px; text-align: center; pointer-events: none;
 }
 .akk-clean-search-clear {
-  position: absolute; right: 8px; top: 8px;
+  position: absolute; right: 9px; top: 8px;
   display: grid; place-items: center; width: 26px; height: 26px;
-  border: 0; border-radius: 8px; background: transparent;
+  border: 0; border-radius: 999px; background: transparent;
   color: var(--akk-ui-muted); cursor: pointer;
   transition: background-color .14s ease, color .14s ease;
 }
@@ -246,16 +629,16 @@ body.akk-clean-ui #root header.sticky h1 {
 .akk-clean-nav { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 12px 12px 24px; scrollbar-width: thin; scrollbar-color: #c1ceda transparent; }
 .akk-clean-block-label {
   display: flex; align-items: center; gap: 6px;
-  margin: 0 9px 9px; color: var(--akk-ui-muted);
+  margin: 0 10px 9px; color: var(--akk-ui-muted);
   font-size: 10px; font-weight: 800; letter-spacing: .095em;
   text-transform: uppercase;
 }
-.akk-clean-section-title { margin-top: 23px; }
+.akk-clean-section-title { margin-top: 22px; }
 .akk-clean-shortcuts { padding: 4px 0 9px; border-bottom: 1px solid var(--akk-ui-border); }
 .akk-clean-section { margin: 3px 0; }
 .akk-clean-section-button {
   display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px;
-  border: 0; border-radius: 11px; padding: 0 12px;
+  border: 0; border-radius: 14px; padding: 0 12px;
   color: var(--akk-ui-ink); background: transparent;
   font-size: 13.5px; font-weight: 670; text-align: left;
   cursor: pointer; transition: color .16s ease, background-color .16s ease;
@@ -263,25 +646,29 @@ body.akk-clean-ui #root header.sticky h1 {
 .akk-clean-section-button > span { flex: 1; min-width: 0; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
 .akk-clean-section-button > svg:not(:last-child) { color: var(--akk-ui-muted); flex-shrink: 0; }
 .akk-clean-section-button:hover, .akk-clean-section.is-open > .akk-clean-section-button { background: var(--akk-ui-subtle); }
-.akk-clean-section-button.is-current, .akk-clean-section.is-open > .akk-clean-section-button { color: var(--akk-ui-primary); }
-.akk-clean-section-button.is-current > svg { color: var(--akk-ui-primary); }
+.akk-clean-section-button.is-current, .akk-clean-section.is-open > .akk-clean-section-button {
+  background: var(--akk-ui-selected);
+  color: var(--akk-ui-primary);
+}
+.akk-clean-section-button.is-current > svg,
+.akk-clean-section.is-open > .akk-clean-section-button > svg:not(:last-child) { color: var(--akk-ui-primary); }
 .akk-clean-section-chevron { margin-left: auto; flex-shrink: 0; color: var(--akk-ui-muted); transition: transform .18s ease; }
 .akk-clean-section.is-open .akk-clean-section-chevron { transform: rotate(180deg); color: var(--akk-ui-primary); }
-.akk-clean-items { margin: 3px 0 10px 24px; padding-left: 10px; border-left: 1px solid var(--akk-ui-border); animation: akkCleanReveal .17s ease both; }
-.akk-nav-item-wrap { position: relative; display: flex; align-items: center; border-radius: 9px; margin: 1px 0; }
+.akk-clean-items { margin: 4px 0 10px 22px; padding-left: 10px; border-left: 1.5px solid var(--akk-ui-border); animation: akkCleanReveal .17s ease both; }
+.akk-nav-item-wrap { position: relative; display: flex; align-items: center; border-radius: 12px; margin: 2px 0; }
 .akk-nav-item-wrap.is-active { background: var(--akk-ui-selected); }
 .akk-nav-link {
   display: flex; align-items: center; gap: 9px; flex: 1 1 auto; width: 100%; min-width: 0; min-height: 37px;
-  padding: 6px 7px; border: none; border-radius: 9px; background: transparent;
-  color: var(--akk-ui-muted); font-size: 12.5px; font-weight: 550; text-align: left; cursor: pointer;
+  padding: 6px 9px; border: none; border-radius: 12px; background: transparent;
+  color: var(--akk-ui-muted); font-size: 12.5px; font-weight: 560; text-align: left; cursor: pointer;
   transition: color .14s ease, background-color .14s ease;
 }
 .akk-nav-link:hover { color: var(--akk-ui-primary); background: var(--akk-ui-subtle); }
 .akk-nav-link.is-active { color: var(--akk-ui-primary); font-weight: 720; }
 .akk-nav-item-dot { width: 5px; height: 5px; background: #bcc9d8; border-radius: 50%; flex-shrink: 0; }
-.akk-nav-link.is-active .akk-nav-item-dot { background: var(--akk-ui-primary); box-shadow: 0 0 0 3px rgba(59,130,246,.12); }
+.akk-nav-link.is-active .akk-nav-item-dot { background: var(--akk-ui-primary); box-shadow: 0 0 0 3px rgba(23,100,219,.14); }
 .akk-nav-link-text { min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.akk-nav-pin { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 28px; border: 0; border-radius: 7px; background: transparent; color: var(--akk-ui-muted); cursor: pointer; opacity: 0; transition: opacity .13s ease, color .13s ease, background .13s ease; }
+.akk-nav-pin { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 28px; border: 0; border-radius: 999px; background: transparent; color: var(--akk-ui-muted); cursor: pointer; opacity: 0; transition: opacity .13s ease, color .13s ease, background .13s ease; }
 .akk-nav-pin.is-starred { opacity: 1; color: var(--akk-ui-primary); }
 .akk-nav-item-wrap:hover .akk-nav-pin, .akk-nav-pin:focus-visible { opacity: 1; }
 .akk-nav-pin:hover { color: var(--akk-ui-primary); background: var(--akk-ui-sidebar); }
@@ -293,12 +680,12 @@ body.akk-clean-ui #root header.sticky h1 {
 .akk-clean-rail::-webkit-scrollbar { display: none; }
 .akk-clean-rail-button {
   display: grid; place-items: center; flex-shrink: 0;
-  height: 42px; width: 48px; border: 1px solid transparent; border-radius: 12px;
+  height: 44px; width: 48px; border: 1px solid transparent; border-radius: 14px;
   background: transparent; color: var(--akk-ui-muted); cursor: pointer;
   transition: background-color .15s ease, color .15s ease, border-color .15s ease;
 }
 .akk-clean-rail-button:hover { background: var(--akk-ui-subtle); color: var(--akk-ui-primary); }
-.akk-clean-rail-button.is-active { background: var(--akk-ui-selected); color: var(--akk-ui-primary); border-color: rgba(59, 130, 246, .18); }
+.akk-clean-rail-button.is-active { background: var(--akk-ui-selected); color: var(--akk-ui-primary); border-color: rgba(23, 100, 219, .2); }
 .akk-clean-footer {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   border-top: 1px solid var(--akk-ui-border); padding: 12px 14px; flex-shrink: 0;
@@ -309,16 +696,16 @@ body.akk-clean-ui #root header.sticky h1 {
 }
 .akk-clean-user { display: flex; align-items: center; gap: 9px; min-width: 0; flex: 1 1 auto; }
 .akk-clean-avatar {
-  display: grid; place-items: center; width: 35px; height: 35px; flex: 0 0 35px;
+  display: grid; place-items: center; width: 38px; height: 38px; flex: 0 0 38px;
   background: var(--akk-ui-selected); color: var(--akk-ui-primary);
-  border-radius: 10px; font-size: 14px; font-weight: 800;
+  border-radius: 999px; font-size: 13px; font-weight: 750;
 }
 .akk-clean-user-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; gap: 2px; }
 .akk-clean-user-text strong {
   display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  max-width: 100%; color: var(--akk-ui-ink); font-size: 12px; font-weight: 700;
+  max-width: 100%; color: var(--akk-ui-ink); font-size: 12.5px; font-weight: 700;
 }
-.akk-clean-user-text small { color: var(--akk-ui-muted); font-size: 10px; line-height: 1.2; }
+.akk-clean-user-text small { color: var(--akk-ui-muted); font-size: 10.5px; line-height: 1.2; }
 .akk-clean-footer-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .akk-clean-footer.is-rail .akk-clean-footer-actions {
   flex-direction: column; align-items: center; gap: 6px; width: 100%;
@@ -326,7 +713,7 @@ body.akk-clean-ui #root header.sticky h1 {
 .akk-clean-footer-actions .akk-clean-icon-button,
 .akk-clean-footer-actions .akk-clean-theme-btn {
   width: 36px; height: 36px; padding: 0 !important;
-  border-radius: 10px !important;
+  border-radius: 999px !important;
   background: var(--akk-ui-subtle) !important;
   border: 1px solid var(--akk-ui-border) !important;
   color: var(--akk-ui-muted);
@@ -337,16 +724,22 @@ body.akk-clean-ui #root header.sticky h1 {
 .akk-clean-footer-actions .akk-clean-theme-btn:hover {
   background: var(--akk-ui-selected) !important;
   color: var(--akk-ui-primary);
-  border-color: rgba(59, 130, 246, .28) !important;
+  border-color: rgba(23, 100, 219, .28) !important;
 }
 
-/* ---- Mobile: compact top bar, accessible slide-over menu ---- */
-.akk-clean-mobile-top { position: fixed; top: 0; left: 0; right: 0; height: 64px; z-index: 1090; padding: 0 14px; align-items: center; justify-content: space-between; background: var(--akk-ui-sidebar); border-bottom: 1px solid var(--akk-ui-border); box-shadow: 0 1px 8px rgba(13, 28, 60, .04); }
-.akk-clean-mobile-home { display: flex; align-items: center; gap:8px; }
-.akk-clean-mobile-home strong { font-size:17px; font-weight:820; letter-spacing:-.035em; color:var(--akk-ui-ink); }
+/* ---- Mobile: Portal Driver clean top bar, slide-over menu ---- */
+.akk-clean-mobile-top { position: fixed; top: 0; left: 0; right: 0; height: 64px; z-index: 1090; padding: 0 14px; align-items: center; justify-content: space-between; background: var(--akk-ui-sidebar); border-bottom: 1px solid var(--akk-ui-border); box-shadow: 0 2px 10px rgba(24, 55, 93, .04); }
+.akk-clean-mobile-home { display: flex; align-items: center; gap: 9px; }
+.akk-clean-mobile-home strong { font-size: 16px; font-weight: 800; letter-spacing: -.03em; color: var(--akk-ui-ink); }
+.akk-clean-mobile-avatar {
+  display: grid; place-items: center;
+  width: 38px; height: 38px; border-radius: 999px;
+  background: var(--akk-ui-selected); color: var(--akk-ui-primary);
+  font-size: 13px; font-weight: 750; border: 0; cursor: pointer;
+}
 .akk-clean-mobile-layer { position: fixed; inset: 0; z-index: 1300; }
 .akk-clean-mobile-backdrop { position: absolute; inset: 0; background: var(--akk-ui-overlay); border: 0; cursor: pointer; animation: akkCleanFade .2s ease both; }
-.akk-clean-mobile-panel { position: absolute; z-index: 1; width: min(320px, 88vw); box-shadow: var(--akk-ui-shadow); display: flex; animation: akkCleanSlide .22s cubic-bezier(.22,1,.36,1) both; }
+.akk-clean-mobile-panel { position: absolute; z-index: 1; width: min(320px, 88vw); box-shadow: var(--akk-ui-shadow-elevated); display: flex; animation: akkCleanSlide .22s cubic-bezier(.22,1,.36,1) both; }
 .akk-clean-mobile-panel .akk-clean-brand { height: 67px; }
 .akk-clean-mobile-panel .akk-clean-nav { padding-bottom: max(18px, env(safe-area-inset-bottom, 0px)); }
 .akk-clean-mobile-panel .akk-nav-pin { opacity: .7; }
@@ -354,7 +747,6 @@ body.akk-clean-ui #root header.sticky h1 {
   .akk-clean-sidebar { display: none !important; }
   .akk-clean-mobile-top { display: flex !important; }
   .akk-clean-mobile-panel { display: flex; }
-  /* App.tsx already reserves 64px with pt-14/pt-20 on its content. */
 }
 @media (min-width: 1024px) {
   .akk-clean-sidebar { display: flex !important; }

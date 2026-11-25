@@ -52,9 +52,9 @@ type QaTrip = {id:string;branchId:string;area:string;fleetLabel:string;date:stri
   driver:{id:string;name:string}|null;helper:{id:string;name:string}|null;createdAt:string};
 const todayJakarta = (): string => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' });
 
-const fieldClass = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-medium text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus:ring-blue-900';
-const labelClass = 'mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300';
-const buttonClass = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-700 active:scale-[.98] disabled:cursor-not-allowed disabled:opacity-50';
+const fieldClass = 'w-full rounded-[14px] border border-[#dce5ef] bg-white px-3.5 py-2.5 text-sm font-medium text-[#18283d] outline-none transition focus:border-[#1764db] focus:ring-2 focus:ring-[#1764db]/15 dark:border-[#2b3b50] dark:bg-[#132235] dark:text-[#edf4ff] dark:focus:ring-[#3079ea]/25';
+const labelClass = 'mb-1.5 block text-xs font-semibold text-[#5a6b80] dark:text-[#b2c1d3]';
+const buttonClass = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-[10px] bg-[#2563eb] px-5 text-sm font-bold text-white transition hover:bg-[#1d4ed8] disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer';
 const HOURS_24 = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
 const MINUTES_60 = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
 
@@ -64,13 +64,13 @@ const Time24Field: React.FC<{ label: string; value: string; onChange: (next: str
   const minute = MINUTES_60.includes(rawM) ? rawM : '00';
   return (
     <div className="block">
-      <span className={labelClass}>{label} <span className="font-normal text-slate-400">(24 jam)</span></span>
-      <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 transition focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:focus-within:ring-blue-900">
+      <span className={labelClass}>{label} <span className="font-normal text-[#5a6b80]/80 dark:text-[#b2c1d3]/80">(24 jam)</span></span>
+      <div className="flex items-center gap-1.5 rounded-[14px] border border-[#dce5ef] bg-white px-3 py-1.5 text-sm font-semibold text-[#18283d] transition focus-within:border-[#1764db] focus-within:ring-2 focus-within:ring-[#1764db]/15 dark:border-[#2b3b50] dark:bg-[#132235] dark:text-[#edf4ff] dark:focus-within:ring-[#3079ea]/25">
         <select
           aria-label={`Jam ${label}`}
           value={hour}
           onChange={e => onChange(`${e.target.value}:${minute}`)}
-          className="flex-1 bg-transparent py-1 text-center text-sm font-bold tabular-nums text-slate-900 outline-none dark:bg-slate-900 dark:text-white"
+          className="flex-1 bg-transparent py-1 text-center text-sm font-bold tabular-nums text-[#18283d] outline-none dark:bg-[#132235] dark:text-[#edf4ff]"
         >
           {HOURS_24.map(h => <option key={h} value={h}>{h}</option>)}
         </select>
@@ -214,14 +214,27 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
   }, [testCreator]);
   useEffect(() => { setFleetId(''); setDriverId(''); setHelperId(''); }, [effectiveBranchId]);
 
-  const start = () => {
+  const start = (preferredBranchId?: string) => {
     setError('');
     setNotice('');
     setConfirmDeleteQaId(null);
+    if (preferredBranchId && branches.some(b => b.id === preferredBranchId)) {
+      setBranchId(preferredBranchId);
+    }
     void logisticsStore.hydrateOperationalDataFromHostinger();
     void branchStore.syncFromServer();
     setOpen(true);
   };
+
+  useEffect(() => {
+    if (!active) return;
+    const handleOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ branchId?: string }>).detail;
+      start(detail?.branchId);
+    };
+    window.addEventListener('akk-open-create-shipment', handleOpen);
+    return () => window.removeEventListener('akk-open-create-shipment', handleOpen);
+  }, [active, branches]);
 
   const handleDeliveryDateChange = (nextDate: string) => {
     setDate(nextDate);
@@ -372,10 +385,12 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
 
   return createPortal(
     <>
-      <button type="button" onClick={start} className={`akk-ship-create-trigger ${testCreator ? 'akk-ship-qa-trigger' : ''}`}>
-        <Plus size={19} strokeWidth={2.5} /> {testCreator ? 'Buat Jadwal Uji' : 'Buat Kiriman'}
-      </button>
-      {notice && !open && <div className="akk-ship-notice" role="status"><Check size={15} /> {notice} <button type="button" onClick={() => setNotice('')} aria-label="Tutup pemberitahuan"><X size={15}/></button></div>}
+      {testCreator && (
+        <button type="button" onClick={() => start()} className="akk-ship-create-trigger akk-ship-qa-trigger">
+          <Plus size={19} strokeWidth={2.5} /> Buat Jadwal Uji
+        </button>
+      )}
+      {notice && !open && <div className={`akk-ship-notice ${!testCreator ? 'akk-ship-notice--inline' : ''}`} role="status"><Check size={15} /> {notice} <button type="button" onClick={() => setNotice('')} aria-label="Tutup pemberitahuan"><X size={15}/></button></div>}
       {open && (
         <div className="akk-ship-backdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) setOpen(false); }}>
           <section className="akk-ship-dialog" role="dialog" aria-modal="true" aria-label={testCreator ? 'Buat jadwal uji' : 'Buat kiriman'}>
@@ -423,7 +438,7 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
                     {picker('Driver', driverId, setDriverId, crews.filter(c => c.id !== helperId).map(c => ({ value: c.id, label: c.name })))}
                     {picker('Helper', helperId, setHelperId, crews.filter(c => c.id !== driverId).map(c => ({ value: c.id, label: c.name })))}
                   </div>
-                  <p className="mt-2 text-xs text-slate-500">Kru bisa ditentukan kemudian. Tidak akan terisi otomatis.</p>
+                  <p className="mt-2 text-xs text-slate-500">Boleh dikosongkan. Jika tetap diisi admin, nama kru tidak ditampilkan di Portal sehingga kru memilih Area &amp; posisi (Driver/Helper) sendiri.</p>
                 </div>}
               </form>
               {error && <p role="alert" className="akk-ship-error">{error}</p>}

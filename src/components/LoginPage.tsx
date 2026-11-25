@@ -347,26 +347,24 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
 
   return (
-    <div className="min-h-screen bg-[#f4f7fb] dark:bg-slate-950 flex items-center justify-center p-4 selection:bg-blue-600 selection:text-white font-sans antialiased">
-      {/* Centered Modal Card with Clean Modern Slate-Blue Tone */}
-      <div className="w-full max-w-[460px] rounded-2xl overflow-hidden shadow-xl shadow-slate-900/5 border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 transition-all">
-        {/* Top Brand Accent Bar */}
-        <div className="h-1.5 w-full bg-gradient-to-r from-[#1E8AD5] via-blue-600 to-[#CB4E2A]" />
-
-        {/* Top Header */}
-        <div className="bg-gradient-to-b from-slate-50/90 via-white to-slate-50/60 dark:from-slate-900 dark:via-slate-900 dark:to-slate-950 px-6 pt-6 pb-6 text-center border-b border-slate-200/80 dark:border-slate-800 relative">
+    <div className="min-h-screen bg-[#f3f6fb] dark:bg-[#111d2c] flex items-center justify-center p-4 selection:bg-[#1764db] selection:text-white font-sans antialiased">
+      {/* Centered Portal Card */}
+      <div className="w-full max-w-[460px] rounded-[24px] overflow-hidden shadow-xl shadow-[#18375d]/8 border border-[#e4eaf2] dark:border-[#2b3b50] bg-white dark:bg-[#192a40] transition-all">
+        {/* Portal Driver Gradient Hero Header */}
+        <div className="relative overflow-hidden bg-gradient-to-br from-[#1454c2] via-[#1768db] to-[#3597ef] px-6 pt-7 pb-6 text-center text-white">
+          <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full border-[22px] border-white/10" />
           {/* Logo & Brand Monogram */}
-          <div className="flex items-center justify-center gap-2 mb-2">
+          <div className="inline-flex items-center justify-center rounded-[18px] bg-white px-4 py-2.5 shadow-sm mb-3 relative z-10">
             <AkkLogo size="md" showText={true} showSubtitle={false} />
           </div>
 
-          <p className="text-slate-600 dark:text-slate-400 text-xs leading-relaxed max-w-sm mx-auto mt-2 font-medium">
+          <p className="text-[#e2edff] text-xs leading-relaxed max-w-sm mx-auto font-medium relative z-10">
             Portal Akses Logistik Terintegrasi &amp; Pengiriman Luar Pulau PT Anugrah Kemasan Kreatif.
           </p>
 
           {/* Segmented Tab Switcher */}
           {tab === 'forgot' ? (
-            <div className="flex items-center justify-between mt-5 max-w-xs mx-auto px-1">
+            <div className="flex items-center justify-between mt-5 max-w-xs mx-auto px-1 relative z-10">
               <button
                 type="button"
                 onClick={() => {
@@ -375,24 +373,24 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   setErrorMsg('');
                   setSuccessMsg('');
                 }}
-                className="inline-flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-white font-semibold transition-colors cursor-pointer group"
+                className="inline-flex items-center gap-1.5 text-xs text-white/90 hover:text-white font-semibold transition-colors cursor-pointer group"
               >
                 <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
                 <span>Kembali ke Masuk</span>
               </button>
-              <span className="text-xs font-bold text-blue-600 dark:text-blue-400">
+              <span className="text-xs font-bold px-3 py-1 rounded-full bg-white/15 text-white">
                 Lupa Password
               </span>
             </div>
           ) : (
-            <div className="flex items-center justify-center gap-1.5 mt-5 bg-slate-100 dark:bg-slate-800/90 p-1.5 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 max-w-[330px] mx-auto">
+            <div className="flex items-center justify-center gap-1.5 mt-5 bg-white/15 backdrop-blur-xs p-1.5 rounded-full max-w-[330px] mx-auto relative z-10">
               <button
                 type="button"
                 onClick={() => { setTab('login'); setErrorMsg(''); setSuccessMsg(''); }}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-full text-xs font-bold transition-all cursor-pointer ${
                   tab === 'login'
-                    ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/25'
-                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/50'
+                    ? 'bg-white text-[#1764db] shadow-sm'
+                    : 'text-white/90 hover:text-white hover:bg-white/10'
                 }`}
               >
                 <LogIn className="w-3.5 h-3.5" />
@@ -402,10 +400,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               <button
                 type="button"
                 onClick={() => { setTab('register'); setErrorMsg(''); setSuccessMsg(''); }}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-full text-xs font-bold transition-all cursor-pointer ${
                   tab === 'register'
-                    ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/25'
-                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-slate-700/50'
+                    ? 'bg-white text-[#1764db] shadow-sm'
+                    : 'text-white/90 hover:text-white hover:bg-white/10'
                 }`}
               >
                 <UserPlus className="w-3.5 h-3.5" />
@@ -441,7 +439,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         )}
 
         {/* Card Body */}
-        <div className="p-6 sm:p-7 bg-white dark:bg-slate-900">
+        <div className="p-6 sm:p-7 bg-white dark:bg-[#192a40]">
           {tab === 'login' ? (
             /* ======================================================== */
             /* TAB 1: MASUK (LOGIN)                                      */
@@ -516,7 +514,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               <button
                 type="submit"
                 disabled={isLocked || isLoading}
-                className="w-full mt-2 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/20 flex items-center justify-center gap-2 transition active:scale-[0.99] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full mt-2 py-3 rounded-full bg-gradient-to-r from-[#1764db] to-[#247beb] hover:brightness-95 text-white font-bold text-xs shadow-sm shadow-[#1764db]/20 flex items-center justify-center gap-2 transition active:scale-[0.99] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isLoading ? (
                   <>
@@ -627,7 +625,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/20 flex items-center justify-center gap-2 transition active:scale-[0.99] cursor-pointer disabled:opacity-50"
+                className="w-full py-3 rounded-full bg-gradient-to-r from-[#1764db] to-[#247beb] hover:brightness-95 text-white font-bold text-xs shadow-sm shadow-[#1764db]/20 flex items-center justify-center gap-2 transition active:scale-[0.99] cursor-pointer disabled:opacity-50"
               >
                 {isLoading ? (
                   <span>Mengirimkan Pendaftaran...</span>
@@ -675,7 +673,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   <button
                     type="submit"
                     disabled={isSendingRecovery}
-                    className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/20 flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="w-full py-3 rounded-full bg-gradient-to-r from-[#1764db] to-[#247beb] hover:brightness-95 text-white font-bold text-xs shadow-sm shadow-[#1764db]/20 flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {isSendingRecovery ? (
                       <>
@@ -775,7 +773,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                       type="button"
                       disabled={isSendingRecovery || recoveryResendCooldown > 0}
                       onClick={() => requestWhatsAppOtp(recoveryInput)}
-                      className="px-3 py-3 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 font-bold text-xs transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                      className="px-4 py-3 rounded-full bg-[#e9f2ff] dark:bg-[#253e64] text-[#1764db] dark:text-[#c5dbff] hover:brightness-95 font-bold text-xs transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                     >
                       {recoveryResendCooldown > 0
                         ? `Kirim Ulang (${recoveryResendCooldown}s)`
@@ -784,7 +782,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     <button
                       type="submit"
                       disabled={isVerifyingRecovery}
-                      className="flex-1 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-600/20 flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-60"
+                      className="flex-1 py-3 rounded-full bg-gradient-to-r from-[#1764db] to-[#247beb] hover:brightness-95 text-white font-bold text-xs shadow-sm shadow-[#1764db]/20 flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-60"
                     >
                       {isVerifyingRecovery ? (
                         <>

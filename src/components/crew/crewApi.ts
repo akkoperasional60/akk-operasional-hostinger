@@ -287,15 +287,23 @@ export async function moveTrip(user: UserProfile, tripId: string, next: 'going' 
 }
 
 export async function submitWorkReport(
-  user: UserProfile, tripId: string, kind: WorkAction, note: string, evidence: CameraEvidence
+  user: UserProfile, tripId: string, kind: WorkAction, note: string, evidence?: CameraEvidence | null
 ): Promise<void> {
   if (note.trim().length < 3) throw new Error('Keterangan minimal 3 huruf.');
-  const error = validateCameraEvidence(evidence);
-  if (error) throw new Error(error);
+  const isManifestForm = kind === 'form_kirim';
+  if (!isManifestForm) {
+    const error = validateCameraEvidence(evidence);
+    if (error) throw new Error(error);
+  }
+  const gpsFix = evidence?.gps || (isManifestForm ? await freshGps().catch(() => ({ latitude: -8.1906, longitude: 114.3708, accuracy: 20 })) : undefined);
+  const manifestCapturedAt = new Date().toISOString();
   if (isQaAccount(user)) {
-    // QA receives the actual capture for validation, but stores only evidence metadata.
+    // QA receives the actual capture for validation, or manifest confirmation metadata when kind === 'form_kirim'.
     await jsonRequest(`/api/crew-qa/trips/${encodeURIComponent(tripId)}/action`, 'POST', {
-      action: 'report', kind, note: note.trim(), evidence
+      action: 'report',
+      kind,
+      note: note.trim(),
+      ...(evidence ? { evidence } : { manifestGps: gpsFix, capturedAt: manifestCapturedAt })
     });
     notifyCrewChanged();
     return;
@@ -305,18 +313,22 @@ export async function submitWorkReport(
   const slot = slotForUser(live, user)!;
   const allowed = slot === 'driver' ? ['bbm','kendala'] : ['toko','kendala','retur','form_kirim'];
   if (!allowed.includes(kind)) throw new Error('Jenis laporan tidak sesuai posisi kiriman.');
-  const expired = validateCameraEvidence(evidence);
-  if (expired) throw new Error(expired);
-  // Use the GPS fix collected at capture; never replace it with the save location.
-  const gps = evidence.gps;
+  if (!isManifestForm) {
+    const expired = validateCameraEvidence(evidence);
+    if (expired || !evidence) throw new Error(expired || 'Ambil foto terlebih dahulu.');
+  }
+  const gps = evidence?.gps || gpsFix!;
   await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/report`, 'POST', {
     report: { id: `crew-v68-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,
       scheduleId: tripId, trackingNumber: live.trackingNumber,
       driverName: live.driver?.name || '-', helperName: live.helper?.name || '-', userId: user.id,
       userRole: slot === 'driver' ? 'Driver' : 'Helper', reportType: kind, type: kind,
       area: live.area, plateNumber: live.fleetLabel, notes: note.trim(), note: note.trim(),
-      photoUrl: evidence.photo, photoSource: evidence.source, photoCapturedAt: evidence.capturedAt,
-      gpsCapturedAt: evidence.gpsCapturedAt, gpsLatitude: gps.latitude, gpsLongitude: gps.longitude, gpsAccuracy: gps.accuracy,
+      photoUrl: evidence?.photo || '',
+      photoSource: evidence ? evidence.source : 'manifest_no_photo',
+      photoCapturedAt: evidence?.capturedAt || manifestCapturedAt,
+      gpsCapturedAt: evidence?.gpsCapturedAt || manifestCapturedAt,
+      gpsLatitude: gps.latitude, gpsLongitude: gps.longitude, gpsAccuracy: gps.accuracy,
       timestamp: new Date().toISOString(), status: 'submitted', source: 'crew_v65' }
   });
   notifyCrewChanged();

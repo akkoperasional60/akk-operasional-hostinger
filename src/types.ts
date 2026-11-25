@@ -171,6 +171,12 @@ export interface Schedule {
   crew?: Crew;
   crewHelper?: Crew;
   crewHelper2?: Crew;
+  portalCrewId?: string;
+  portalCrew?: Crew;
+  portalCrewHelperId?: string;
+  portalCrewHelper?: Crew;
+  crewClaimVersion?: number;
+  crewClaimAudit?: Array<{ slot: 'driver' | 'helper'; at: string; actorId: string; actorName: string }>;
   status: ShipmentStatus;
   departureDate: string;
   estimatedArrival: string;

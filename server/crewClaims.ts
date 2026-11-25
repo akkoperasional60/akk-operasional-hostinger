@@ -110,16 +110,67 @@ function branchAllowed(actor: any, branchId: string, write = false): boolean {
   return levels.includes('full_access') || (!write && levels.includes('read_only'));
 }
 
+const isFilledSlotValue = (v: unknown) =>
+  Boolean(clean(v) && !/^(?:-|none|pending|tbd|drv-pending|crew-driver-tbd)$/i.test(clean(v)));
+
+function getPortalSlotMember(schedule: any, slot: Position): { id: string; name: string; crewObj?: any } | null {
+  if (!schedule || typeof schedule !== 'object') return null;
+  const portalId = slot === 'driver' ? schedule.portalCrewId : schedule.portalCrewHelperId;
+  const portalCrew = slot === 'driver' ? schedule.portalCrew : schedule.portalCrewHelper;
+  if (isFilledSlotValue(portalId) || isFilledSlotValue(portalCrew?.id)) {
+    const id = clean(portalCrew?.id || portalId);
+    const name = clean(portalCrew?.name);
+    return { id, name, crewObj: portalCrew && typeof portalCrew === 'object' ? portalCrew : undefined };
+  }
+  const audit = Array.isArray(schedule.crewClaimAudit) ? schedule.crewClaimAudit : [];
+  const claimed = [...audit].reverse().find((entry: any) => entry?.slot === slot && clean(entry?.actorId));
+  if (!claimed) return null;
+  const legacyId = slot === 'driver' ? schedule.crewId : schedule.crewHelperId;
+  const legacyCrew = slot === 'driver' ? schedule.crew : schedule.crewHelper;
+  if (isFilledSlotValue(legacyId) || isFilledSlotValue(legacyCrew?.id)) {
+    const id = clean(legacyCrew?.id || legacyId);
+    const name = clean(legacyCrew?.name || claimed.actorName);
+    return { id, name, crewObj: legacyCrew && typeof legacyCrew === 'object' ? legacyCrew : undefined };
+  }
+  return {
+    id: `crw-${clean(claimed.actorId)}`,
+    name: clean(claimed.actorName) || 'Kru AKK'
+  };
+}
+
+function sanitizeScheduleForPortal(schedule: any): any {
+  const portalDriver = getPortalSlotMember(schedule, 'driver');
+  const portalHelper = getPortalSlotMember(schedule, 'helper');
+  return {
+    ...schedule,
+    crewId: portalDriver ? portalDriver.id : '',
+    crew: portalDriver
+      ? portalDriver.crewObj || { id: portalDriver.id, name: portalDriver.name || 'Driver' }
+      : undefined,
+    crewHelperId: portalHelper ? portalHelper.id : undefined,
+    crewHelper: portalHelper
+      ? portalHelper.crewObj || { id: portalHelper.id, name: portalHelper.name || 'Helper' }
+      : undefined,
+    crewHelper2Id: undefined,
+    crewHelper2: undefined,
+    backupCrewId: undefined,
+    backupCrewName: undefined,
+    backupPosition: undefined,
+    backupTargetName: undefined
+  };
+}
+
 function currentCrewPosition(schedule: any, actor: any): Position | null {
   const mine = ident(actor?.id);
   const name = clean(actor?.full_name || actor?.fullName).toLocaleLowerCase('id-ID');
-  const match = (crew: any, id: unknown) => {
-    const sourceId = ident(crew?.id || id);
+  const match = (member: { id: string; name: string } | null) => {
+    if (!member) return false;
+    const sourceId = ident(member.id);
     return Boolean(mine.length >= 3 && sourceId === mine) ||
-      Boolean(name.length >= 4 && clean(crew?.name).toLocaleLowerCase('id-ID') === name);
+      Boolean(name.length >= 4 && clean(member.name).toLocaleLowerCase('id-ID') === name);
   };
-  if (match(schedule?.crew, schedule?.crewId)) return 'driver';
-  if (match(schedule?.crewHelper, schedule?.crewHelperId)) return 'helper';
+  if (match(getPortalSlotMember(schedule, 'driver'))) return 'driver';
+  if (match(getPortalSlotMember(schedule, 'helper'))) return 'helper';
   return null;
 }
 
@@ -142,18 +193,18 @@ function checkLocation(input: unknown) {
 }
 
 const REQUIRED_VEHICLE_CHECKLIST = [
-  { key: 'oli_mesin', label: 'Oli Mesin', requiresPhoto: true },
-  { key: 'air_radiator', label: 'Air Radiator', requiresPhoto: true },
-  { key: 'air_aki', label: 'Air Aki', requiresPhoto: false },
-  { key: 'rem_minyak_rem', label: 'Rem Mobil & Minyak Rem', requiresPhoto: true },
-  { key: 'kebersihan_kabin', label: 'Kebersihan Kabin', requiresPhoto: true },
-  { key: 'inventaris_mobil', label: 'Inventaris Mobil', requiresPhoto: false },
-  { key: 'ban_cadangan', label: 'Ban Cadangan', requiresPhoto: false }
+  { key: 'oli_mesin', label: 'Oli Mesin', requiresPhoto: true, options: ['Normal', 'Tidak Normal'] },
+  { key: 'air_radiator', label: 'Air Radiator', requiresPhoto: true, options: ['Normal', 'Tidak Normal'] },
+  { key: 'air_aki', label: 'Air Aki', requiresPhoto: false, options: ['Normal', 'Tidak Normal'] },
+  { key: 'rem_minyak_rem', label: 'Rem Mobil & Minyak Rem', requiresPhoto: true, options: ['Normal', 'Tidak Normal'] },
+  { key: 'kebersihan_kabin', label: 'Kebersihan Kabin', requiresPhoto: true, options: ['Bersih', 'Tidak'] },
+  { key: 'inventaris_mobil', label: 'Inventaris Mobil', requiresPhoto: false, options: ['Normal', 'Tidak Normal'] },
+  { key: 'ban_cadangan', label: 'Ban Cadangan', requiresPhoto: false, options: ['Ada', 'Tidak Ada'] }
 ] as const;
 
 function validateAndNormalizeChecklist(raw: unknown) {
   if (!Array.isArray(raw)) {
-    throw Object.assign(new Error('Checklist kendaraan wajib diisi lengkap.'), { status: 422 });
+    throw Object.assign(new Error('Pemeriksaan armada wajib diisi lengkap.'), { status: 422 });
   }
   const byKey = new Map<string, any>();
   for (const item of raw) {
@@ -162,12 +213,13 @@ function validateAndNormalizeChecklist(raw: unknown) {
     }
   }
   const missingPhotos: string[] = [];
-  const unchecked: string[] = [];
+  const unselected: string[] = [];
   const normalized: any[] = [];
   for (const def of REQUIRED_VEHICLE_CHECKLIST) {
     const entry = byKey.get(def.key);
-    if (!entry || entry.checked !== true) {
-      unchecked.push(def.label);
+    const chosen = clean(entry?.status);
+    if (!(def.options as readonly string[]).includes(chosen)) {
+      unselected.push(def.label);
       continue;
     }
     if (def.requiresPhoto) {
@@ -183,6 +235,7 @@ function validateAndNormalizeChecklist(raw: unknown) {
       normalized.push({
         key: def.key,
         label: def.label,
+        status: chosen,
         checked: true,
         requiresPhoto: true,
         photo,
@@ -194,6 +247,7 @@ function validateAndNormalizeChecklist(raw: unknown) {
       normalized.push({
         key: def.key,
         label: def.label,
+        status: chosen,
         checked: true,
         requiresPhoto: false
       });
@@ -202,8 +256,8 @@ function validateAndNormalizeChecklist(raw: unknown) {
   if (missingPhotos.length > 0) {
     throw Object.assign(new Error(`Foto bukti wajib belum lengkap: ${missingPhotos.join(', ')}.`), { status: 422 });
   }
-  if (unchecked.length > 0) {
-    throw Object.assign(new Error(`Item checklist belum dicentang: ${unchecked.join(', ')}.`), { status: 422 });
+  if (unselected.length > 0) {
+    throw Object.assign(new Error(`Pilihan pemeriksaan belum diisi: ${unselected.join(', ')}.`), { status: 422 });
   }
   return normalized;
 }
@@ -299,7 +353,8 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
             latitude: Number(r.gpsLatitude), longitude: Number(r.gpsLongitude), accuracy: Number(r.gpsAccuracy || 0)
           } : undefined
         }));
-      return res.json({ success: true, schedules: ownBranch, reports: reportMeta });
+      const portalSchedules = ownBranch.map(sanitizeScheduleForPortal);
+      return res.json({ success: true, schedules: portalSchedules, reports: reportMeta });
     } catch (error: any) { return res.status(Number(error?.status) || 503).json({ success: false, error: 'Jadwal tidak dapat dibaca dari database.' }); }
   });
 
@@ -338,8 +393,9 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
         }
         const idKey = slot === 'driver' ? 'crewId' : 'crewHelperId';
         const crewKey = slot === 'driver' ? 'crew' : 'crewHelper';
-        const filled = (v: unknown) => Boolean(clean(v) && !/^(?:-|none|pending|tbd|drv-pending|crew-driver-tbd)$/i.test(clean(v)));
-        const assigned = filled(trip[idKey]) || filled(trip[crewKey]?.id);
+        const portalIdKey = slot === 'driver' ? 'portalCrewId' : 'portalCrewHelperId';
+        const portalCrewKey = slot === 'driver' ? 'portalCrew' : 'portalCrewHelper';
+        const assigned = Boolean(getPortalSlotMember(trip, slot));
         if (assigned) throw Object.assign(new Error(`Slot ${slot === 'driver' ? 'Driver' : 'Helper'} sudah diambil.`), { status: 409 });
         const actorId = clean(actor.id);
         const actorName = clean(actor.full_name || actor.fullName);
@@ -351,6 +407,8 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
           branchId
         };
         const now = new Date().toISOString();
+        trip[portalIdKey] = crew.id;
+        trip[portalCrewKey] = crew;
         trip[idKey] = crew.id;
         trip[crewKey] = crew;
         trip.originBranchId = branchId;
@@ -401,7 +459,6 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
         else trip.actualArrival = now;
         trip.crewFieldEvents = (Array.isArray(trip.crewFieldEvents) ? trip.crewFieldEvents : []).slice(-(MAX_REPORT_EVENTS - 1));
         trip.crewFieldEvents.push({ action, actorId: clean(actor.id), actorName: clean(actor.full_name), position: role, gps, at: now });
-        trip.crewClaimVersion = Number(trip.crewClaimVersion || 0) + 1;
         trip.updatedAt = now;
         payload.updatedAt = now;
         if (conn) {
@@ -456,7 +513,6 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
           action: task, actorId: clean(actor.id), actorName: clean(actor.full_name), position: slot,
           value: task === 'km' ? trip.crewOdometerStart : undefined, gps, at: now
         });
-        trip.crewClaimVersion = Number(trip.crewClaimVersion || 0) + 1;
         trip.updatedAt = now;
         payload.updatedAt = now;
         if (conn) {
@@ -486,8 +542,10 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
     const photo = typeof report.photoUrl === 'string' ? report.photoUrl : '';
     const capture = { photo, source: report.photoSource, capturedAt: report.photoCapturedAt, gpsCapturedAt: report.gpsCapturedAt,
       gps: { latitude: report.gpsLatitude, longitude: report.gpsLongitude, accuracy: report.gpsAccuracy } };
-    const evidenceError = validateCameraEvidence(capture);
-    if (evidenceError) return res.status(422).json({ success: false, error: evidenceError });
+    if (kind !== 'form_kirim' || photo) {
+      const evidenceError = validateCameraEvidence(capture);
+      if (evidenceError) return res.status(422).json({ success: false, error: evidenceError });
+    }
     if (photo && (photo.length > 3_500_000 || !/^data:image\/(jpeg|png|webp);base64,/i.test(photo))) {
       return res.status(413).json({ success: false, error: 'Foto terlalu besar atau format tidak didukung.' });
     }
@@ -510,8 +568,8 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
         driverName: trip.crew?.name || '-', helperName: trip.crewHelper?.name || '-',
         userId: clean(actor.id), actorName: clean(actor.full_name),
         plateNumber: trip.armada || trip.fleet?.plateNumber || '-', area: trip.areaName || trip.store?.storeName || '-',
-        notes: note, note, photoUrl: photo, photoSource: 'camera',
-        photoCapturedAt: capture.capturedAt, gpsCapturedAt: capture.gpsCapturedAt,
+        notes: note, note, photoUrl: photo, photoSource: photo ? 'camera' : 'manifest_no_photo',
+        photoCapturedAt: capture.capturedAt || timestamp, gpsCapturedAt: capture.gpsCapturedAt || timestamp,
         gpsLatitude: gps.latitude, gpsLongitude: gps.longitude, gpsAccuracy: gps.accuracy,
         timestamp, status: 'submitted', source: 'crew_v65'
       };
@@ -536,6 +594,10 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
         delete trip.crew;
         delete trip.crewHelperId;
         delete trip.crewHelper;
+        delete trip.portalCrewId;
+        delete trip.portalCrew;
+        delete trip.portalCrewHelperId;
+        delete trip.portalCrewHelper;
         delete trip.crewHelper2Id;
         delete trip.crewHelper2;
         delete trip.backupCrewName;

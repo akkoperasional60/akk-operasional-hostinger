@@ -1,9 +1,9 @@
 {
-  "versionCode": 10050,
-  "versionName": "1.0.50",
-  "updatedAt": "2026-11-24T20:15:00+07:00",
-  "changelog": "Update V72: Checklist Armada 7 Item + 4 Foto Bukti Wajib setelah KM Awal, Filter Kiriman Hari Ini & Besok (Format 24 Jam WIB), Mode Uji Sistem Super Admin, dan Pembatasan Menu Uji Sistem E2E khusus Super Admin.",
+  "versionCode": 10051,
+  "versionName": "1.0.51",
+  "updatedAt": "2026-11-25T09:50:00+07:00",
+  "changelog": "Update V73: Modul Validasi Rute & Form (Three-Way Matching GPS, Faktur & Konfirmasi Helper), Pilihan Kondisi Pemeriksaan Armada 7 Item (Normal/Tidak Normal, Bersih/Tidak, Ada/Tidak Ada) + 4 Foto Bukti, Isolasi Slot Klaim Portal Driver (portalCrewId/portalCrewHelperId), Konfirmasi Manifest Form Kirim Tanpa Wajib Foto, serta Penyelarasan Desain Portal Driver Unified Design System.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V72: Checklist kendaraan Driver kini wajib setelah mengisi KM awal dengan 7 item pemeriksaan dan 4 foto bukti kamera langsung (Oli Mesin, Air Radiator, Rem Mobil & Minyak Rem, Kebersihan Kabin); daftar Kiriman difilter khusus jadwal hari ini & besok yang belum selesai dengan urutan jam keberangkatan 24 jam WIB; kiriman yang sudah Tiba di Gudang otomatis berpindah ke Riwayat; penambahan tombol Uji Sistem (Sandbox Super Admin) di Portal Driver serta pembatasan akses menu Uji Sistem (E2E) khusus Super Admin."
+  "releaseNotes": "Update V73 (v1.0.51): Penambahan modul Validasi Rute & Form (Three-Way Matching antara titik GPS Tracksolid/evaluasi, Faktur Form Kirim, dan konfirmasi Helper) di menu Logistik & Laporan Kiriman Kru; pembaruan Pemeriksaan Armada 7 Item di Portal Driver & Sandbox menjadi pilihan status kondisi eksplisit (Normal/Tidak Normal, Bersih/Tidak, Ada/Tidak Ada) beserta 4 foto bukti kamera; pemisahan slot klaim Portal Driver (portalCrewId & portalCrewHelperId) agar klaim posisi di portal terisolasi bersih dari jadwal master; dukungan konfirmasi Manifest Form Kirim (Sesuai Tagihan / Selisih & Retur) oleh Helper tanpa wajib foto kamera; integrasi tombol Buat Kiriman langsung dari header Jadwal Pengiriman; serta penyelarasan palet warna Portal Driver Unified Design System."
 }

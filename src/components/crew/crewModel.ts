@@ -30,22 +30,24 @@ export interface VehicleChecklistItemDef {
   key: VehicleChecklistKey;
   label: string;
   requiresPhoto: boolean;
+  options: readonly [string, string];
 }
 
 export const VEHICLE_CHECKLIST_ITEMS: readonly VehicleChecklistItemDef[] = [
-  { key: 'oli_mesin', label: 'Oli Mesin', requiresPhoto: true },
-  { key: 'air_radiator', label: 'Air Radiator', requiresPhoto: true },
-  { key: 'air_aki', label: 'Air Aki', requiresPhoto: false },
-  { key: 'rem_minyak_rem', label: 'Rem Mobil & Minyak Rem', requiresPhoto: true },
-  { key: 'kebersihan_kabin', label: 'Kebersihan Kabin', requiresPhoto: true },
-  { key: 'inventaris_mobil', label: 'Inventaris Mobil', requiresPhoto: false },
-  { key: 'ban_cadangan', label: 'Ban Cadangan', requiresPhoto: false }
+  { key: 'oli_mesin', label: 'Oli Mesin', requiresPhoto: true, options: ['Normal', 'Tidak Normal'] },
+  { key: 'air_radiator', label: 'Air Radiator', requiresPhoto: true, options: ['Normal', 'Tidak Normal'] },
+  { key: 'air_aki', label: 'Air Aki', requiresPhoto: false, options: ['Normal', 'Tidak Normal'] },
+  { key: 'rem_minyak_rem', label: 'Rem Mobil & Minyak Rem', requiresPhoto: true, options: ['Normal', 'Tidak Normal'] },
+  { key: 'kebersihan_kabin', label: 'Kebersihan Kabin', requiresPhoto: true, options: ['Bersih', 'Tidak'] },
+  { key: 'inventaris_mobil', label: 'Inventaris Mobil', requiresPhoto: false, options: ['Normal', 'Tidak Normal'] },
+  { key: 'ban_cadangan', label: 'Ban Cadangan', requiresPhoto: false, options: ['Ada', 'Tidak Ada'] }
 ] as const;
 
 export interface InspectionChecklistEntry {
   key: VehicleChecklistKey;
   label: string;
-  checked: boolean;
+  status: string;
+  checked?: boolean;
   requiresPhoto: boolean;
   photo?: string;
   photoAttached?: boolean;
@@ -55,7 +57,7 @@ export interface InspectionChecklistEntry {
 
 export function validateVehicleChecklist(entries: unknown): string | null {
   if (!Array.isArray(entries)) {
-    return 'Checklist kendaraan wajib diisi lengkap.';
+    return 'Pemeriksaan armada wajib diisi lengkap.';
   }
   const byKey = new Map<string, any>();
   for (const item of entries) {
@@ -63,12 +65,13 @@ export function validateVehicleChecklist(entries: unknown): string | null {
       byKey.set((item as any).key, item);
     }
   }
-  const unchecked: string[] = [];
+  const unselected: string[] = [];
   const missingPhotos: string[] = [];
   for (const def of VEHICLE_CHECKLIST_ITEMS) {
     const entry = byKey.get(def.key);
-    if (!entry || entry.checked !== true) {
-      unchecked.push(def.label);
+    const chosen = typeof entry?.status === 'string' ? entry.status.trim() : '';
+    if (!def.options.includes(chosen)) {
+      unselected.push(def.label);
     }
     if (def.requiresPhoto) {
       const photo = typeof entry?.photo === 'string' ? entry.photo.trim() : '';
@@ -81,8 +84,8 @@ export function validateVehicleChecklist(entries: unknown): string | null {
   if (missingPhotos.length > 0) {
     return `Foto bukti wajib belum lengkap: ${missingPhotos.join(', ')}.`;
   }
-  if (unchecked.length > 0) {
-    return `Item checklist belum dicentang: ${unchecked.join(', ')}.`;
+  if (unselected.length > 0) {
+    return `Pilihan pemeriksaan belum diisi: ${unselected.join(', ')}.`;
   }
   return null;
 }
@@ -195,6 +198,23 @@ function getMember(crew?: Crew | null, id?: string): Member | null {
   return mapped?.name ? { id: mapped.id, name: mapped.name } : null;
 }
 
+function getPortalSlotMember(s: Schedule, slot: CrewSlot): Member | null {
+  const explicit =
+    slot === 'driver'
+      ? getMember(s.portalCrew, s.portalCrewId)
+      : getMember(s.portalCrewHelper, s.portalCrewHelperId);
+  if (explicit) return explicit;
+  const audit = Array.isArray(s.crewClaimAudit) ? s.crewClaimAudit : [];
+  const claimed = [...audit].reverse().find(entry => entry?.slot === slot && String(entry?.actorId || '').trim());
+  if (!claimed) return null;
+  const legacy = slot === 'driver' ? getMember(s.crew, s.crewId) : getMember(s.crewHelper, s.crewHelperId);
+  if (legacy) return legacy;
+  return {
+    id: `crw-${String(claimed.actorId).trim()}`,
+    name: String(claimed.actorName || '').trim() || 'Kru AKK'
+  };
+}
+
 export function normalizeLiveSchedule(s: Schedule): FieldTrip | null {
   const branchId = strictScheduleBranch(s);
   if (!branchId || !s.id) return null;
@@ -211,8 +231,8 @@ export function normalizeLiveSchedule(s: Schedule): FieldTrip | null {
       : 'waiting';
   const dateRaw = s.deliveryDate || s.departureDate || '';
   const date = dateRaw.match(/^\d{4}-\d{2}-\d{2}/)?.[0] || '';
-  const driver = getMember(s.crew, s.crewId);
-  const helper = getMember(s.crewHelper, s.crewHelperId);
+  const driver = getPortalSlotMember(s, 'driver');
+  const helper = getPortalSlotMember(s, 'helper');
   return {
     id: s.id, branchId, area: s.areaName || s.store?.storeName || 'Area belum ditentukan',
     fleetLabel: s.fleet?.initialCode || s.armada || s.fleet?.plateNumber || 'Armada belum dipilih',

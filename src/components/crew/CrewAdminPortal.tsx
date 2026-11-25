@@ -75,7 +75,7 @@ export default function CrewAdminPortal({currentUser: user}: {currentUser: UserP
   const ongoing = useMemo(
     () =>
       filtered
-        .filter(t => !isCompleted(t) && (t.phase === 'going' || isTodayOrTomorrowTrip(t)))
+        .filter(t => !isCompleted(t) && isTodayOrTomorrowTrip(t))
         .sort((a, b) => (a.date === b.date ? a.departureTime.localeCompare(b.departureTime) : a.date.localeCompare(b.date))),
     [filtered]
   );
@@ -162,24 +162,30 @@ export default function CrewAdminPortal({currentUser: user}: {currentUser: UserP
                 <Panel title="Persiapan">
                   {slot==='driver'?<>
                     <div className="cv66-km"><div className="cv66-km-label"><IconTile icon={Truck} art={selected.odometerStart?'success':'gauge'} tone={selected.odometerStart?'green':'blue'}/><span className="cv66-row-title">KM Awal</span><span className={selected.odometerStart?'cv66-km-value':'cv66-meta'}>{selected.odometerStart?`${selected.odometerStart} km`:'Belum diisi'}</span></div></div>
-                    <TaskRow icon={ShieldCheck} label="Cek Armada" detail={selected.inspectionDone?'7 item & 4 foto bukti tersimpan':'Belum diperiksa'} done={Boolean(selected.inspectionDone)} disabled onClick={NO_WRITE}/>
+                    <TaskRow icon={ShieldCheck} label="Cek Armada" detail={selected.inspectionDone?'7 kondisi & 4 foto bukti tersimpan':'Belum diperiksa'} done={Boolean(selected.inspectionDone)} disabled onClick={NO_WRITE}/>
                     {selected.inspectionDone && selected.inspectionChecklist && selected.inspectionChecklist.length > 0 && (
                       <div className="cv72-admin-checklist">
-                        {selected.inspectionChecklist.map(item => (
-                          <div key={item.key} className="cv72-admin-check-item">
-                            <span className="cv72-admin-check-title">
-                              <CheckCircle2 size={13} style={{ color: 'var(--cv-green)' }}/>
-                              <span>{item.label}</span>
-                            </span>
-                            {item.requiresPhoto && item.photo ? (
-                              <img src={item.photo} alt={`Bukti ${item.label}`} className="cv72-admin-check-photo"/>
-                            ) : item.requiresPhoto && item.photoAttached ? (
-                              <span className="cv66-meta cv66-inline"><Camera size={12}/>Foto terlampir</span>
-                            ) : (
-                              <span className="cv66-meta">Dicek</span>
-                            )}
-                          </div>
-                        ))}
+                        {selected.inspectionChecklist.map(item => {
+                          const isWarn = item.status === 'Tidak Normal' || item.status === 'Tidak' || item.status === 'Tidak Ada';
+                          return (
+                            <div key={item.key} className="cv72-admin-check-item">
+                              <span className="cv72-admin-check-title">
+                                <CheckCircle2 size={13} style={{ color: isWarn ? 'var(--cv-danger)' : 'var(--cv-green)' }}/>
+                                <span>{item.label}</span>
+                              </span>
+                              {item.status && (
+                                <span className={`cv72-admin-status ${isWarn ? 'cv72-admin-status--warn' : ''}`}>
+                                  {item.status}
+                                </span>
+                              )}
+                              {item.requiresPhoto && item.photo ? (
+                                <img src={item.photo} alt={`Bukti ${item.label}`} className="cv72-admin-check-photo"/>
+                              ) : item.requiresPhoto && item.photoAttached ? (
+                                <span className="cv66-meta cv66-inline"><Camera size={12}/>Foto terlampir</span>
+                              ) : null}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </>:<TaskRow icon={ClipboardCheck} label="Validasi Surat Jalan" detail={selected.waybillValidated?undefined:'Belum divalidasi'} done={Boolean(selected.waybillValidated)} disabled onClick={NO_WRITE}/>}

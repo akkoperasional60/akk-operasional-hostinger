@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { AkkLogo } from './AkkLogo';
 import {
   MapPin,
   AlertTriangle,
@@ -43,6 +44,7 @@ import {
 } from 'lucide-react';
 import { driverReportService, DriverHelperReport, getLocalDateStr } from '../services/driverReportService';
 import { SchedulePortalValidationReport } from './SchedulePortalValidationReport';
+import { IntegratedRouteValidation } from './IntegratedRouteValidation';
 import { MuatReturValidationTab } from './sales/MuatReturValidationTab';
 import { driverShiftService } from '../services/driverShiftService';
 import { useToast } from '../context/ToastContext';
@@ -226,7 +228,9 @@ export const DriverReportsManagement: React.FC = () => {
   };
 
   // Sub-menu switcher: Laporan Kendala Lapangan | Laporan Absen Tim Kiriman | Laporan Check-In & Check-Out | Laporan Pengisian BBM (Solar) | Laporan Checklist Armada | Laporan GPS Form Kirim
-  const [activeSubMenu, setActiveSubMenu] = useState<'operasional' | 'absen_tim_kiriman' | 'checkin_checkout' | 'pengisian_bbm' | 'checklist_armada' | 'peringatan_offline' | 'validasi_jadwal_portal' | 'retur_muat_salah'>('operasional');
+  const [activeSubMenu, setActiveSubMenu] = useState<'operasional' | 'absen_tim_kiriman' | 'checkin_checkout' | 'pengisian_bbm' | 'checklist_armada' | 'peringatan_offline' | 'validasi_jadwal_portal' | 'validasi_rute_form' | 'retur_muat_salah'>('operasional');
+  const [isLogisticsMenuOpen, setIsLogisticsMenuOpen] = useState(false);
+  const logisticsMenuRef = useRef<HTMLDivElement | null>(null);
   const [gpsHistoryFilter, setGPSHistoryFilter] = useState<'all' | 'edited_multi' | 'initial_only'>('all');
   const [offlineSearchQuery, setOfflineSearchQuery] = useState<string>('');
   const [formKirimRecords, setFormKirimRecords] = useState<FormKirimRecord[]>(() => formKirimStore.getAll());
@@ -1291,139 +1295,124 @@ export const DriverReportsManagement: React.FC = () => {
     ).length;
   }, [reports]);
 
+  useEffect(() => {
+    if (!isLogisticsMenuOpen) return;
+    const handleOutside = (e: MouseEvent) => {
+      if (logisticsMenuRef.current && !logisticsMenuRef.current.contains(e.target as Node)) {
+        setIsLogisticsMenuOpen(false);
+      }
+    };
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsLogisticsMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('keydown', handleEsc);
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('keydown', handleEsc);
+    };
+  }, [isLogisticsMenuOpen]);
+
+  const returMuatCount = useMemo(
+    () =>
+      reports.filter(
+        r =>
+          r.category === 'retur' ||
+          r.category === 'kurang_muat' ||
+          r.category === 'lebih_muat' ||
+          r.category === 'salah_muat'
+      ).length,
+    [reports]
+  );
+
+  const logisticsMenuItems: Array<{
+    id: typeof activeSubMenu;
+    label: string;
+    count?: number;
+    icon: React.ReactNode;
+  }> = [
+    { id: 'operasional', label: 'Kendala Lapangan', count: totalCount, icon: <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" /> },
+    { id: 'absen_tim_kiriman', label: 'Absen Tim', count: absenTimKirimanCount, icon: <UserCheck className="w-4 h-4 text-blue-600 shrink-0" /> },
+    { id: 'checkin_checkout', label: 'Check-In & Out', count: checkinCheckoutList.length, icon: <Clock className="w-4 h-4 text-sky-600 shrink-0" /> },
+    { id: 'pengisian_bbm', label: 'Pengisian BBM', count: totalFuelReportsCount, icon: <Fuel className="w-4 h-4 text-amber-600 shrink-0" /> },
+    { id: 'checklist_armada', label: 'Checklist Armada', icon: <ShieldCheck className="w-4 h-4 text-green-600 shrink-0" /> },
+    { id: 'peringatan_offline', label: 'GPS Form Kirim', count: formKirimGpsReportsList.length, icon: <Navigation className="w-4 h-4 text-indigo-600 shrink-0" /> },
+    { id: 'validasi_jadwal_portal', label: 'Validasi Jadwal', icon: <FileCheck2 className="w-4 h-4 text-indigo-600 shrink-0" /> },
+    { id: 'validasi_rute_form', label: 'Validasi Rute & Form', icon: <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0" /> },
+    { id: 'retur_muat_salah', label: 'Retur & Muat', count: returMuatCount, icon: <ShieldCheck className="w-4 h-4 text-rose-500 shrink-0" /> }
+  ];
+
+  const activeLogisticsMenu = logisticsMenuItems.find(m => m.id === activeSubMenu) || logisticsMenuItems[0];
+
   return (
-    <div className="w-full max-w-full px-3 sm:px-5 py-4 space-y-5 animate-in fade-in duration-200">
-      
-      {/* 🌟 SUB-MENU SELECTOR: Ringkas, 1 Baris Proporsional & Mudah Dipindai */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-1.5 rounded-xl shadow-xs overflow-x-auto no-scrollbar">
-        <div className="flex items-center gap-1 min-w-max">
+    <div className="akk-flat-reports w-full max-w-full bg-slate-50 dark:bg-[#0F172A] px-3 sm:px-6 py-5 space-y-5 animate-in fade-in duration-200">
+      {/* 1. Header Utama & Logo Minimalis */}
+      <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-xl px-5 py-3.5 shadow-sm flex items-center justify-between gap-4 relative z-30">
+        <div className="flex items-center gap-3 min-w-0">
+          <AkkLogo size="md" showSubtitle subtitle="AKK Pengiriman · Logistik DC" />
+        </div>
+
+        <div className="relative shrink-0" ref={logisticsMenuRef}>
           <button
             type="button"
-            onClick={() => setActiveSubMenu('operasional')}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
-              activeSubMenu === 'operasional'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/70'
-            }`}
+            onClick={() => setIsLogisticsMenuOpen(prev => !prev)}
+            aria-expanded={isLogisticsMenuOpen}
+            className="inline-flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-white dark:bg-[#162234] hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-[#24344D] text-xs sm:text-sm font-semibold text-slate-800 dark:text-slate-100 transition-colors cursor-pointer whitespace-nowrap"
           >
-            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-            <span>Kendala Lapangan</span>
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono tabular-nums leading-none ${activeSubMenu === 'operasional' ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
-              {totalCount}
+            {activeLogisticsMenu.icon}
+            <span>Menu Logistik</span>
+            <span className="hidden sm:inline text-xs font-medium text-slate-400">·</span>
+            <span className="hidden sm:inline text-xs font-medium text-blue-600 dark:text-blue-400">
+              {activeLogisticsMenu.label}
             </span>
+            <ChevronDown
+              className={`w-4 h-4 text-slate-400 transition-transform duration-150 ${isLogisticsMenuOpen ? 'rotate-180 text-blue-600' : ''}`}
+            />
           </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveSubMenu('absen_tim_kiriman')}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
-              activeSubMenu === 'absen_tim_kiriman'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/70'
-            }`}
-          >
-            <UserCheck className="w-3.5 h-3.5 shrink-0" />
-            <span>Absen Tim</span>
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono tabular-nums leading-none ${activeSubMenu === 'absen_tim_kiriman' ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
-              {absenTimKirimanCount}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveSubMenu('checkin_checkout')}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
-              activeSubMenu === 'checkin_checkout'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/70'
-            }`}
-          >
-            <Clock className="w-3.5 h-3.5 shrink-0" />
-            <span>Check-In &amp; Out</span>
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono tabular-nums leading-none ${activeSubMenu === 'checkin_checkout' ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
-              {checkinCheckoutList.length}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveSubMenu('pengisian_bbm')}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
-              activeSubMenu === 'pengisian_bbm'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/70'
-            }`}
-          >
-            <Fuel className="w-3.5 h-3.5 shrink-0" />
-            <span>Pengisian BBM</span>
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono tabular-nums leading-none ${activeSubMenu === 'pengisian_bbm' ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
-              {totalFuelReportsCount}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveSubMenu('checklist_armada')}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
-              activeSubMenu === 'checklist_armada'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/70'
-            }`}
-          >
-            <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-            <span>Checklist Armada</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveSubMenu('peringatan_offline')}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
-              activeSubMenu === 'peringatan_offline'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/70'
-            }`}
-          >
-            <Navigation className="w-3.5 h-3.5 shrink-0" />
-            <span>GPS Form Kirim</span>
-            <span
-              className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono tabular-nums leading-none ${
-                activeSubMenu === 'peringatan_offline'
-                  ? 'bg-white/20 text-white font-bold'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-              }`}
-            >
-              {formKirimGpsReportsList.length}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveSubMenu('validasi_jadwal_portal')}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
-              activeSubMenu === 'validasi_jadwal_portal'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/70'
-            }`}
-          >
-            <FileCheck2 className="w-3.5 h-3.5 shrink-0" />
-            <span>Validasi Jadwal</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveSubMenu('retur_muat_salah')}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap cursor-pointer ${
-              activeSubMenu === 'retur_muat_salah'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/70'
-            }`}
-          >
-            <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-            <span>Retur &amp; Muat</span>
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-mono tabular-nums leading-none ${activeSubMenu === 'retur_muat_salah' ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
-              {reports.filter(r => r.category === 'retur' || r.category === 'kurang_muat' || r.category === 'lebih_muat' || r.category === 'salah_muat').length}
-            </span>
-          </button>
+          {isLogisticsMenuOpen && (
+            <div className="absolute right-0 mt-2 w-72 rounded-xl bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] shadow-lg p-1.5 z-50">
+              <div className="px-3 py-2 text-[11px] font-semibold text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-800 mb-1">
+                Pilih Modul Laporan Logistik
+              </div>
+              <div className="space-y-0.5">
+                {logisticsMenuItems.map(item => {
+                  const isActive = item.id === activeSubMenu;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        setActiveSubMenu(item.id);
+                        setIsLogisticsMenuOpen(false);
+                      }}
+                      className={`w-full flex items-center justify-between gap-2.5 px-3 py-2 rounded-lg text-left text-xs font-semibold transition-colors cursor-pointer ${
+                        isActive
+                          ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300'
+                          : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/70'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2.5 min-w-0">
+                        {item.icon}
+                        <span className="truncate">{item.label}</span>
+                      </span>
+                      {typeof item.count === 'number' && (
+                        <span
+                          className={`text-[11px] px-2 py-0.5 rounded-md font-mono tabular-nums ${
+                            isActive
+                              ? 'bg-blue-100 dark:bg-blue-500/30 text-blue-700 dark:text-blue-200'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                          }`}
+                        >
+                          {item.count}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -2388,47 +2377,52 @@ export const DriverReportsManagement: React.FC = () => {
           onBack={() => setActiveSubMenu('operasional')}
           backLabel="Kembali ke Laporan Kru"
         />
+      ) : activeSubMenu === 'validasi_rute_form' ? (
+        <IntegratedRouteValidation />
       ) : activeSubMenu === 'retur_muat_salah' ? (
         <MuatReturValidationTab embeddedInLogistics />
       ) : (
         <>
-          {/* Header Section - Compact & Dense */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5 bg-slate-900 border border-slate-800 px-4 py-3 rounded-xl shadow-xs">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-lg bg-gradient-to-tr from-rose-500/20 to-amber-500/20 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0 shadow-inner">
-                <MapPin className="w-4 h-4" />
+          {/* 2. Header Judul Halaman */}
+          <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-xl p-5 sm:p-6 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="flex items-start sm:items-center gap-3.5">
+              <div className="w-11 h-11 rounded-xl bg-rose-50 dark:bg-rose-500/15 border border-rose-100 dark:border-rose-500/30 flex items-center justify-center text-rose-500 dark:text-rose-400 shrink-0">
+                <MapPin className="w-5 h-5" />
               </div>
               <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h1 className="text-sm sm:text-base font-black text-white tracking-tight">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <h1 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white tracking-tight">
                     Laporan &amp; Kendala Kiriman Kru
                   </h1>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 font-bold">
+                  <span className="text-[11px] px-2.5 py-0.5 rounded-lg bg-rose-50 dark:bg-rose-500/15 text-rose-600 dark:text-rose-300 border border-rose-200 dark:border-rose-500/30 font-semibold">
                     Tersambung ke Portal Driver
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-400">
+                <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
                   Rincian kalender pertanggal, pemantauan kendala jalan, dan penyampaian solusi langsung dari SPV Logistik ke ponsel kru pengiriman
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5 flex-wrap shrink-0">
               <button
+                type="button"
                 onClick={loadReports}
-                className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer border border-slate-700 shadow-2xs"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white dark:bg-[#162234] hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-[#24344D] text-xs sm:text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
                 title="Muat Ulang Data"
               >
-                <RefreshCw className="w-3.5 h-3.5" />
+                <RefreshCw className="w-4 h-4 text-slate-500" />
+                <span>Segarkan</span>
               </button>
 
               <button
+                type="button"
                 onClick={handleExportCsv}
-                className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm active:scale-95"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white border border-green-700 text-xs sm:text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
                 title="Unduh laporan dalam format CSV / Excel"
               >
-                <FileSpreadsheet className="w-3.5 h-3.5" />
-                <span>Ekspor Excel</span>
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>Export Excel</span>
               </button>
             </div>
           </div>
@@ -2516,94 +2510,100 @@ export const DriverReportsManagement: React.FC = () => {
             </div>
           )}
 
-          {/* 📊 KPI STATS CARDS (Fokus Khusus Kendala Lapangan) */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-            <div className="bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 shadow-xs relative overflow-hidden">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-400">Total Kendala Masuk</span>
-                <div className="w-7 h-7 rounded-lg bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
-                  <AlertTriangle className="w-3.5 h-3.5" />
+          {/* 3. Baris Metrik Kendala (Grid 4 Kolom) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-xl p-5 shadow-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Total Kendala Masuk</span>
+                <div className="w-8 h-8 rounded-lg bg-rose-50 dark:bg-rose-500/15 border border-rose-100 dark:border-rose-500/30 flex items-center justify-center text-rose-500 dark:text-rose-400 shrink-0">
+                  <AlertTriangle className="w-4 h-4" />
                 </div>
               </div>
-              <div className="text-3xl sm:text-4xl font-black text-white mt-1 font-mono flex items-baseline gap-1.5 leading-none">
+              <div className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white mt-2.5 tabular-nums flex items-baseline gap-1.5 leading-none">
                 <span>{inScopeTotal}</span>
                 {dateFilterMode !== 'all' && (
-                  <span className="text-xs text-slate-500 font-semibold font-sans">/ {totalCount} total</span>
+                  <span className="text-xs text-slate-400 font-medium">/ {totalCount} total</span>
                 )}
               </div>
-              <div className="text-[10px] text-slate-400 mt-1.5 font-medium">
+              <div className="text-xs text-slate-500 dark:text-slate-400 mt-2">
                 Khusus kendala tanggal {selectedCalendarDate}
               </div>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 shadow-xs relative overflow-hidden">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-rose-300">Kendala di Jalan &amp; Rute</span>
-                <div className="w-7 h-7 rounded-lg bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
-                  <AlertTriangle className="w-3.5 h-3.5" />
+            <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-xl p-5 shadow-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-rose-600 dark:text-rose-400">Kendala di Jalan &amp; Rute</span>
+                <div className="w-8 h-8 rounded-lg bg-rose-50 dark:bg-rose-500/15 border border-rose-100 dark:border-rose-500/30 flex items-center justify-center text-rose-500 dark:text-rose-400 shrink-0">
+                  <AlertTriangle className="w-4 h-4" />
                 </div>
               </div>
-              <div className="text-3xl sm:text-4xl font-black text-rose-400 mt-1 font-mono flex items-baseline gap-1.5 leading-none">
+              <div className="text-2xl sm:text-3xl font-bold text-rose-600 dark:text-rose-400 mt-2.5 tabular-nums flex items-baseline gap-1.5 leading-none">
                 <span>{inScopeKendala}</span>
                 {dateFilterMode !== 'all' && (
-                  <span className="text-xs text-slate-500 font-semibold font-sans">/ {kendalaCount} total</span>
+                  <span className="text-xs text-slate-400 font-medium">/ {kendalaCount} total</span>
                 )}
               </div>
-              <div className="text-[10px] text-slate-400 mt-1.5 font-medium">Macet, akses jalan &amp; gangguan rute</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                Macet, akses jalan &amp; gangguan rute
+              </div>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 shadow-xs relative overflow-hidden">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-cyan-300">Kendala Antri Customer</span>
-                <div className="w-7 h-7 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
-                  <Clock className="w-3.5 h-3.5" />
+            <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-xl p-5 shadow-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-sky-600 dark:text-sky-400">Kendala Antri Customer</span>
+                <div className="w-8 h-8 rounded-lg bg-sky-50 dark:bg-sky-500/15 border border-sky-100 dark:border-sky-500/30 flex items-center justify-center text-sky-500 dark:text-sky-400 shrink-0">
+                  <Clock className="w-4 h-4" />
                 </div>
               </div>
-              <div className="text-3xl sm:text-4xl font-black text-cyan-400 mt-1 font-mono flex items-baseline gap-1.5 leading-none">
+              <div className="text-2xl sm:text-3xl font-bold text-sky-600 dark:text-sky-400 mt-2.5 tabular-nums flex items-baseline gap-1.5 leading-none">
                 <span>{inScopeAkhir}</span>
                 {dateFilterMode !== 'all' && (
-                  <span className="text-xs text-slate-500 font-semibold font-sans">/ {akhirCount} total</span>
+                  <span className="text-xs text-slate-400 font-medium">/ {akhirCount} total</span>
                 )}
               </div>
-              <div className="text-[10px] text-slate-300 mt-1.5 font-semibold">Antrean bongkar di gudang toko</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                Antrean bongkar di gudang toko
+              </div>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 shadow-xs relative overflow-hidden">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-amber-300">Menunggu Solusi SPV</span>
-                <div className="w-7 h-7 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
-                  <Clock className="w-3.5 h-3.5" />
+            <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-xl p-5 shadow-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">Menunggu Solusi SPV</span>
+                <div className="w-8 h-8 rounded-lg bg-amber-50 dark:bg-amber-500/15 border border-amber-100 dark:border-amber-500/30 flex items-center justify-center text-amber-500 dark:text-amber-400 shrink-0">
+                  <Clock className="w-4 h-4" />
                 </div>
               </div>
-              <div className="text-3xl sm:text-4xl font-black text-amber-400 mt-1 font-mono flex items-baseline gap-1.5 leading-none">
+              <div className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400 mt-2.5 tabular-nums flex items-baseline gap-1.5 leading-none">
                 <span>{inScopePending}</span>
                 {dateFilterMode !== 'all' && (
-                  <span className="text-xs text-slate-500 font-semibold font-sans">/ {pendingCount} total</span>
+                  <span className="text-xs text-slate-400 font-medium">/ {pendingCount} total</span>
                 )}
               </div>
-              <div className="text-[10px] text-slate-400 mt-1.5 font-medium">Khusus SPV Logistik DC</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                Khusus SPV Logistik DC
+              </div>
             </div>
           </div>
 
-          {/* 📅 KALENDER LAPORAN & KENDALA KIRIMAN (Rapat & Padat) */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 shadow-xs space-y-2.5">
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-2.5">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold shadow-xs shrink-0">
-                  <Calendar className="w-4 h-4" />
+          {/* 4. Bagian Kalender (Kartu Utama Paling Besar) */}
+          <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-xl p-5 sm:p-6 shadow-sm space-y-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-200 dark:border-[#24344D] pb-4">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-green-600 text-white flex items-center justify-center shrink-0">
+                  <Calendar className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2 flex-wrap">
-                    <span>KALENDER LAPORAN &amp; KENDALA - {monthlyCalendarGrid.monthName.toUpperCase()} {monthlyCalendarGrid.year}</span>
+                  <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white uppercase tracking-wide flex items-center gap-2 flex-wrap">
+                    <span>KALENDER LAPORAN &amp; KENDALA — {monthlyCalendarGrid.monthName.toUpperCase()} {monthlyCalendarGrid.year}</span>
                   </h3>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                     Klik pada salah satu tanggal untuk melihat rincian kendala jalan dan laporan pada tanggal tersebut.
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="flex items-center gap-1 bg-slate-50 dark:bg-slate-950 p-1 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-semibold">
+              <div className="flex items-center gap-2 flex-wrap shrink-0">
+                <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-[#0F172A] p-1 rounded-xl border border-slate-200 dark:border-[#24344D]">
                   <select
                     value={calendarMonth}
                     onChange={(e) => {
@@ -2613,7 +2613,7 @@ export const DriverReportsManagement: React.FC = () => {
                       setSelectedCalendarDate(nextIso);
                       setDateFilterMode('single_date');
                     }}
-                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-md px-2 py-1 text-xs font-bold focus:outline-none focus:border-emerald-500 cursor-pointer"
+                    className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] text-slate-800 dark:text-white rounded-lg px-3 py-1.5 text-xs font-semibold focus:outline-none focus:border-green-600 cursor-pointer"
                   >
                     {CALENDAR_MONTH_NAMES.map((m, idx) => (
                       <option key={m} value={idx}>{m}</option>
@@ -2628,7 +2628,7 @@ export const DriverReportsManagement: React.FC = () => {
                       setSelectedCalendarDate(nextIso);
                       setDateFilterMode('single_date');
                     }}
-                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-md px-2 py-1 text-xs font-bold focus:outline-none focus:border-emerald-500 cursor-pointer"
+                    className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] text-slate-800 dark:text-white rounded-lg px-3 py-1.5 text-xs font-semibold focus:outline-none focus:border-green-600 cursor-pointer tabular-nums"
                   >
                     {[2024, 2025, 2026, 2027, 2028].map(yr => (
                       <option key={yr} value={yr}>{yr}</option>
@@ -2640,23 +2640,23 @@ export const DriverReportsManagement: React.FC = () => {
 
             {/* Legend Badges */}
             <div className="flex items-center justify-between gap-2 flex-wrap">
-              <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
-                Tanggal Terpilih: <strong className="text-emerald-600 dark:text-emerald-400 font-mono">{selectedCalendarDate}</strong>
+              <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                Tanggal Terpilih: <strong className="text-green-600 dark:text-green-400 font-mono tabular-nums">{selectedCalendarDate}</strong>
               </span>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 dark:bg-rose-950/80 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
-                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-                  <span>⚠️ Kendala Masuk</span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />
+                  <span>Kendala Masuk</span>
                 </span>
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-green-50 dark:bg-green-950/60 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
                   <span>Solusi Terkirim ke Portal Driver</span>
                 </span>
               </div>
             </div>
 
             {/* 7-Column Calendar Grid Header */}
-            <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-black uppercase text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800/90 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700">
+            <div className="grid grid-cols-7 gap-1.5 text-center text-[11px] font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/70 py-2.5 rounded-xl border border-slate-200 dark:border-[#24344D]">
               <div className="text-rose-600 dark:text-rose-400">MINGGU</div>
               <div>SENIN</div>
               <div>SELASA</div>
@@ -2666,14 +2666,14 @@ export const DriverReportsManagement: React.FC = () => {
               <div className="text-blue-600 dark:text-blue-400">SABTU</div>
             </div>
 
-            {/* Calendar Cells Grid (Compact) */}
-            <div className="grid grid-cols-7 gap-1">
+            {/* Calendar Cells Grid */}
+            <div className="grid grid-cols-7 gap-1.5">
               {monthlyCalendarGrid.cells.map((cell) => {
                 if (cell.type === 'padding') {
                   return (
                     <div
                       key={cell.key}
-                      className="min-h-[64px] sm:min-h-[72px] bg-slate-50/50 dark:bg-slate-950/20 rounded-lg border border-dashed border-slate-200 dark:border-slate-800/50"
+                      className="min-h-[70px] sm:min-h-[78px] bg-slate-50/50 dark:bg-slate-900/20 rounded-xl border border-dashed border-slate-200 dark:border-slate-800/60"
                     />
                   );
                 }
@@ -2691,26 +2691,26 @@ export const DriverReportsManagement: React.FC = () => {
                       setSelectedCalendarDate(cell.iso);
                       setDateFilterMode('single_date');
                     }}
-                    className={`min-h-[64px] sm:min-h-[72px] p-1.5 rounded-lg border transition cursor-pointer flex flex-col justify-between select-none relative gap-1 ${
+                    className={`min-h-[70px] sm:min-h-[78px] p-2 rounded-xl border transition-colors cursor-pointer flex flex-col justify-between select-none relative gap-1 ${
                       isSelected
                         ? hasUnhandled
-                          ? 'bg-rose-100/90 dark:bg-rose-950/60 border-rose-500 ring-1 ring-rose-500 shadow-sm z-10'
-                          : 'bg-emerald-100/90 dark:bg-emerald-950/60 border-emerald-500 ring-1 ring-emerald-500 shadow-sm z-10'
+                          ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-500 ring-1 ring-rose-500/30 z-10'
+                          : 'bg-green-50 dark:bg-green-950/40 border-green-500 ring-1 ring-green-500/25 z-10'
                         : hasUnhandled
-                        ? 'bg-rose-50/90 dark:bg-rose-950/40 hover:bg-rose-100/80 dark:hover:bg-rose-950/60 border-rose-400 dark:border-rose-500/70'
+                        ? 'bg-rose-50/80 dark:bg-rose-950/40 hover:bg-rose-100/70 dark:hover:bg-rose-950/60 border-rose-300 dark:border-rose-500/60'
                         : isAllResolvedGreen
-                        ? 'bg-emerald-50/80 dark:bg-emerald-950/35 hover:bg-emerald-100/70 dark:hover:bg-emerald-950/55 border-emerald-400 dark:border-emerald-500/60'
-                        : 'bg-slate-50/80 dark:bg-slate-950/40 hover:bg-slate-100 dark:hover:bg-slate-900 border-slate-200 dark:border-slate-800'
+                        ? 'bg-green-50/60 dark:bg-green-950/30 hover:bg-green-100/60 dark:hover:bg-green-950/50 border-green-300 dark:border-green-500/50'
+                        : 'bg-white dark:bg-[#162234] hover:bg-slate-50 dark:hover:bg-slate-800/50 border-slate-200 dark:border-[#24344D]'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-1">
                       <span
-                        className={`text-[11px] font-black px-1.5 py-0.2 rounded ${
+                        className={`text-xs font-bold px-1.5 py-0.5 rounded-md tabular-nums ${
                           hasUnhandled
-                            ? 'bg-rose-600 text-white font-extrabold'
+                            ? 'bg-rose-600 text-white'
                             : isAllResolvedGreen || isSelected
-                            ? 'bg-emerald-600 text-white font-extrabold'
-                            : 'text-slate-500 dark:text-slate-400'
+                            ? 'bg-green-600 text-white'
+                            : 'text-slate-600 dark:text-slate-300'
                         }`}
                       >
                         {String(cell.dayNumber).padStart(2, '0')}
@@ -2718,38 +2718,34 @@ export const DriverReportsManagement: React.FC = () => {
 
                       {hasUnhandled ? (
                         <span
-                          className="w-2 h-2 rounded-full bg-rose-500 animate-pulse ring-2 ring-rose-500/20"
+                          className="w-2 h-2 rounded-full bg-rose-500"
                           title="Ada kendala masuk — segera perbarui status & solusi!"
                         />
                       ) : isAllResolvedGreen ? (
                         <span
-                          className="w-3.5 h-3.5 rounded-full bg-emerald-500 text-white flex items-center justify-center"
+                          className="w-4 h-4 rounded-full bg-green-600 text-white flex items-center justify-center"
                           title="Solusi terkirim / Tiba di gudang tercatat"
                         >
-                          <Check className="w-2 h-2 stroke-[3]" />
+                          <Check className="w-2.5 h-2.5 stroke-[3]" />
                         </span>
                       ) : null}
                     </div>
 
                     <div className="space-y-0.5 mt-auto">
                       {hasKendala && (
-                        <div className="px-1 py-0.5 rounded bg-rose-600/15 dark:bg-rose-500/25 border border-rose-500/40 text-rose-800 dark:text-rose-200 text-[8px] leading-tight">
-                          <div className="font-black flex items-center justify-between gap-0.5">
-                            <span className="truncate">⚠️ Kendala</span>
-                            <span className="px-1 rounded bg-rose-600 text-white font-mono text-[8px] shrink-0">
-                              {cell.kendalaCount}
-                            </span>
+                        <div className="px-1.5 py-0.5 rounded bg-rose-100/80 dark:bg-rose-500/20 border border-rose-200 dark:border-rose-500/40 text-rose-700 dark:text-rose-200 text-[9px] leading-tight">
+                          <div className="font-bold flex items-center justify-between gap-1">
+                            <span className="truncate">Kendala</span>
+                            <span className="font-mono tabular-nums shrink-0">{cell.kendalaCount}</span>
                           </div>
                         </div>
                       )}
 
                       {hasAkhirKiriman && (
-                        <div className="px-1 py-0.5 rounded bg-blue-600/15 dark:bg-blue-500/25 border border-blue-500/40 text-blue-800 dark:text-blue-200 text-[8px] leading-tight">
-                          <div className="font-black flex items-center justify-between gap-0.5">
-                            <span className="truncate">✅ Tiba di Gudang</span>
-                            <span className="px-1 rounded bg-blue-600 text-white font-mono text-[8px] shrink-0">
-                              {cell.akhirKirimanCount}
-                            </span>
+                        <div className="px-1.5 py-0.5 rounded bg-blue-100/80 dark:bg-blue-500/20 border border-blue-200 dark:border-blue-500/40 text-blue-700 dark:text-blue-200 text-[9px] leading-tight">
+                          <div className="font-bold flex items-center justify-between gap-1">
+                            <span className="truncate">Tiba Gudang</span>
+                            <span className="font-mono tabular-nums shrink-0">{cell.akhirKirimanCount}</span>
                           </div>
                         </div>
                       )}
@@ -2760,83 +2756,86 @@ export const DriverReportsManagement: React.FC = () => {
             </div>
           </div>
 
-          {/* Filter and Search Bar - Compact */}
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-2.5 shadow-xs">
-            <div className="flex flex-col sm:flex-row gap-2">
-              <div className="flex-1 relative">
-                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          {/* 5. Baris Pencarian (Bawah Kalender) */}
+          <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-xl p-4 sm:p-5 shadow-sm">
+            <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+              <div className="flex-1 relative min-w-0">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Cari supir, helper, plat mobil, area, atau solusi SPV..."
-                  className="w-full pl-9 pr-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                  className="w-full pl-10 pr-8 py-2.5 rounded-xl bg-slate-100 dark:bg-[#0F172A] border border-transparent focus:bg-white dark:focus:bg-[#162234] focus:border-blue-500 text-xs sm:text-sm text-slate-800 dark:text-white placeholder:text-slate-400 focus:outline-none transition-colors"
                 />
                 {searchQuery && (
                   <button
+                    type="button"
                     onClick={() => setSearchQuery('')}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <X className="w-4 h-4" />
                   </button>
                 )}
               </div>
 
-              <select
-                value={categoryFilter}
-                onChange={(e) => setCategoryFilter(e.target.value as any)}
-                className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-amber-500 cursor-pointer"
-              >
-                <option value="all">Semua Jenis Kendala</option>
-                <option value="kendala_umum">⚠️ Kendala di Jalan &amp; Rute</option>
-                <option value="antri_customer">⏳ Kendala Antri di Customer</option>
-              </select>
+              <div className="flex items-center gap-2.5 flex-wrap shrink-0">
+                <select
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value as any)}
+                  className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] text-slate-700 dark:text-slate-200 text-xs sm:text-sm font-medium rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-blue-500 cursor-pointer"
+                >
+                  <option value="all">Semua Jenis Kendala</option>
+                  <option value="kendala_umum">Kendala di Jalan &amp; Rute</option>
+                  <option value="antri_customer">Kendala Antri di Customer</option>
+                </select>
 
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as any)}
-                className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-amber-500 cursor-pointer"
-              >
-                <option value="all">Semua Status</option>
-                <option value="pending">⏳ Menunggu Solusi SPV</option>
-                <option value="follow_up">⚠️ Diproses / Diberi Arahan</option>
-                <option value="verified">✓ Terverifikasi Selesai</option>
-              </select>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as any)}
+                  className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] text-slate-700 dark:text-slate-200 text-xs sm:text-sm font-medium rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-blue-500 cursor-pointer"
+                >
+                  <option value="all">Semua Status</option>
+                  <option value="pending">Menunggu Solusi SPV</option>
+                  <option value="follow_up">Diproses / Diberi Arahan</option>
+                  <option value="verified">Terverifikasi Selesai</option>
+                </select>
+              </div>
             </div>
           </div>
 
-          {/* Reports Table - 10 Kolom: Waktu; Kru; Armada; Jenis Laporan; Nama Area Kirim; Foto Bukti; Keterangan Kendala; Solusi; Status; Tindakan */}
-          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xs">
+          {/* 6. Area Empty State & Tabel Laporan */}
+          <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-xl overflow-hidden shadow-sm">
             {filteredReports.length === 0 ? (
-              <div className="p-8 text-center space-y-2">
-                <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-slate-500 mx-auto">
-                  <Calendar className="w-5 h-5" />
+              <div className="py-14 px-6 text-center space-y-2.5">
+                <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-[#24344D] flex items-center justify-center text-slate-400 mx-auto">
+                  <Calendar className="w-6 h-6" />
                 </div>
-                <div className="text-xs font-bold text-white">
+                <div className="text-sm sm:text-base font-bold text-slate-800 dark:text-white">
                   Tidak Ada Laporan Pada Tanggal {selectedCalendarDate}
                 </div>
-                <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
+                <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
                   Tidak ada laporan atau kendala yang tercatat pada tanggal {selectedCalendarDate}. Silakan klik tanggal lain pada kalender yang memiliki tanda indikator laporan.
                 </p>
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
-                  <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider text-[10px] font-bold border-b border-slate-800">
+                  <thead className="bg-slate-50 dark:bg-slate-900/80 text-slate-600 dark:text-slate-300 uppercase tracking-wider text-[11px] font-semibold border-b border-slate-200 dark:border-[#24344D]">
                     <tr>
-                      <th className="py-2.5 px-3 whitespace-nowrap">Waktu</th>
-                      <th className="py-2.5 px-3 whitespace-nowrap">Kru</th>
-                      <th className="py-2.5 px-3 whitespace-nowrap">Armada</th>
-                      <th className="py-2.5 px-3 whitespace-nowrap">Jenis Laporan</th>
-                      <th className="py-2.5 px-3 whitespace-nowrap">Nama Area Kirim</th>
-                      <th className="py-2.5 px-3 text-center whitespace-nowrap">Foto Bukti</th>
-                      <th className="py-2.5 px-3 whitespace-nowrap">Keterangan Kendala</th>
-                      <th className="py-2.5 px-3 min-w-[200px] whitespace-nowrap">Solusi</th>
-                      <th className="py-2.5 px-3 text-center whitespace-nowrap">Status</th>
-                      <th className="py-2.5 px-3 text-center whitespace-nowrap">Tindakan</th>
+                      <th className="py-3 px-3 whitespace-nowrap">Waktu</th>
+                      <th className="py-3 px-3 whitespace-nowrap">Kru</th>
+                      <th className="py-3 px-3 whitespace-nowrap">Armada</th>
+                      <th className="py-3 px-3 whitespace-nowrap">Jenis Laporan</th>
+                      <th className="py-3 px-3 whitespace-nowrap">Nama Area Kirim</th>
+                      <th className="py-3 px-3 text-center whitespace-nowrap">Foto Bukti</th>
+                      <th className="py-3 px-3 whitespace-nowrap">Keterangan Kendala</th>
+                      <th className="py-3 px-3 min-w-[200px] whitespace-nowrap">Solusi</th>
+                      <th className="py-3 px-3 text-center whitespace-nowrap">Status</th>
+                      <th className="py-3 px-3 text-center whitespace-nowrap">Tindakan</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800/70 text-slate-300">
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70 text-slate-700 dark:text-slate-200">
                     {filteredReports.map((item) => {
                       const isVerifiedOrResolved =
                         Boolean(item.solution && item.solution.trim()) ||
@@ -2845,13 +2844,13 @@ export const DriverReportsManagement: React.FC = () => {
                         item.offlineStatus === 'sudah_online';
 
                       return (
-                        <tr key={item.id} className="hover:bg-slate-850/60 transition">
+                        <tr key={item.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
                           {/* 1. Waktu */}
-                          <td className="py-2.5 px-3 align-middle whitespace-nowrap">
-                            <div className="text-xs text-white font-bold font-mono">
+                          <td className="py-3 px-3 align-middle whitespace-nowrap">
+                            <div className="text-xs text-slate-900 dark:text-white font-semibold font-mono tabular-nums">
                               {new Date(item.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
                             </div>
-                            <div className="text-[10px] text-slate-400 mt-0.5">
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
                               {item.date || new Date(item.timestamp).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
                             </div>
                           </td>
@@ -2874,21 +2873,21 @@ export const DriverReportsManagement: React.FC = () => {
                                   : '');
 
                             return (
-                              <td className="py-2.5 px-3 align-middle whitespace-nowrap">
-                                <div className="font-bold text-white flex items-center gap-1.5">
-                                  <User className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                              <td className="py-3 px-3 align-middle whitespace-nowrap">
+                                <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
+                                  <User className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
                                   <span>{primaryName || '-'}</span>
-                                  <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold border ${
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold border ${
                                     isHelperSub
-                                      ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
-                                      : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                      ? 'bg-sky-50 dark:bg-cyan-500/15 text-sky-700 dark:text-cyan-300 border-sky-200 dark:border-cyan-500/30'
+                                      : 'bg-green-50 dark:bg-emerald-500/15 text-green-700 dark:text-emerald-300 border-green-200 dark:border-emerald-500/30'
                                   }`}>
                                     {item.userRole || 'Driver'}
                                   </span>
                                 </div>
                                 {companionLine && (
-                                  <div className="text-[10px] text-slate-400 mt-0.5 pl-5">
-                                    <strong className="text-slate-300">{companionLine}</strong>
+                                  <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 pl-5">
+                                    <span className="font-medium text-slate-600 dark:text-slate-300">{companionLine}</span>
                                   </div>
                                 )}
                               </td>
@@ -2896,34 +2895,34 @@ export const DriverReportsManagement: React.FC = () => {
                           })()}
 
                           {/* 3. Armada (Beserta Nama Inisial Armada) */}
-                          <td className="py-2.5 px-3 align-middle whitespace-nowrap">
-                            <span className="inline-flex items-center gap-1.5 font-mono font-bold text-amber-300 text-[11px] bg-slate-950 px-2 py-1 rounded-md border border-slate-800">
-                              <Truck className="w-3 h-3 text-amber-400 shrink-0" />
+                          <td className="py-3 px-3 align-middle whitespace-nowrap">
+                            <span className="inline-flex items-center gap-1.5 font-mono tabular-nums font-semibold text-slate-800 dark:text-amber-300 text-[11px] bg-slate-100 dark:bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
+                              <Truck className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
                               {formatPlateWithInitial(item.plateNumber)}
                             </span>
                           </td>
 
                           {/* 4. Jenis Laporan */}
-                          <td className="py-2.5 px-3 align-middle space-y-1 whitespace-nowrap">
+                          <td className="py-3 px-3 align-middle space-y-1 whitespace-nowrap">
                             {item.category === 'mode_offline' && (
                               <div className="space-y-1">
-                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black border ${
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold border ${
                                   item.offlineStatus === 'masih_offline'
-                                    ? 'bg-rose-500/20 text-rose-200 border-rose-500/50 animate-pulse'
-                                    : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                    ? 'bg-rose-50 dark:bg-rose-500/20 text-rose-700 dark:text-rose-200 border-rose-200 dark:border-rose-500/50'
+                                    : 'bg-green-50 dark:bg-emerald-500/15 text-green-700 dark:text-emerald-300 border-green-200 dark:border-emerald-500/30'
                                 }`}>
                                   {item.offlineStatus === 'masih_offline' ? (
-                                    <WifiOff className="w-3 h-3 text-rose-400 shrink-0" />
+                                    <WifiOff className="w-3 h-3 text-rose-500 shrink-0" />
                                   ) : (
-                                    <Wifi className="w-3 h-3 text-emerald-400 shrink-0" />
+                                    <Wifi className="w-3 h-3 text-green-600 shrink-0" />
                                   )}
                                   <span>Peringatan Mode Offline</span>
                                 </span>
-                                <div className="text-[9px] font-mono bg-slate-950 px-1.5 py-1 rounded border border-slate-800 space-y-0.5">
-                                  <div className="text-rose-400 font-bold">
+                                <div className="text-[10px] font-mono bg-slate-50 dark:bg-slate-950 px-2 py-1 rounded border border-slate-200 dark:border-slate-800 space-y-0.5">
+                                  <div className="text-rose-600 dark:text-rose-400 font-semibold">
                                     Off: {item.offlineActivatedAt || new Date(item.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB'}
                                   </div>
-                                  <div className={item.onlineRestoredAt ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
+                                  <div className={item.onlineRestoredAt ? 'text-green-600 dark:text-emerald-400 font-semibold' : 'text-amber-600 dark:text-amber-400 font-semibold'}>
                                     On: {item.onlineRestoredAt || 'Masih Offline!'}
                                   </div>
                                 </div>
@@ -2932,76 +2931,74 @@ export const DriverReportsManagement: React.FC = () => {
                             {item.category === 'kendala_jalan' && (
                               <div className="space-y-1">
                                 {item.customerQueueStatus ? (
-                                  <>
-                                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${
-                                      item.customerQueueStatus === 'sedang_mengantri'
-                                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse'
-                                        : 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
-                                    }`}>
-                                      <Clock className="w-3 h-3 shrink-0" />
-                                      <span>
-                                        {item.customerQueueStatus === 'sedang_mengantri'
-                                          ? 'Mengantri di Customer'
-                                          : `Selesai Antri (${item.customerQueueDurationMinutes || 15} Menit)`}
-                                      </span>
+                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold border ${
+                                    item.customerQueueStatus === 'sedang_mengantri'
+                                      ? 'bg-amber-50 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/40'
+                                      : 'bg-sky-50 dark:bg-cyan-500/15 text-sky-700 dark:text-cyan-300 border-sky-200 dark:border-cyan-500/30'
+                                  }`}>
+                                    <Clock className="w-3 h-3 shrink-0" />
+                                    <span>
+                                      {item.customerQueueStatus === 'sedang_mengantri'
+                                        ? 'Mengantri di Customer'
+                                        : `Selesai Antri (${item.customerQueueDurationMinutes || 15} Menit)`}
                                     </span>
-                                  </>
+                                  </span>
                                 ) : (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">
-                                    <AlertTriangle className="w-3 h-3 text-rose-400" />
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-500/30">
+                                    <AlertTriangle className="w-3 h-3 text-rose-500" />
                                     <span>Kendala Jalan</span>
                                   </span>
                                 )}
                               </div>
                             )}
                             {item.category === 'akhir_kiriman' && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-green-50 dark:bg-emerald-500/15 text-green-700 dark:text-emerald-300 border border-green-200 dark:border-emerald-500/30">
+                                <CheckCircle2 className="w-3 h-3 text-green-600" />
                                 <span>Tiba di Gudang</span>
                               </span>
                             )}
                             {item.category === 'presensi_shift' && (
                               <div className="space-y-0.5">
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
-                                  <Clock className="w-3 h-3 text-cyan-400" />
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-sky-50 dark:bg-cyan-500/15 text-sky-700 dark:text-cyan-300 border border-sky-200 dark:border-cyan-500/30">
+                                  <Clock className="w-3 h-3 text-sky-600" />
                                   <span>Check-In &amp; Check-Out</span>
                                 </span>
-                                <div className="text-[9px] font-mono bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
-                                  <span className="text-emerald-400 font-bold">In: {item.checkinTimeFormatted || '-'}</span>
+                                <div className="text-[10px] font-mono bg-slate-50 dark:bg-slate-950 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-800">
+                                  <span className="text-green-600 dark:text-emerald-400 font-semibold">In: {item.checkinTimeFormatted || '-'}</span>
                                   {' | '}
-                                  <span className={item.checkoutTimeFormatted ? 'text-amber-400 font-bold' : 'text-slate-500'}>
+                                  <span className={item.checkoutTimeFormatted ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-slate-500'}>
                                     Out: {item.checkoutTimeFormatted || 'Dinas'}
                                   </span>
                                 </div>
                               </div>
                             )}
                             {item.category === 'pin_keamanan' && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                                <Lock className="w-3 h-3 text-amber-400" />
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-500/30">
+                                <Lock className="w-3 h-3 text-amber-600" />
                                 <span>PIN Keamanan (2x)</span>
                               </span>
                             )}
                             {item.category === 'istirahat' && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-500/15 text-blue-300 border border-blue-500/30">
-                                <CheckCircle2 className="w-3 h-3 text-blue-400" />
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30">
+                                <CheckCircle2 className="w-3 h-3 text-blue-600" />
                                 <span>Absen Kiriman Pelanggan</span>
                               </span>
                             )}
                             {item.category === 'update_lokasi' && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-500/15 text-blue-300 border border-blue-500/30">
-                                <Navigation className="w-3 h-3 text-blue-400" />
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30">
+                                <Navigation className="w-3 h-3 text-blue-600" />
                                 <span>Update Lokasi</span>
                               </span>
                             )}
                             {item.securityPin && (
-                              <div className="flex items-center gap-1 pt-0.5">
-                                <span className="text-[9px] font-mono bg-slate-950 px-1.5 py-0.5 rounded border border-amber-500/30 text-amber-300 font-bold">
+                              <div className="flex items-center gap-1.5 pt-0.5">
+                                <span className="text-[10px] font-mono bg-amber-50 dark:bg-slate-950 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-300 font-semibold">
                                   PIN: {revealedPinIds[item.id] ? item.securityPin : '••••'}
                                 </span>
                                 <button
                                   type="button"
                                   onClick={() => setRevealedPinIds(prev => ({ ...prev, [item.id]: !prev[item.id] }))}
-                                  className="text-[9px] text-cyan-400 hover:underline font-bold cursor-pointer"
+                                  className="text-[10px] text-blue-600 dark:text-cyan-400 hover:underline font-semibold cursor-pointer"
                                 >
                                   {revealedPinIds[item.id] ? 'Tutup' : 'Lihat'}
                                 </button>
@@ -3010,21 +3007,21 @@ export const DriverReportsManagement: React.FC = () => {
                           </td>
 
                           {/* 5. Nama Area Kirim & Pelanggan */}
-                          <td className="py-2.5 px-3 align-middle">
-                            <div className="font-bold text-white text-xs max-w-[160px] truncate" title={item.areaName}>
+                          <td className="py-3 px-3 align-middle">
+                            <div className="font-semibold text-slate-900 dark:text-white text-xs max-w-[160px] truncate" title={item.areaName}>
                               {item.areaName}
                             </div>
                             {item.customerOutletName && (
-                              <div className="text-[10px] text-blue-400 font-semibold mt-0.5 truncate max-w-[160px]" title={item.customerOutletName}>
+                              <div className="text-[11px] text-blue-600 dark:text-blue-400 font-medium mt-0.5 truncate max-w-[160px]" title={item.customerOutletName}>
                                 Pelanggan: {item.customerOutletName}
                               </div>
                             )}
                           </td>
 
                           {/* 6. Foto Bukti */}
-                          <td className="py-2.5 px-3 align-middle text-center">
+                          <td className="py-3 px-3 align-middle text-center">
                             {item.photoUrl ? (
-                              <div className="relative group w-11 h-11 rounded-lg overflow-hidden border border-slate-700 bg-slate-950 mx-auto">
+                              <div className="relative group w-11 h-11 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-950 mx-auto">
                                 <img
                                   src={item.photoUrl}
                                   alt="Bukti Kiriman"
@@ -3032,6 +3029,7 @@ export const DriverReportsManagement: React.FC = () => {
                                   onClick={() => setSelectedPhotoModal(item)}
                                 />
                                 <button
+                                  type="button"
                                   onClick={() => setSelectedPhotoModal(item)}
                                   className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white"
                                   title="Perbesar foto"
@@ -3040,76 +3038,76 @@ export const DriverReportsManagement: React.FC = () => {
                                 </button>
                               </div>
                             ) : (
-                              <span className="inline-block px-2 py-1 rounded border border-dashed border-slate-800 text-slate-500 text-[10px]">
+                              <span className="inline-block px-2 py-1 rounded-md border border-dashed border-slate-200 dark:border-slate-800 text-slate-400 text-[10px]">
                                 Tanpa Foto
                               </span>
                             )}
                           </td>
 
                           {/* 7. Keterangan Kendala */}
-                          <td className="py-2.5 px-3 align-middle max-w-[210px]">
-                            <p className="text-slate-300 text-[11px] leading-snug line-clamp-3" title={item.notes}>
+                          <td className="py-3 px-3 align-middle max-w-[210px]">
+                            <p className="text-slate-600 dark:text-slate-300 text-xs leading-snug line-clamp-3" title={item.notes}>
                               {item.notes || '-'}
                             </p>
                           </td>
 
                           {/* 8. Solusi */}
-                          <td className="py-2.5 px-3 align-middle max-w-[230px]">
+                          <td className="py-3 px-3 align-middle max-w-[230px]">
                             {item.solution && item.solution.trim() ? (
-                              <div className="bg-slate-950 p-2 rounded-lg border border-emerald-500/40 space-y-1">
-                                <div className="flex items-center justify-between text-[9px]">
-                                  <span className="font-bold text-emerald-400 flex items-center gap-1">
-                                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                              <div className="bg-green-50 dark:bg-slate-950 p-2.5 rounded-lg border border-green-200 dark:border-emerald-500/40 space-y-1">
+                                <div className="flex items-center justify-between text-[10px]">
+                                  <span className="font-semibold text-green-700 dark:text-emerald-400 flex items-center gap-1">
+                                    <CheckCircle2 className="w-3 h-3 text-green-600" />
                                     <span>Solusi SPV:</span>
                                   </span>
-                                  <span className="text-emerald-300 font-semibold">
+                                  <span className="text-green-700 dark:text-emerald-300 font-medium">
                                     {item.driverAcknowledged ? 'Dijalankan' : 'Terkirim'}
                                   </span>
                                 </div>
-                                <p className="text-white text-[11px] leading-snug font-semibold">
+                                <p className="text-slate-800 dark:text-white text-xs leading-snug font-medium">
                                   "{item.solution}"
                                 </p>
                               </div>
                             ) : item.category === 'kendala_jalan' ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] text-rose-300 font-semibold bg-rose-950/40 px-2 py-1 rounded border border-rose-500/30">
-                                <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
+                              <span className="inline-flex items-center gap-1 text-[11px] text-rose-700 dark:text-rose-300 font-semibold bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1 rounded-lg border border-rose-200 dark:border-rose-500/30">
+                                <AlertTriangle className="w-3 h-3 text-rose-500 shrink-0" />
                                 <span>Menunggu Solusi SPV</span>
                               </span>
                             ) : (
-                              <span className="text-[11px] text-slate-500 italic">
+                              <span className="text-xs text-slate-400 italic">
                                 Tidak memerlukan solusi khusus
                               </span>
                             )}
                           </td>
 
                           {/* 9. Status */}
-                          <td className="py-2.5 px-3 align-middle text-center whitespace-nowrap">
+                          <td className="py-3 px-3 align-middle text-center whitespace-nowrap">
                             {isVerifiedOrResolved ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                                <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-green-50 dark:bg-emerald-500/20 text-green-700 dark:text-emerald-300 border border-green-200 dark:border-emerald-500/40">
+                                <CheckCircle2 className="w-3 h-3 text-green-600 shrink-0" />
                                 <span>Terverifikasi</span>
                               </span>
                             ) : item.status === 'follow_up' ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-500/40">
                                 <AlertTriangle className="w-3 h-3" />
                                 <span>Tindak Lanjut</span>
                               </span>
                             ) : (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40">
-                                <Clock className="w-3 h-3 text-rose-400 shrink-0" />
+                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-rose-50 dark:bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-500/40">
+                                <Clock className="w-3 h-3 text-rose-500 shrink-0" />
                                 <span>Pending</span>
                               </span>
                             )}
                           </td>
 
                           {/* 10. Tindakan (Edit, Centang, dan Hapus Khusus Super Admin) */}
-                          <td className="py-2.5 px-3 align-middle text-center whitespace-nowrap">
+                          <td className="py-3 px-3 align-middle text-center whitespace-nowrap">
                             {isAuthorizedSpvOrAdmin ? (
                               <div className="inline-flex items-center justify-center gap-1.5">
                                 <button
                                   type="button"
                                   onClick={() => handleOpenSolutionModal(item)}
-                                  className="p-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/40 transition active:scale-95 cursor-pointer"
+                                  className="p-1.5 rounded-lg bg-amber-50 dark:bg-amber-500/20 hover:bg-amber-500 text-amber-700 dark:text-amber-300 hover:text-white border border-amber-200 dark:border-amber-500/40 transition cursor-pointer"
                                   title="Edit Solusi & Arahan SPV"
                                 >
                                   <Edit className="w-3.5 h-3.5" />
@@ -3118,10 +3116,10 @@ export const DriverReportsManagement: React.FC = () => {
                                   type="button"
                                   onClick={() => handleVerify(item.id)}
                                   disabled={item.status === 'verified'}
-                                  className={`p-1.5 rounded-lg border transition active:scale-95 ${
+                                  className={`p-1.5 rounded-lg border transition ${
                                     item.status === 'verified'
-                                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 cursor-default'
-                                      : 'bg-slate-800 hover:bg-emerald-600 text-slate-300 hover:text-white border-slate-700 hover:border-emerald-500 cursor-pointer'
+                                      ? 'bg-green-50 dark:bg-emerald-500/20 text-green-600 dark:text-emerald-400 border-green-200 dark:border-emerald-500/40 cursor-default'
+                                      : 'bg-white dark:bg-slate-800 hover:bg-green-600 text-slate-600 dark:text-slate-300 hover:text-white border-slate-200 dark:border-slate-700 hover:border-green-600 cursor-pointer'
                                   }`}
                                   title={item.status === 'verified' ? 'Sudah Terverifikasi' : 'Centang Verifikasi Sah'}
                                 >
@@ -3140,7 +3138,7 @@ export const DriverReportsManagement: React.FC = () => {
                                         label: 'Kendala Lapangan'
                                       })
                                     }
-                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/35 hover:border-rose-500 text-[10px] font-bold transition active:scale-95 cursor-pointer"
+                                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-500/15 hover:bg-rose-600 text-rose-600 dark:text-rose-400 hover:text-white border border-rose-200 dark:border-rose-500/35 hover:border-rose-600 text-[11px] font-semibold transition cursor-pointer"
                                     title="Hapus Laporan (Khusus Super Admin)"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
@@ -3149,7 +3147,7 @@ export const DriverReportsManagement: React.FC = () => {
                                 )}
                               </div>
                             ) : (
-                              <div className="inline-flex items-center justify-center gap-1 text-[10px] text-slate-500">
+                              <div className="inline-flex items-center justify-center gap-1 text-[11px] text-slate-400">
                                 <Lock className="w-3 h-3" />
                                 <span>SPV</span>
                               </div>

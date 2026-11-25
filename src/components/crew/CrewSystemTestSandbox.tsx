@@ -94,12 +94,6 @@ function createInitialSandboxTrips(): FieldTrip[] {
   ];
 }
 
-const emptyChecks = (): Record<VehicleChecklistKey, boolean> =>
-  VEHICLE_CHECKLIST_ITEMS.reduce(
-    (acc, item) => ({ ...acc, [item.key]: false }),
-    {} as Record<VehicleChecklistKey, boolean>
-  );
-
 export const CrewSystemTestSandbox: React.FC<CrewSystemTestSandboxProps> = ({ currentUser, onExit }) => {
   const isSuperAdmin = currentUser.role === 'super_admin' && currentUser.status === 'approved';
   const reduced = useReducedMotion();
@@ -115,7 +109,7 @@ export const CrewSystemTestSandbox: React.FC<CrewSystemTestSandboxProps> = ({ cu
   const [kmValue, setKmValue] = useState('');
   const [taskConfirm, setTaskConfirm] = useState<{ tripId: string; kind: 'inspection' | 'waybill' } | null>(null);
   const [waybillChecks, setWaybillChecks] = useState<[boolean, boolean]>([false, false]);
-  const [inspectionChecks, setInspectionChecks] = useState<Record<VehicleChecklistKey, boolean>>(emptyChecks);
+  const [inspectionStatuses, setInspectionStatuses] = useState<Partial<Record<VehicleChecklistKey, string>>>({});
   const [inspectionPhotos, setInspectionPhotos] = useState<Partial<Record<VehicleChecklistKey, CameraEvidence>>>({});
   const [inspectionCameraKey, setInspectionCameraKey] = useState<VehicleChecklistKey | null>(null);
 
@@ -179,10 +173,12 @@ export const CrewSystemTestSandbox: React.FC<CrewSystemTestSandboxProps> = ({ cu
   const inspectionEntries = useMemo<InspectionChecklistEntry[]>(() =>
     VEHICLE_CHECKLIST_ITEMS.map(item => {
       const ev = item.requiresPhoto ? inspectionPhotos[item.key] : undefined;
+      const chosen = inspectionStatuses[item.key] || '';
       return {
         key: item.key,
         label: item.label,
-        checked: Boolean(inspectionChecks[item.key]),
+        status: chosen,
+        checked: Boolean(chosen),
         requiresPhoto: item.requiresPhoto,
         ...(item.requiresPhoto ? {
           photo: ev?.photo,
@@ -192,10 +188,10 @@ export const CrewSystemTestSandbox: React.FC<CrewSystemTestSandboxProps> = ({ cu
         } : {})
       };
     }),
-    [inspectionChecks, inspectionPhotos]
+    [inspectionStatuses, inspectionPhotos]
   );
 
-  const inspectionCheckedCount = VEHICLE_CHECKLIST_ITEMS.filter(item => inspectionChecks[item.key]).length;
+  const inspectionAnsweredCount = VEHICLE_CHECKLIST_ITEMS.filter(item => Boolean(inspectionStatuses[item.key])).length;
   const inspectionPhotoTotal = VEHICLE_CHECKLIST_ITEMS.filter(item => item.requiresPhoto).length;
   const inspectionPhotoCount = VEHICLE_CHECKLIST_ITEMS.filter(item => item.requiresPhoto && Boolean(inspectionPhotos[item.key]?.photo)).length;
   const inspectionValidationError = useMemo(() => validateVehicleChecklist(inspectionEntries), [inspectionEntries]);
@@ -246,10 +242,10 @@ export const CrewSystemTestSandbox: React.FC<CrewSystemTestSandboxProps> = ({ cu
     clearAlerts();
     if (kind === 'inspection') {
       if (!activeTrip.odometerStart) {
-        setFault('Isi KM awal terlebih dahulu sebelum mengisi checklist kendaraan.');
+        setFault('Isi KM awal terlebih dahulu sebelum mengisi pemeriksaan armada.');
         return;
       }
-      setInspectionChecks(emptyChecks());
+      setInspectionStatuses({});
       setInspectionPhotos({});
       setInspectionCameraKey(null);
     } else {
@@ -269,7 +265,6 @@ export const CrewSystemTestSandbox: React.FC<CrewSystemTestSandboxProps> = ({ cu
       gps: { latitude: -8.2192, longitude: 114.3691, accuracy: 12 }
     };
     setInspectionPhotos(prev => ({ ...prev, [key]: simEvidence }));
-    setInspectionChecks(prev => ({ ...prev, [key]: true }));
     clearAlerts();
   };
 
@@ -578,8 +573,8 @@ export const CrewSystemTestSandbox: React.FC<CrewSystemTestSandboxProps> = ({ cu
                                 !activeTrip.odometerStart
                                   ? 'Isi KM awal terlebih dahulu'
                                   : activeTrip.inspectionDone
-                                    ? '7 item & 4 foto bukti tersimpan'
-                                    : '7 item checklist · 4 foto bukti wajib'
+                                    ? '7 kondisi & 4 foto bukti tersimpan'
+                                    : '7 pemeriksaan kondisi · 4 foto bukti wajib'
                               }
                               done={Boolean(activeTrip.inspectionDone)}
                               disabled={!activeTrip.odometerStart}
@@ -748,6 +743,28 @@ export const CrewSystemTestSandbox: React.FC<CrewSystemTestSandboxProps> = ({ cu
         </nav>
       </div>
 
+      {reportCamOpen && reportKind && (
+        <CrewLiveCamera
+          title={`Foto: ${WORK_LABELS[reportKind]}`}
+          onClose={() => setReportCamOpen(false)}
+          onCapture={ev => { setReportPhoto(ev.photo); setReportCamOpen(false); }}
+        />
+      )}
+
+      {taskConfirm?.kind === 'inspection' && activeInspectionCamItem && (
+        <CrewLiveCamera
+          key={`sandbox-insp-${activeInspectionCamItem.key}`}
+          title={`Foto: ${activeInspectionCamItem.label}`}
+          onClose={() => setInspectionCameraKey(null)}
+          onCapture={ev => {
+            const key = activeInspectionCamItem.key;
+            setInspectionPhotos(prev => ({ ...prev, [key]: ev }));
+            setInspectionCameraKey(null);
+            clearAlerts();
+          }}
+        />
+      )}
+
       <AnimatePresence>
         {taskConfirm && (
           <Dialog
@@ -759,22 +776,17 @@ export const CrewSystemTestSandbox: React.FC<CrewSystemTestSandboxProps> = ({ cu
             {taskConfirm.kind === 'inspection' ? (
               <>
                 <div className={`cv72-check-summary ${!inspectionValidationError ? 'cv72-check-summary--ready' : ''}`}>
-                  <span>Checklist: {inspectionCheckedCount}/{VEHICLE_CHECKLIST_ITEMS.length}</span>
+                  <span>Terisi: {inspectionAnsweredCount}/{VEHICLE_CHECKLIST_ITEMS.length}</span>
                   <span>Foto bukti: {inspectionPhotoCount}/{inspectionPhotoTotal}</span>
                 </div>
                 <div className="cv72-check-list">
                   {VEHICLE_CHECKLIST_ITEMS.map(item => {
-                    const checked = Boolean(inspectionChecks[item.key]);
+                    const selectedStatus = inspectionStatuses[item.key] || '';
                     const evidence = item.requiresPhoto ? inspectionPhotos[item.key] : undefined;
-                    const itemDone = checked && (!item.requiresPhoto || Boolean(evidence?.photo));
+                    const itemDone = Boolean(selectedStatus) && (!item.requiresPhoto || Boolean(evidence?.photo));
                     return (
                       <div key={item.key} className={`cv72-check-card ${itemDone ? 'cv72-check-card--done' : ''}`}>
-                        <label className="cv72-check-top">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={e => setInspectionChecks(prev => ({ ...prev, [item.key]: e.target.checked }))}
-                          />
+                        <div className="cv72-check-top" style={{ cursor: 'default' }}>
                           <span className="cv72-check-label">{item.label}</span>
                           {item.requiresPhoto && (
                             <span className={`cv72-photo-badge ${evidence?.photo ? 'cv72-photo-badge--ok' : ''}`}>
@@ -782,7 +794,26 @@ export const CrewSystemTestSandbox: React.FC<CrewSystemTestSandboxProps> = ({ cu
                               {evidence?.photo ? 'Foto OK' : 'Wajib Foto'}
                             </span>
                           )}
-                        </label>
+                        </div>
+                        <div className="cv72-choice-row" role="radiogroup" aria-label={item.label}>
+                          {item.options.map((opt, idx) => {
+                            const active = selectedStatus === opt;
+                            const activeClass = active ? (idx === 0 ? 'cv72-choice-btn--ok' : 'cv72-choice-btn--warn') : '';
+                            return (
+                              <button
+                                key={opt}
+                                type="button"
+                                role="radio"
+                                aria-checked={active}
+                                className={`cv72-choice-btn ${activeClass}`}
+                                onClick={() => setInspectionStatuses(prev => ({ ...prev, [item.key]: opt }))}
+                              >
+                                {active && <Check size={14}/>}
+                                <span>{opt}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
                         {item.requiresPhoto && (
                           <div className="cv72-check-photo-row">
                             {evidence?.photo && (
@@ -834,7 +865,7 @@ export const CrewSystemTestSandbox: React.FC<CrewSystemTestSandboxProps> = ({ cu
                   disabled={Boolean(inspectionCameraKey) || Boolean(inspectionValidationError)}
                   onClick={handleSaveTask}
                 >
-                  <Check size={18}/>Simpan Checklist Armada
+                  <Check size={18}/>Simpan Cek Armada
                 </Button>
               </>
             ) : (
@@ -913,29 +944,6 @@ export const CrewSystemTestSandbox: React.FC<CrewSystemTestSandboxProps> = ({ cu
           </Dialog>
         )}
       </AnimatePresence>
-
-      {reportCamOpen && reportKind && (
-        <CrewLiveCamera
-          title={`Foto: ${WORK_LABELS[reportKind]}`}
-          onClose={() => setReportCamOpen(false)}
-          onCapture={ev => { setReportPhoto(ev.photo); setReportCamOpen(false); }}
-        />
-      )}
-
-      {taskConfirm?.kind === 'inspection' && activeInspectionCamItem && (
-        <CrewLiveCamera
-          key={`sandbox-insp-${activeInspectionCamItem.key}`}
-          title={`Foto: ${activeInspectionCamItem.label}`}
-          onClose={() => setInspectionCameraKey(null)}
-          onCapture={ev => {
-            const key = activeInspectionCamItem.key;
-            setInspectionPhotos(prev => ({ ...prev, [key]: ev }));
-            setInspectionChecks(prev => ({ ...prev, [key]: true }));
-            setInspectionCameraKey(null);
-            clearAlerts();
-          }}
-        />
-      )}
     </section>
   );
 };

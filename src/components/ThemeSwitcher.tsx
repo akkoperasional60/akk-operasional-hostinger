@@ -18,7 +18,7 @@ export const ThemeSwitcher: React.FC<ThemeSwitcherProps> = ({
       onClick={toggleTheme}
       title={theme === 'dark' ? 'Ganti ke Mode Cerah' : 'Ganti ke Mode Gelap'}
       aria-label="Toggle tema tampilan"
-      className={`p-2.5 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer flex items-center justify-center shadow-2xs ${className}`}
+      className={`p-2.5 rounded-full border border-[#e4eaf2] dark:border-[#2b3b50] bg-[#f3f6fb] dark:bg-[#192a40] text-[#5a6b80] dark:text-[#b2c1d3] hover:bg-[#e9f2ff] dark:hover:bg-[#253e64] hover:text-[#1764db] transition-colors cursor-pointer flex items-center justify-center ${className}`}
     >
       {theme === 'dark' ? (
         <Moon className="w-4 h-4 text-slate-300" />

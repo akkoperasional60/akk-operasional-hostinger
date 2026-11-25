@@ -17,7 +17,7 @@ import '../styles/akk-driver-helper-clean.css';
 // All existing tab IDs remain unchanged. Routes, role permissions, and saved links keep working.
 export type NavTab =
   | 'dashboard' | 'driver_portal' | 'driver_reports' | 'analytics_reports'
-  | 'operational_dashboard' | 'schedules' | 'portal_validation' | 'fleets'
+  | 'operational_dashboard' | 'schedules' | 'portal_validation' | 'integrated_validation' | 'fleets'
   | 'spareparts' | 'maintenance_costs' | 'fuel_efficiency' | 'crew_history'
   | 'tracking_eval' | 'fleet_forms' | 'sales_dashboard'
   | 'sales_activities' | 'sales_schedules' | 'sales_loading_duration'
@@ -88,6 +88,7 @@ const SECTIONS: MenuSection[] = [
     { tab: 'schedules', label: 'Jadwal Kirim', keywords: 'jadwal armada kru' },
     { tab: 'driver_portal', label: 'Portal Driver', keywords: 'supir hp' },
     { tab: 'portal_validation', label: 'Validasi Kiriman' },
+    { tab: 'integrated_validation', label: 'Validasi Rute & Form', keywords: 'three way gps peta faktur helper' },
     { tab: 'driver_reports', label: 'Laporan Driver' },
     { tab: 'tracking_eval', label: 'Evaluasi GPS' },
     { tab: 'fleet_forms', label: 'Form Armada' },
@@ -291,7 +292,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onO
     <>
       <div className="akk-clean-brand">
         <button type="button" className="akk-clean-logo-button" onClick={() => navigate('dashboard')} aria-label="Beranda AKK" title="Beranda AKK">
-          <AkkLogo size="sm" showSubtitle={false} showText={false} />
+          <span className="akk-clean-logo-tile">
+            <AkkLogo size="sm" showSubtitle={false} showText={false} />
+          </span>
           {(!desktop || !isMinimized) && <span className="akk-clean-brand-title"><strong>AKK</strong><small>Operasional</small></span>}
         </button>
         <div className="akk-clean-brand-actions">
@@ -400,8 +403,15 @@ const SidebarComponent: React.FC<SidebarProps> = ({ currentTab, onSelectTab, onO
     <ShipmentScheduleWorkbench activeTab={currentTab} user={user} />
     {!isCrewWorkScreen && <div className="akk-clean-mobile-top lg:hidden">
       <button type="button" className="akk-clean-icon-button" onClick={() => setMobileOpen(true)} aria-label="Buka menu"><Menu size={22} /></button>
-      <button type="button" className="akk-clean-mobile-home" onClick={() => navigate('dashboard')}><AkkLogo size="sm" showSubtitle={false} showText={false} /><strong>AKK</strong></button>
-      <button type="button" className="akk-clean-icon-button" onClick={() => onOpenAuth('login')} title="Profil akun" aria-label="Profil akun"><Users size={19} /></button>
+      <button type="button" className="akk-clean-mobile-home" onClick={() => navigate('dashboard')}>
+        <span className="akk-clean-logo-tile" style={{ width: 34, height: 34, borderRadius: 11 }}>
+          <AkkLogo size="sm" showSubtitle={false} showText={false} />
+        </span>
+        <strong>AKK</strong>
+      </button>
+      <button type="button" className="akk-clean-mobile-avatar" onClick={() => onOpenAuth('login')} title="Profil akun" aria-label="Profil akun">
+        {(user.fullName?.trim()?.[0] || 'A').toUpperCase()}
+      </button>
     </div>}
     <aside className={`akk-clean-sidebar hidden lg:flex ${isMinimized ? 'is-minimized' : ''}`} aria-label="Navigasi utama">{renderContent(true)}</aside>
     {isMobileOpen && <div className="akk-clean-mobile-layer lg:hidden" role="dialog" aria-modal="true" aria-label="Menu AKK">

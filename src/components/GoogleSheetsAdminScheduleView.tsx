@@ -302,13 +302,9 @@ const CrewCustomSelectDropdown: React.FC<{
 
   return (
     <div ref={containerRef} className="relative">
-      <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between mb-1.5">
+      <label className="text-xs font-bold text-[#334155] dark:text-[#CBD5E1] flex items-center justify-between mb-1.5">
         <span>{label}</span>
-        <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
-          accentColor === 'blue'
-            ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20'
-            : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-        }`}>
+        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA] border border-[#BFDBFE] dark:border-[#1E40AF]">
           {options.length} Aktif
         </span>
       </label>
@@ -319,41 +315,39 @@ const CrewCustomSelectDropdown: React.FC<{
           setIsOpen(prev => !prev);
           setSearch('');
         }}
-        className={`w-full flex items-center justify-between gap-2.5 bg-slate-50 dark:bg-slate-950 border rounded-xl px-3 py-2 text-left transition cursor-pointer ${
+        className={`w-full flex items-center justify-between gap-2.5 bg-[#F8FAFC] dark:bg-[#0F172A] border rounded-xl px-3 py-2 text-left transition cursor-pointer ${
           isOpen
-            ? 'border-emerald-500 ring-2 ring-emerald-500/20'
-            : 'border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600'
+            ? 'border-[#2563EB] ring-2 ring-[#2563EB]/15'
+            : 'border-[#CBD5E1] dark:border-[#334155] hover:border-[#2563EB]/60'
         }`}
       >
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-extrabold text-[11px] shrink-0 border ${
+          <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-[11px] shrink-0 border ${
             isNoneSelected
-              ? 'bg-slate-200 dark:bg-slate-800 text-slate-500 border-slate-300 dark:border-slate-700'
-              : accentColor === 'blue'
-              ? 'bg-blue-600 text-white border-blue-500 shadow-2xs'
-              : 'bg-emerald-600 text-white border-emerald-500 shadow-2xs'
+              ? 'bg-[#E2E8F0] dark:bg-[#1E293B] text-[#64748B] border-[#CBD5E1] dark:border-[#334155]'
+              : 'bg-[#2563EB] text-white border-[#2563EB]'
           }`}>
             {isNoneSelected ? '—' : getDriverInitials(displayValue)}
           </div>
           <div className="min-w-0">
             <div className={`text-xs font-bold leading-tight truncate ${
-              isNoneSelected ? 'text-slate-400 dark:text-slate-500 italic' : 'text-slate-900 dark:text-white'
+              isNoneSelected ? 'text-[#94A3B8] dark:text-[#64748B] italic' : 'text-[#0F172A] dark:text-[#F1F5F9]'
             }`}>
               {displayValue}
             </div>
-            <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium leading-tight mt-0.5">
+            <div className="text-[10px] text-[#64748B] dark:text-[#94A3B8] font-medium leading-tight mt-0.5">
               {isNoneSelected ? 'Tidak ditugaskan' : `${roleBadgeText} • Status Aktif`}
             </div>
           </div>
         </div>
-        <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-180 text-emerald-500' : ''}`} />
+        <ChevronDown className={`w-4 h-4 text-[#64748B] shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-180 text-[#2563EB]' : ''}`} />
       </button>
 
       {isOpen && (
-        <div className="absolute left-0 right-0 z-50 mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-          <div className="p-2 bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800">
+        <div className="absolute left-0 right-0 z-50 mt-1.5 bg-white dark:bg-[#162234] border border-[#CBD5E1] dark:border-[#334155] rounded-xl shadow-sm overflow-hidden animate-in fade-in duration-150">
+          <div className="p-2 bg-[#F8FAFC] dark:bg-[#0F172A] border-b border-[#E2E8F0] dark:border-[#24344D]">
             <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <Search className="w-3.5 h-3.5 text-[#64748B] absolute left-2.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={search}
@@ -366,7 +360,7 @@ const CrewCustomSelectDropdown: React.FC<{
                 }}
                 placeholder={`Cari nama ${roleBadgeText.toLowerCase()}... (Tekan Enter untuk memilih)`}
                 autoFocus
-                className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500"
+                className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-white dark:bg-[#162234] border border-[#CBD5E1] dark:border-[#334155] text-xs text-[#0F172A] dark:text-[#F1F5F9] placeholder-[#94A3B8] focus:outline-none focus:border-[#2563EB]"
               />
             </div>
           </div>
@@ -381,17 +375,17 @@ const CrewCustomSelectDropdown: React.FC<{
                 }}
                 className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg text-left text-xs transition cursor-pointer ${
                   isNoneSelected
-                    ? 'bg-slate-200/70 dark:bg-slate-800 text-slate-900 dark:text-white font-bold'
-                    : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                    ? 'bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA] font-bold'
+                    : 'text-[#64748B] dark:text-[#94A3B8] hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B]'
                 }`}
               >
                 <span className="italic">{emptyLabel}</span>
-                {isNoneSelected && <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />}
+                {isNoneSelected && <Check className="w-3.5 h-3.5 text-[#2563EB] shrink-0" />}
               </button>
             )}
 
             {filteredOptions.length === 0 ? (
-              <div className="py-5 text-center text-[11px] text-slate-400">
+              <div className="py-5 text-center text-[11px] text-[#64748B]">
                 Tidak ada kru aktif yang cocok dengan pencarian.
               </div>
             ) : (
@@ -413,40 +407,36 @@ const CrewCustomSelectDropdown: React.FC<{
                     }}
                     className={`w-full flex items-center justify-between gap-2.5 px-2.5 py-2 rounded-lg text-left transition cursor-pointer ${
                       isAlreadyScheduled
-                        ? 'opacity-50 cursor-not-allowed bg-slate-100 dark:bg-slate-950/40 text-slate-400'
+                        ? 'opacity-50 cursor-not-allowed bg-[#F8FAFC] dark:bg-[#0F172A] text-[#94A3B8]'
                         : isSelected
-                        ? accentColor === 'blue'
-                          ? 'bg-blue-600 text-white shadow-2xs'
-                          : 'bg-emerald-600 text-white shadow-2xs'
-                        : 'hover:bg-slate-100 dark:hover:bg-slate-800/70 text-slate-800 dark:text-slate-200'
+                        ? 'bg-[#2563EB] text-white'
+                        : 'hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B] text-[#0F172A] dark:text-[#F1F5F9]'
                     }`}
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-extrabold text-[10px] shrink-0 border ${
+                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-[10px] shrink-0 border ${
                         isSelected
                           ? 'bg-white/20 text-white border-white/30'
                           : isAlreadyScheduled
-                          ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
-                          : accentColor === 'blue'
-                          ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30'
-                          : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                          ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-600 border-amber-200 dark:border-amber-800'
+                          : 'bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA] border-[#BFDBFE] dark:border-[#1E40AF]'
                       }`}>
                         {getDriverInitials(item.name)}
                       </div>
                       <div className="min-w-0">
-                        <div className={`text-xs font-bold leading-snug ${isSelected ? 'text-white' : isAlreadyScheduled ? 'text-slate-400 dark:text-slate-500' : 'text-slate-900 dark:text-white'}`}>
+                        <div className={`text-xs font-bold leading-snug ${isSelected ? 'text-white' : isAlreadyScheduled ? 'text-[#94A3B8]' : 'text-[#0F172A] dark:text-[#F1F5F9]'}`}>
                           {item.name}
                         </div>
-                        <div className={`text-[10px] flex items-center gap-1.5 ${isSelected ? 'text-white/85' : 'text-slate-500 dark:text-slate-400'}`}>
+                        <div className={`text-[10px] flex items-center gap-1.5 ${isSelected ? 'text-white/85' : 'text-[#64748B] dark:text-[#94A3B8]'}`}>
                           <span>{roleBadgeText}</span>
                           <span>•</span>
                           {isAlreadyScheduled ? (
                             <span className="text-amber-600 dark:text-amber-400 font-bold">
-                              ⚠️ Sudah Terjadwal ({scheduledInfo?.area})
+                              Sudah Terjadwal ({scheduledInfo?.area})
                             </span>
                           ) : (
-                            <span className={isSelected ? 'text-white font-semibold' : 'text-emerald-600 dark:text-emerald-400 font-semibold'}>
-                              ● Siap Tugas
+                            <span className={isSelected ? 'text-white font-semibold' : 'text-[#2563EB] dark:text-[#60A5FA] font-semibold'}>
+                              Siap Tugas
                             </span>
                           )}
                         </div>
@@ -454,7 +444,7 @@ const CrewCustomSelectDropdown: React.FC<{
                     </div>
                     {isSelected && <Check className="w-4 h-4 text-white shrink-0" />}
                     {isAlreadyScheduled && (
-                      <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/25 shrink-0">
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800 shrink-0">
                         Terjadwal
                       </span>
                     )}
@@ -1196,16 +1186,12 @@ const ModernDatePicker: React.FC<{
     <div ref={containerRef} className="relative">
       {label && (
         <div className="h-[24px] flex items-center justify-between mb-1.5">
-          <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-            <Calendar className={`w-3.5 h-3.5 ${accentColor === 'blue' ? 'text-blue-500' : 'text-emerald-600 dark:text-emerald-400'}`} />
+          <label className="text-xs font-bold text-[#334155] dark:text-[#CBD5E1] flex items-center gap-1.5">
+            <Calendar className="w-3.5 h-3.5 text-[#2563EB] dark:text-[#60A5FA]" />
             <span>{label}</span>
           </label>
           {badgeText && (
-            <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
-              accentColor === 'blue'
-                ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-500/20'
-                : 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/20'
-            }`}>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA] border border-[#BFDBFE] dark:border-[#1E40AF]">
               {badgeText}
             </span>
           )}
@@ -1233,28 +1219,27 @@ const ModernDatePicker: React.FC<{
             setIsOpen(false);
           }
         }}
-        className={`h-[44px] w-full flex items-center justify-between gap-2 bg-white dark:bg-slate-950 border rounded-2xl px-4 py-2.5 text-left transition cursor-pointer ${
+        className={`h-[44px] w-full flex items-center justify-between gap-2 bg-white dark:bg-[#0F172A] border rounded-xl px-4 py-2.5 text-left transition cursor-pointer ${
           isOpen
-            ? accentColor === 'blue' ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-emerald-500 ring-2 ring-emerald-500/20'
-            : 'border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600'
+            ? 'border-[#2563EB] ring-2 ring-[#2563EB]/15'
+            : 'border-[#CBD5E1] dark:border-[#334155] hover:border-[#2563EB]/60'
         }`}
       >
-        <span className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
+        <span className="text-xs font-bold text-[#0F172A] dark:text-[#F1F5F9] truncate">
           {formattedDisplay}
         </span>
-        <Calendar className="w-4 h-4 text-slate-700 dark:text-slate-300 shrink-0" />
+        <Calendar className="w-4 h-4 text-[#2563EB] dark:text-[#60A5FA] shrink-0" />
       </button>
 
-      {/* Quick Date Pills Below Input (Matching Image 5) */}
       {showQuickPills && (
         <div className="mt-2 flex items-center gap-1.5">
           <button
             type="button"
             onClick={() => onChange(todayIso)}
-            className={`h-[32px] px-3 rounded-xl border text-[11px] font-bold transition cursor-pointer ${
+            className={`h-[32px] px-3 rounded-lg border text-[11px] font-bold transition cursor-pointer ${
               value === todayIso
-                ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30'
-                : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800'
+                ? 'bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA] border-[#BFDBFE] dark:border-[#1E40AF]'
+                : 'bg-[#F8FAFC] dark:bg-[#0F172A] text-[#475569] dark:text-[#CBD5E1] border-[#E2E8F0] dark:border-[#24344D] hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B]'
             }`}
           >
             Hari Ini
@@ -1262,10 +1247,10 @@ const ModernDatePicker: React.FC<{
           <button
             type="button"
             onClick={() => onChange(tomorrowIso)}
-            className={`h-[32px] px-3 rounded-xl border text-[11px] font-bold transition cursor-pointer ${
+            className={`h-[32px] px-3 rounded-lg border text-[11px] font-bold transition cursor-pointer ${
               value === tomorrowIso
-                ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30'
-                : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800'
+                ? 'bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA] border-[#BFDBFE] dark:border-[#1E40AF]'
+                : 'bg-[#F8FAFC] dark:bg-[#0F172A] text-[#475569] dark:text-[#CBD5E1] border-[#E2E8F0] dark:border-[#24344D] hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B]'
             }`}
           >
             Besok (+1)
@@ -1273,10 +1258,10 @@ const ModernDatePicker: React.FC<{
           <button
             type="button"
             onClick={() => onChange(lusaIso)}
-            className={`h-[32px] px-3 rounded-xl border text-[11px] font-bold transition cursor-pointer ${
+            className={`h-[32px] px-3 rounded-lg border text-[11px] font-bold transition cursor-pointer ${
               value === lusaIso
-                ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30'
-                : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800'
+                ? 'bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA] border-[#BFDBFE] dark:border-[#1E40AF]'
+                : 'bg-[#F8FAFC] dark:bg-[#0F172A] text-[#475569] dark:text-[#CBD5E1] border-[#E2E8F0] dark:border-[#24344D] hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B]'
             }`}
           >
             Lusa (+2)
@@ -1285,25 +1270,25 @@ const ModernDatePicker: React.FC<{
       )}
 
       {isOpen && (
-        <div className="absolute left-0 z-50 mt-1.5 w-72 sm:w-80 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl p-3.5 space-y-3 animate-in fade-in zoom-in-95 duration-150">
-          <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-800">
+        <div className="absolute left-0 z-50 mt-1.5 w-72 sm:w-80 bg-white dark:bg-[#162234] border border-[#CBD5E1] dark:border-[#334155] rounded-xl shadow-sm p-3.5 space-y-3 animate-in fade-in duration-150">
+          <div className="flex items-center justify-between gap-2 pb-2 border-b border-[#E2E8F0] dark:border-[#24344D]">
             <button
               type="button"
               onClick={handlePrevMonth}
-              className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition cursor-pointer"
+              className="p-1.5 rounded-lg bg-[#F1F5F9] dark:bg-[#1E293B] hover:bg-[#E2E8F0] dark:hover:bg-[#24344D] text-[#334155] dark:text-[#CBD5E1] transition cursor-pointer"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
 
-            <div className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1">
+            <div className="text-xs font-bold text-[#0F172A] dark:text-[#F1F5F9] flex items-center gap-1">
               <span>{monthNames[viewMonth]}</span>
-              <span className="text-slate-400 font-mono">{viewYear}</span>
+              <span className="text-[#64748B] font-mono">{viewYear}</span>
             </div>
 
             <button
               type="button"
               onClick={handleNextMonth}
-              className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition cursor-pointer"
+              className="p-1.5 rounded-lg bg-[#F1F5F9] dark:bg-[#1E293B] hover:bg-[#E2E8F0] dark:hover:bg-[#24344D] text-[#334155] dark:text-[#CBD5E1] transition cursor-pointer"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -1313,8 +1298,8 @@ const ModernDatePicker: React.FC<{
             {dayNames.map((day, idx) => (
               <span
                 key={day}
-                className={`text-[10px] font-black uppercase ${
-                  idx === 0 ? 'text-rose-500' : 'text-slate-400 dark:text-slate-500'
+                className={`text-[10px] font-bold uppercase ${
+                  idx === 0 ? 'text-rose-500' : 'text-[#64748B] dark:text-[#94A3B8]'
                 }`}
               >
                 {day}
@@ -1336,28 +1321,26 @@ const ModernDatePicker: React.FC<{
                     onChange(item.iso);
                     setIsOpen(false);
                   }}
-                  className={`h-8 rounded-xl font-mono text-xs font-bold transition flex items-center justify-center relative cursor-pointer ${
+                  className={`h-8 rounded-lg font-mono text-xs font-bold transition flex items-center justify-center relative cursor-pointer ${
                     isSelected
-                      ? accentColor === 'blue'
-                        ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30'
-                        : 'bg-emerald-600 text-white shadow-md shadow-emerald-500/30'
+                      ? 'bg-[#2563EB] text-white'
                       : !isCurrentMonth
-                      ? 'text-slate-300 dark:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800/40'
+                      ? 'text-[#CBD5E1] dark:text-[#334155] hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B]'
                       : isToday
-                      ? 'bg-slate-100 dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 font-black border border-emerald-500/40'
-                      : 'text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      ? 'bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA] font-bold border border-[#BFDBFE] dark:border-[#1E40AF]'
+                      : 'text-[#0F172A] dark:text-[#F1F5F9] hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B]'
                   }`}
                 >
                   {item.day}
                   {isToday && !isSelected && (
-                    <span className="w-1 h-1 rounded-full bg-emerald-500 absolute bottom-1" />
+                    <span className="w-1 h-1 rounded-full bg-[#2563EB] absolute bottom-1" />
                   )}
                 </button>
               );
             })}
           </div>
 
-          <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-[10px]">
+          <div className="pt-2 border-t border-[#E2E8F0] dark:border-[#24344D] flex items-center justify-between text-[10px]">
             <div className="flex items-center gap-1">
               <button
                 type="button"
@@ -1365,7 +1348,7 @@ const ModernDatePicker: React.FC<{
                   onChange(todayIso);
                   setIsOpen(false);
                 }}
-                className="px-2 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold transition cursor-pointer"
+                className="px-2 py-1 rounded-lg bg-[#EFF6FF] hover:bg-[#DBEAFE] text-[#2563EB] dark:bg-[#1E3A8A]/40 dark:text-[#60A5FA] font-bold transition cursor-pointer"
               >
                 Hari Ini
               </button>
@@ -1375,7 +1358,7 @@ const ModernDatePicker: React.FC<{
                   onChange(tomorrowIso);
                   setIsOpen(false);
                 }}
-                className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold transition cursor-pointer"
+                className="px-2 py-1 rounded-lg bg-[#F1F5F9] dark:bg-[#1E293B] hover:bg-[#E2E8F0] text-[#334155] dark:text-[#CBD5E1] font-bold transition cursor-pointer"
               >
                 Besok (+1)
               </button>
@@ -1383,7 +1366,7 @@ const ModernDatePicker: React.FC<{
             <button
               type="button"
               onClick={() => setIsOpen(false)}
-              className="text-slate-400 hover:text-slate-600 dark:hover:text-white font-bold cursor-pointer"
+              className="text-[#64748B] hover:text-[#0F172A] dark:hover:text-white font-bold cursor-pointer"
             >
               Tutup
             </button>
@@ -1462,8 +1445,8 @@ const ModernTimePicker: React.FC<{
   return (
     <div ref={containerRef} className="relative">
       {label && (
-        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-1.5">
-          <Clock className={`w-3.5 h-3.5 ${accentColor === 'blue' ? 'text-blue-500' : 'text-emerald-500'}`} />
+        <label className="text-xs font-bold text-[#334155] dark:text-[#CBD5E1] flex items-center gap-1.5 mb-1.5">
+          <Clock className="w-3.5 h-3.5 text-[#2563EB] dark:text-[#60A5FA]" />
           <span>{label}</span>
         </label>
       )}
@@ -1471,29 +1454,27 @@ const ModernTimePicker: React.FC<{
       <button
         type="button"
         onClick={() => setIsOpen(prev => !prev)}
-        className={`w-full flex items-center justify-between gap-2 bg-slate-50 dark:bg-slate-950 border rounded-xl px-3.5 py-2.5 text-left transition cursor-pointer ${
+        className={`w-full flex items-center justify-between gap-2 bg-white dark:bg-[#0F172A] border rounded-xl px-3.5 py-2.5 text-left transition cursor-pointer ${
           isOpen
-            ? accentColor === 'blue' ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-emerald-500 ring-2 ring-emerald-500/20'
-            : 'border-slate-300 dark:border-slate-700 hover:border-slate-400 dark:hover:border-slate-600'
+            ? 'border-[#2563EB] ring-2 ring-[#2563EB]/15'
+            : 'border-[#CBD5E1] dark:border-[#334155] hover:border-[#2563EB]/60'
         }`}
       >
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
-            accentColor === 'blue' ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400' : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-          }`}>
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA]">
             <Clock className="w-4 h-4" />
           </div>
-          <span className="text-xs font-mono font-black text-slate-900 dark:text-white tracking-wider">
+          <span className="text-xs font-mono font-bold text-[#0F172A] dark:text-[#F1F5F9] tracking-wider">
             {displayTime} WIB
           </span>
         </div>
-        <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-180' : ''}`} />
+        <ChevronDown className={`w-4 h-4 text-[#64748B] shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-180 text-[#2563EB]' : ''}`} />
       </button>
 
       {isOpen && (
-        <div className="absolute left-0 z-50 mt-1.5 w-72 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl p-3 space-y-3 animate-in fade-in zoom-in-95 duration-150">
+        <div className="absolute left-0 z-50 mt-1.5 w-72 bg-white dark:bg-[#162234] border border-[#CBD5E1] dark:border-[#334155] rounded-xl shadow-sm p-3 space-y-3 animate-in fade-in duration-150">
           <div>
-            <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-1.5">
+            <span className="text-[10px] font-bold uppercase text-[#64748B] tracking-wider block mb-1.5">
               Pilihan Jam Cepat:
             </span>
             <div className="flex flex-wrap gap-1">
@@ -1507,8 +1488,8 @@ const ModernTimePicker: React.FC<{
                   }}
                   className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold transition cursor-pointer border ${
                     value === t
-                      ? accentColor === 'blue' ? 'bg-blue-600 text-white border-blue-500 shadow-2xs' : 'bg-emerald-600 text-white border-emerald-500 shadow-2xs'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-200'
+                      ? 'bg-[#2563EB] text-white border-[#2563EB]'
+                      : 'bg-[#F8FAFC] dark:bg-[#0F172A] text-[#334155] dark:text-[#CBD5E1] border-[#E2E8F0] dark:border-[#24344D] hover:bg-[#EFF6FF] hover:text-[#2563EB]'
                   }`}
                 >
                   {t}
@@ -1517,9 +1498,9 @@ const ModernTimePicker: React.FC<{
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[#E2E8F0] dark:border-[#24344D]">
             <div>
-              <span className="text-[10px] font-bold text-slate-500 block mb-1">Jam</span>
+              <span className="text-[10px] font-bold text-[#64748B] block mb-1">Jam</span>
               <div className="h-36 overflow-y-auto pr-1 space-y-1">
                 {hours.map(h => (
                   <button
@@ -1528,8 +1509,8 @@ const ModernTimePicker: React.FC<{
                     onClick={() => handleSelectHour(h)}
                     className={`w-full py-1 text-center font-mono text-xs font-bold rounded-lg transition cursor-pointer ${
                       selectedHour === h
-                        ? accentColor === 'blue' ? 'bg-blue-600 text-white shadow-2xs' : 'bg-emerald-600 text-white shadow-2xs'
-                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        ? 'bg-[#2563EB] text-white'
+                        : 'text-[#334155] dark:text-[#CBD5E1] hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B]'
                     }`}
                   >
                     {h}
@@ -1539,7 +1520,7 @@ const ModernTimePicker: React.FC<{
             </div>
 
             <div>
-              <span className="text-[10px] font-bold text-slate-500 block mb-1">Menit</span>
+              <span className="text-[10px] font-bold text-[#64748B] block mb-1">Menit</span>
               <div className="h-36 overflow-y-auto pr-1 space-y-1">
                 {minutes.map(m => (
                   <button
@@ -1548,8 +1529,8 @@ const ModernTimePicker: React.FC<{
                     onClick={() => handleSelectMinute(m)}
                     className={`w-full py-1 text-center font-mono text-xs font-bold rounded-lg transition cursor-pointer ${
                       selectedMinute === m
-                        ? accentColor === 'blue' ? 'bg-blue-600 text-white shadow-2xs' : 'bg-emerald-600 text-white shadow-2xs'
-                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        ? 'bg-[#2563EB] text-white'
+                        : 'text-[#334155] dark:text-[#CBD5E1] hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B]'
                     }`}
                   >
                     {m}
@@ -1559,16 +1540,14 @@ const ModernTimePicker: React.FC<{
             </div>
           </div>
 
-          <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
-            <span className="text-[10px] font-mono text-slate-500 font-semibold">
-              Terpilih: <strong className={`font-black ${accentColor === 'blue' ? 'text-blue-600 dark:text-blue-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{displayTime} WIB</strong>
+          <div className="pt-2 border-t border-[#E2E8F0] dark:border-[#24344D] flex items-center justify-between">
+            <span className="text-[10px] font-mono text-[#64748B] font-semibold">
+              Terpilih: <strong className="font-bold text-[#2563EB] dark:text-[#60A5FA]">{displayTime} WIB</strong>
             </span>
             <button
               type="button"
               onClick={() => setIsOpen(false)}
-              className={`px-3 py-1 rounded-lg text-white text-[10px] font-bold cursor-pointer transition shadow-2xs ${
-                accentColor === 'blue' ? 'bg-blue-600 hover:bg-blue-500' : 'bg-emerald-600 hover:bg-emerald-500'
-              }`}
+              className="px-3 py-1 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-[10px] font-bold cursor-pointer transition"
             >
               Simpan
             </button>
@@ -4877,29 +4856,29 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   };
 
   return (
-    <div className="space-y-3.5">
+    <div className="akk-flat-schedule space-y-6">
       {activeSubPage === 'schedule' ? (
         <>
-      {/* 1. Header Card: Compact & Dense */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 shadow-md relative overflow-hidden">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 relative z-10">
-          <div>
-            <h2 className="text-base sm:text-lg font-black text-white tracking-tight flex items-center gap-2">
+      {/* 1. Header Halaman (Bagian Atas): Flat Modern Clean Blue & White */}
+      <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-2xl p-5 sm:p-6">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <h2 className="text-xl font-bold text-slate-900 dark:text-slate-50 tracking-tight">
               Jadwal Pengiriman &amp; Penugasan Armada
             </h2>
-            <p className="text-[11px] text-slate-400 mt-0.5 max-w-2xl">
+            <p className="text-sm text-slate-500 dark:text-slate-400 max-w-2xl leading-relaxed">
               Tabel jadwal pengiriman armada, penugasan kru supir &amp; helper, jadwal Kanvas LKT, serta alokasi area distribusi terintegrasi.
             </p>
           </div>
 
-          {/* Simplified Header Actions */}
-          <div className="flex items-center gap-1.5 flex-wrap">
+          {/* Simplified Flat Action Bar */}
+          <div className="flex items-center gap-2.5 flex-wrap">
             {canEditSchedules && (
-              <input 
-                type="file" 
+              <input
+                type="file"
                 ref={fileInputRef}
-                accept=".xlsx,.xls,.csv" 
-                className="hidden" 
+                accept=".xlsx,.xls,.csv"
+                className="hidden"
                 onChange={handleFileUpload}
               />
             )}
@@ -4932,11 +4911,27 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     });
                     setIsUploadConfigModalOpen(true);
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black border border-emerald-400/40 shadow-xs transition cursor-pointer"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
                   title="Pop-up Form Tambah Jadwal Baru (Manual)"
                 >
-                  <Plus className="w-3.5 h-3.5" />
+                  <Plus className="w-4 h-4" />
                   <span>Tambah Jadwal Manual</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.dispatchEvent(
+                      new CustomEvent('akk-open-create-shipment', {
+                        detail: { branchId: effectiveActiveBranchId }
+                      })
+                    );
+                  }}
+                  className="inline-flex items-center justify-center gap-2 min-h-[42px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 border border-blue-700 text-white text-[13.5px] font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  title="Buat Kiriman Baru"
+                >
+                  <Plus className="w-[18px] h-[18px]" strokeWidth={2.5} />
+                  <span>Buat Kiriman</span>
                 </button>
 
                 <button
@@ -4946,10 +4941,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     setImportYear(String(selectedYear));
                     setActiveSubPage('upload_excel');
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-black border border-blue-400/40 shadow-xs transition cursor-pointer"
+                  className="inline-flex items-center justify-center gap-2 min-h-[42px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 border border-blue-700 text-white text-[13.5px] font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
                   title="Halaman Unggah File Jadwal Excel (.xls, .xlsx, .csv)"
                 >
-                  <Upload className="w-3.5 h-3.5" />
+                  <Upload className="w-[18px] h-[18px]" strokeWidth={2.25} />
                   <span>Unggah File Excel</span>
                 </button>
 
@@ -4958,10 +4953,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     setActiveMappingCategory('area');
                     setIsAreaMappingModalOpen(true);
                   }}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer relative"
+                  className="inline-flex items-center justify-center gap-2 min-h-[42px] px-4 py-2 rounded-xl bg-white dark:bg-[#1E293B] hover:bg-blue-50 dark:hover:bg-[#1E3A5F] text-slate-700 dark:text-slate-200 text-[13.5px] font-semibold border border-slate-200 dark:border-[#334155] hover:border-blue-300 transition-colors cursor-pointer whitespace-nowrap shrink-0"
                   title="Pemetaan Area Kirim"
                 >
-                  <MapPin className="w-3.5 h-3.5 text-rose-400" />
+                  <MapPin className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                   <span>Area ({Object.keys(detectedAreaMappings).length})</span>
                 </button>
 
@@ -4970,29 +4965,29 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     setActiveMappingCategory('crew');
                     setIsAreaMappingModalOpen(true);
                   }}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer relative"
+                  className="inline-flex items-center justify-center gap-2 min-h-[42px] px-4 py-2 rounded-xl bg-white dark:bg-[#1E293B] hover:bg-blue-50 dark:hover:bg-[#1E3A5F] text-slate-700 dark:text-slate-200 text-[13.5px] font-semibold border border-slate-200 dark:border-[#334155] hover:border-blue-300 transition-colors cursor-pointer whitespace-nowrap shrink-0"
                   title="Pemetaan Kru (Driver & Helper)"
                 >
-                  <Users className="w-3.5 h-3.5 text-blue-400" />
+                  <Users className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                   <span>Kru ({Object.keys(detectedCrewMappings).length})</span>
                 </button>
               </>
             ) : (
               <span
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/30 text-xs font-bold"
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-blue-50 dark:bg-[#1E3A5F] text-blue-700 dark:text-blue-300 text-xs font-semibold"
                 title="Akun Anda diatur Hanya Lihat (Read Only) pada menu Jadwal & Penugasan Armada"
               >
-                <Eye className="w-3.5 h-3.5 text-amber-400" />
-                <span>Mode Hanya Lihat (Read Only)</span>
+                <Eye className="w-4 h-4" />
+                <span>Mode Hanya Lihat</span>
               </span>
             )}
 
             <button
               onClick={handleExportXLSX}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer"
+              className="inline-flex items-center justify-center gap-2 min-h-[42px] px-4 py-2 rounded-xl bg-white dark:bg-[#1E293B] hover:bg-blue-50 dark:hover:bg-[#1E3A5F] text-slate-700 dark:text-slate-200 text-[13.5px] font-semibold border border-slate-200 dark:border-[#334155] hover:border-blue-300 transition-colors cursor-pointer whitespace-nowrap shrink-0"
               title="Ekspor ke Excel (.xlsx)"
             >
-              <Download className="w-3.5 h-3.5 text-blue-400" />
+              <Download className="w-4 h-4 text-blue-600 dark:text-blue-400" />
               <span>Ekspor</span>
             </button>
           </div>
@@ -5000,79 +4995,78 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
         {/* Sync Success Banner */}
         {syncSuccessMessage && (
-          <div className="mt-3 p-2.5 rounded-lg bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span className="font-semibold">{syncSuccessMessage}</span>
-            </div>
+          <div className="mt-4 p-3 rounded-xl bg-blue-50 dark:bg-[#1E3A5F] border border-blue-200 dark:border-blue-500/40 text-blue-800 dark:text-blue-100 text-xs flex items-center gap-2.5">
+            <CheckCircle2 className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+            <span className="font-semibold">{syncSuccessMessage}</span>
           </div>
         )}
+      </div>
 
-        {/* 1. Keterangan Periode Selection Bar */}
-        <div className="mt-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-sm">
-              <Calendar className="w-4 h-4" />
-            </div>
-            <div>
-              <span className="text-[10px] uppercase font-black text-emerald-600 dark:text-emerald-400 tracking-wider block">
-                Keterangan Periode Jadwal Pengiriman
-              </span>
-              <h4 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5 mt-0.5 flex-wrap">
-                <span>{selectedMonth === -1 ? `Semua Bulan ${selectedYear}` : `${MONTH_NAMES[selectedMonth]} ${selectedYear}`}</span>
-              </h4>
-            </div>
+      {/* 2. Baris Filter & Periode (Satu Kartu Putih Panjang) */}
+      <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-2xl p-4 sm:px-6 sm:py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-[#1E3A5F] text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+            <Calendar className="w-5 h-5" />
           </div>
-
-          {/* Custom Styled Month, Year & Cabang Dropdown Selectors */}
-          <div
-            ref={periodDropdownRef}
-            className="flex items-center gap-2 bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs text-xs font-semibold flex-wrap relative z-30"
-          >
-            <span className="text-slate-500 dark:text-slate-400 font-extrabold px-1.5 text-[11px] uppercase tracking-wider">
-              Periode:
+          <div>
+            <span className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 block">
+              Periode Jadwal Pengiriman
             </span>
+            <h4 className="text-base font-bold text-slate-900 dark:text-white mt-0.5">
+              {selectedMonth === -1 ? `Semua Bulan ${selectedYear}` : `${MONTH_NAMES[selectedMonth]} ${selectedYear}`}
+            </h4>
+          </div>
+        </div>
 
-            {/* Custom Month Dropdown */}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setOpenPeriodDropdown(prev => (prev === 'month' ? null : 'month'))}
-                className={`inline-flex items-center justify-between gap-2 min-w-[132px] px-3 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer whitespace-nowrap ${
-                  openPeriodDropdown === 'month'
-                    ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-500 text-emerald-700 dark:text-emerald-300 ring-2 ring-emerald-500/20'
-                    : 'bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-800/80 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white'
-                }`}
-              >
-                <span className="flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+        {/* Minimalist Light-Gray Filter Selectors */}
+        <div
+          ref={periodDropdownRef}
+          className="flex items-center gap-2.5 flex-wrap relative z-30"
+        >
+          <span className="text-slate-500 dark:text-slate-400 font-semibold text-xs mr-1">
+            Filter Periode:
+          </span>
+
+          {/* Month Dropdown */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setOpenPeriodDropdown(prev => (prev === 'month' ? null : 'month'))}
+              className={`inline-flex items-center justify-between gap-2.5 min-w-[140px] px-3.5 py-2 rounded-xl border text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                openPeriodDropdown === 'month'
+                  ? 'bg-blue-50 dark:bg-[#1E3A5F] border-blue-600 text-blue-700 dark:text-blue-300'
+                  : 'bg-slate-50 dark:bg-[#1E293B] hover:bg-slate-100 dark:hover:bg-[#273549] border-slate-200 dark:border-[#334155] text-slate-900 dark:text-white'
+              }`}
+            >
+                <span className="flex items-center gap-2">
+                  <Calendar className="w-3.5 h-3.5 text-[#2563EB] dark:text-[#60A5FA] shrink-0" />
                   <span>{selectedMonth === -1 ? 'Semua Bulan' : MONTH_NAMES[selectedMonth]}</span>
                 </span>
                 <ChevronDown
-                  className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
-                    openPeriodDropdown === 'month' ? 'rotate-180 text-emerald-500' : ''
+                  className={`w-3.5 h-3.5 text-[#64748B] transition-transform duration-150 ${
+                    openPeriodDropdown === 'month' ? 'rotate-180 text-[#2563EB]' : ''
                   }`}
                 />
               </button>
 
               {openPeriodDropdown === 'month' && (
-                <div className="absolute left-0 mt-1.5 w-48 max-h-72 overflow-y-auto rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl p-1.5 z-50 space-y-0.5">
+                <div className="absolute left-0 mt-1.5 w-48 max-h-72 overflow-y-auto rounded-[10px] bg-white dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] shadow-md p-1.5 z-50 space-y-0.5">
                   <button
                     type="button"
                     onClick={() => {
                       setSelectedMonth(-1);
                       setOpenPeriodDropdown(null);
                     }}
-                    className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
                       selectedMonth === -1
-                        ? 'bg-emerald-500 text-slate-950 shadow-2xs'
-                        : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        ? 'bg-[#2563EB] text-white'
+                        : 'text-[#334155] dark:text-[#E2E8F0] hover:bg-[#EFF6FF] dark:hover:bg-[#1E3A5F]'
                     }`}
                   >
                     <span>Semua Bulan</span>
                     {selectedMonth === -1 && <Check className="w-3.5 h-3.5 shrink-0" />}
                   </button>
-                  <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+                  <div className="my-1 border-t border-[#E2E8F0] dark:border-[#334155]" />
                   {MONTH_NAMES.map((m, idx) => {
                     const isAct = selectedMonth === idx;
                     return (
@@ -5083,10 +5077,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                           setSelectedMonth(idx);
                           setOpenPeriodDropdown(null);
                         }}
-                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                        className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
                           isAct
-                            ? 'bg-emerald-500 text-slate-950 font-bold shadow-2xs'
-                            : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            ? 'bg-[#2563EB] text-white font-semibold'
+                            : 'text-[#334155] dark:text-[#E2E8F0] hover:bg-[#EFF6FF] dark:hover:bg-[#1E3A5F]'
                         }`}
                       >
                         <span>{m}</span>
@@ -5098,27 +5092,27 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               )}
             </div>
 
-            {/* Custom Year Dropdown */}
+            {/* Year Dropdown */}
             <div className="relative">
               <button
                 type="button"
                 onClick={() => setOpenPeriodDropdown(prev => (prev === 'year' ? null : 'year'))}
-                className={`inline-flex items-center justify-between gap-2 min-w-[86px] px-3 py-1.5 rounded-lg border text-xs font-bold tabular-nums transition cursor-pointer whitespace-nowrap ${
+                className={`inline-flex items-center justify-between gap-2 min-w-[92px] px-3.5 py-2 rounded-xl border text-xs font-semibold tabular-nums transition-colors cursor-pointer whitespace-nowrap ${
                   openPeriodDropdown === 'year'
-                    ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-500 text-emerald-700 dark:text-emerald-300 ring-2 ring-emerald-500/20'
-                    : 'bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-800/80 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white'
+                    ? 'bg-blue-50 dark:bg-[#1E3A5F] border-blue-600 text-blue-700 dark:text-blue-300'
+                    : 'bg-slate-50 dark:bg-[#1E293B] hover:bg-slate-100 dark:hover:bg-[#273549] border-slate-200 dark:border-[#334155] text-slate-900 dark:text-white'
                 }`}
               >
                 <span>{selectedYear}</span>
                 <ChevronDown
-                  className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
-                    openPeriodDropdown === 'year' ? 'rotate-180 text-emerald-500' : ''
+                  className={`w-3.5 h-3.5 text-[#64748B] transition-transform duration-150 ${
+                    openPeriodDropdown === 'year' ? 'rotate-180 text-[#2563EB]' : ''
                   }`}
                 />
               </button>
 
               {openPeriodDropdown === 'year' && (
-                <div className="absolute left-0 mt-1.5 w-32 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl p-1.5 z-50 space-y-0.5">
+                <div className="absolute left-0 mt-1.5 w-32 rounded-xl bg-white dark:bg-[#1E293B] border border-slate-200 dark:border-[#334155] shadow-sm p-1.5 z-50 space-y-0.5">
                   {[2024, 2025, 2026, 2027, 2028].map(yr => {
                     const isAct = selectedYear === yr;
                     return (
@@ -5129,10 +5123,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                           setSelectedYear(yr);
                           setOpenPeriodDropdown(null);
                         }}
-                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-bold tabular-nums transition cursor-pointer ${
+                        className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-semibold tabular-nums transition-colors cursor-pointer ${
                           isAct
-                            ? 'bg-emerald-500 text-slate-950 shadow-2xs'
-                            : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            ? 'bg-blue-600 text-white'
+                            : 'text-slate-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-[#1E3A5F]'
                         }`}
                       >
                         <span>{yr}</span>
@@ -5144,18 +5138,18 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               )}
             </div>
 
-            {/* Custom Cabang Dropdown (Terpisah Tegas: Nusantara vs Sidoarjo) */}
-            <div className="relative pl-2 border-l border-slate-200 dark:border-slate-800">
+            {/* Cabang Dropdown */}
+            <div className="relative">
               <button
                 type="button"
                 onClick={() => setOpenPeriodDropdown(prev => (prev === 'branch' ? null : 'branch'))}
-                className={`inline-flex items-center justify-between gap-2 min-w-[164px] px-3 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+                className={`inline-flex items-center justify-between gap-2.5 min-w-[168px] px-3.5 py-2 rounded-xl border text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                   openPeriodDropdown === 'branch'
-                    ? 'bg-blue-50 dark:bg-blue-950/50 border-blue-500 text-blue-700 dark:text-blue-300 ring-2 ring-blue-500/20'
-                    : 'bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-800/80 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white'
+                    ? 'bg-blue-50 dark:bg-[#1E3A5F] border-blue-600 text-blue-700 dark:text-blue-300'
+                    : 'bg-slate-50 dark:bg-[#1E293B] hover:bg-slate-100 dark:hover:bg-[#273549] border-slate-200 dark:border-[#334155] text-slate-900 dark:text-white'
                 }`}
               >
-                <span className="flex items-center gap-1.5">
+                <span className="flex items-center gap-2">
                   <Building2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
                   <span>
                     Cabang {activeBranchRecord?.name || 'Nusantara'}
@@ -5163,16 +5157,16 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 </span>
                 {accessibleBranches.length > 1 && (
                   <ChevronDown
-                    className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
-                      openPeriodDropdown === 'branch' ? 'rotate-180 text-blue-500' : ''
+                    className={`w-3.5 h-3.5 text-slate-500 transition-transform duration-150 ${
+                      openPeriodDropdown === 'branch' ? 'rotate-180 text-blue-600' : ''
                     }`}
                   />
                 )}
               </button>
 
               {openPeriodDropdown === 'branch' && accessibleBranches.length > 1 && (
-                <div className="absolute right-0 mt-1.5 w-52 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-xl p-1.5 z-50 space-y-0.5">
-                  <div className="px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                <div className="absolute right-0 mt-1.5 w-56 rounded-xl bg-white dark:bg-[#1E293B] border border-slate-200 dark:border-[#334155] shadow-sm p-1.5 z-50 space-y-0.5">
+                  <div className="px-2.5 py-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                     Pilih Cabang Operasional
                   </div>
                   {accessibleBranches.map(b => {
@@ -5186,14 +5180,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                           branchStore.setActiveBranchId(b.id);
                           setOpenPeriodDropdown(null);
                         }}
-                        className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
                           isAct
-                            ? 'bg-blue-600 text-white shadow-2xs'
-                            : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            ? 'bg-blue-600 text-white'
+                            : 'text-slate-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-[#1E3A5F]'
                         }`}
                       >
                         <span className="flex items-center gap-2">
-                          <Building2 className={`w-3.5 h-3.5 ${isAct ? 'text-white' : 'text-blue-500'}`} />
+                          <Building2 className={`w-3.5 h-3.5 ${isAct ? 'text-white' : 'text-blue-600'}`} />
                           <span>Cabang {b.name}</span>
                         </span>
                         {isAct && <Check className="w-3.5 h-3.5 shrink-0" />}
@@ -5204,117 +5198,126 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               )}
             </div>
           </div>
+      </div>
+
+      {/* 3. Baris Ringkasan Metrik (Grid 4 Kolom) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white dark:bg-[#162234] p-5 rounded-2xl border border-slate-200 dark:border-[#24344D] flex items-start justify-between gap-4">
+          <div>
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 block">Total Kiriman</span>
+            <div className="text-2xl font-bold text-slate-900 dark:text-white mt-2 leading-none tabular-nums">
+              {stats.totalTrips} <span className="text-xs font-medium text-slate-500 dark:text-slate-400 ml-0.5">Rute</span>
+            </div>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-[#1E3A5F] text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+            <Truck className="w-5 h-5" />
+          </div>
         </div>
 
-        {/* Aggregate KPI Chips - 4 Cards (Total Kiriman & Validasi Area) */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-3">
-          <div className="bg-slate-50 dark:bg-slate-950/60 px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400">Total Kiriman</span>
-              <Truck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-            </div>
-            <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-0.5 leading-none tabular-nums">
-              {stats.totalTrips} <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Rute</span>
+        <div className="bg-white dark:bg-[#162234] p-5 rounded-2xl border border-slate-200 dark:border-[#24344D] flex items-start justify-between gap-4">
+          <div>
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 block">Validasi Area</span>
+            <div className="text-2xl font-bold text-slate-900 dark:text-white mt-2 leading-none tabular-nums">
+              {stats.totalUniqueAreas} <span className="text-xs font-medium text-slate-500 dark:text-slate-400 ml-0.5">Area</span>
             </div>
           </div>
-
-          <div className="bg-slate-50 dark:bg-slate-950/60 px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] uppercase font-bold text-rose-600 dark:text-rose-400">Validasi Area</span>
-              <MapPin className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
-            </div>
-            <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-0.5 leading-none tabular-nums">
-              {stats.totalUniqueAreas} <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Area</span>
-            </div>
+          <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-[#1E3A5F] text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+            <MapPin className="w-5 h-5" />
           </div>
+        </div>
 
-          {isSidoarjoBranch ? (
-            <div className="bg-slate-50 dark:bg-slate-950/60 px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] uppercase font-bold text-slate-600 dark:text-slate-400">Total Area Kirim</span>
-                <MapPin className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
-              </div>
-              <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-0.5 leading-none tabular-nums">
+        {isSidoarjoBranch ? (
+          <div className="bg-white dark:bg-[#162234] p-5 rounded-2xl border border-slate-200 dark:border-[#24344D] flex items-start justify-between gap-4">
+            <div>
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 block">Total Area Kirim</span>
+              <div className="text-2xl font-bold text-slate-900 dark:text-white mt-2 leading-none tabular-nums">
                 {stats.totalUniqueAreas}{' '}
-                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
                   / {branchOfficialAreas.length} Area Resmi
                 </span>
               </div>
             </div>
-          ) : (
-            <div className="bg-slate-50 dark:bg-slate-950/60 px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] uppercase font-bold text-blue-600 dark:text-blue-400">Luar Kota / Bali</span>
-                <Ship className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-              </div>
-              <div className="text-xl sm:text-2xl font-black text-blue-700 dark:text-blue-300 mt-0.5 leading-none tabular-nums">
+            <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-[#1E3A5F] text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+              <MapPin className="w-5 h-5" />
+            </div>
+          </div>
+        ) : (
+          <div className="bg-white dark:bg-[#162234] p-5 rounded-2xl border border-slate-200 dark:border-[#24344D] flex items-start justify-between gap-4">
+            <div>
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 block">Luar Kota / Bali</span>
+              <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-2 leading-none tabular-nums">
                 {stats.totalLuarKota}{' '}
-                <span className="text-[11px] font-semibold text-blue-600/80 dark:text-blue-400">
-                  ({stats.totalLuarKotaOnly} LK • {stats.totalBaliOnly} Bali)
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                  ({stats.totalLuarKotaOnly} LK · {stats.totalBaliOnly} Bali)
                 </span>
               </div>
             </div>
-          )}
+            <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-[#1E3A5F] text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+              <Ship className="w-5 h-5" />
+            </div>
+          </div>
+        )}
 
-          <div className="bg-slate-50 dark:bg-slate-950/60 px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] uppercase font-bold text-amber-600 dark:text-amber-400">Total Personel Kru</span>
-              <Users className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+        <div className="bg-white dark:bg-[#162234] p-5 rounded-2xl border border-slate-200 dark:border-[#24344D] flex items-start justify-between gap-4">
+          <div>
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 block">Total Personel Kru</span>
+            <div className="text-2xl font-bold text-slate-900 dark:text-white mt-2 leading-none tabular-nums">
+              {stats.branchCrewCount} <span className="text-xs font-medium text-slate-500 dark:text-slate-400 ml-0.5">Terdaftar</span>
             </div>
-            <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-0.5 leading-none">
-              {stats.branchCrewCount} <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Terdaftar</span>
-            </div>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-[#1E3A5F] text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+            <Users className="w-5 h-5" />
           </div>
         </div>
       </div>
 
-      {/* Main Content: Interactive Calendar & Selected Day Grid Details */}
-      <div className="space-y-4">
-        {/* Calendar Container - Compact */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 shadow-xs space-y-2.5">
+      {/* Main Content: Flat Calendar & Selected Day Details */}
+      <div className="space-y-6">
+        {/* 4. Bagian Kalender Pengiriman (Kartu Utama Paling Bawah) */}
+          <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-2xl p-5 sm:p-6 space-y-5">
             {/* Calendar Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-2.5">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold shadow-xs">
-                  <Calendar className="w-4 h-4" />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-[#24344D] pb-4">
+              <div className="flex items-center gap-3.5">
+                <div className="w-10 h-10 rounded-[10px] bg-[#2563EB] text-white flex items-center justify-center shrink-0">
+                  <Calendar className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
-                    <span>KALENDER PENGIRIMAN - {selectedMonth === -1 ? `SEMUA BULAN (${calendarGridData.monthName.toUpperCase()})` : calendarGridData.monthName.toUpperCase()} {calendarGridData.year}</span>
+                  <h3 className="text-base font-bold text-[#0F172A] dark:text-white">
+                    Kalender Pengiriman — {selectedMonth === -1 ? `Semua Bulan (${calendarGridData.monthName})` : calendarGridData.monthName} {calendarGridData.year}
                   </h3>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Klik pada salah satu tanggal untuk melihat rincian supir, helper, area kirim, dan armada.
+                  <p className="text-xs text-[#64748B] dark:text-[#94A3B8] mt-0.5">
+                    Klik salah satu tanggal untuk melihat rincian supir, helper, area kirim, dan armada.
                   </p>
                 </div>
               </div>
 
-              {/* Legend Badges — Branch-Specific */}
+              {/* Minimalist Unboxed Legend */}
               {isSidoarjoBranch ? (
-                <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                  <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <div className="flex items-center gap-2 text-xs font-medium text-[#64748B] dark:text-[#94A3B8]">
+                  <MapPin className="w-4 h-4 text-[#2563EB] shrink-0" />
                   <span>Ringkasan Total Area Kirim Harian · Cabang Sidoarjo</span>
                 </div>
               ) : (
-                <div className="flex items-center gap-1.5 flex-wrap">
+                <div className="flex items-center gap-4 flex-wrap text-xs font-medium text-[#475569] dark:text-[#CBD5E1]">
                   <span
-                    className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800"
+                    className="inline-flex items-center gap-1.5"
                     title="Selain jadwal Luar Kota & Bali termasuk Area Banyuwangi"
                   >
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    <span className="w-2 h-2 rounded-full bg-[#0EA5E9]" />
                     <span>Area Banyuwangi</span>
                   </span>
                   <span
-                    className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800"
+                    className="inline-flex items-center gap-1.5"
                     title="Jember Selatan, Jember Barat, Jember Kota, Kanvas LKT, Situbondo, Bondowoso, Susulan Situbondo Bondowoso"
                   >
-                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                    <span className="w-2 h-2 rounded-full bg-[#2563EB]" />
                     <span>Area Luar Kota</span>
                   </span>
                   <span
-                    className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800"
+                    className="inline-flex items-center gap-1.5"
                     title="Negara, Singaraja, Denpasar 1, Denpasar 2, Kanvas LKT"
                   >
-                    <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                    <span className="w-2 h-2 rounded-full bg-[#6366F1]" />
                     <span>Area Bali</span>
                   </span>
                 </div>
@@ -5322,22 +5325,22 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             </div>
 
             {/* 7-Column Calendar Grid Header */}
-            <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-black uppercase text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800/90 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700">
-              <div className="text-rose-600 dark:text-rose-400">MINGGU</div>
+            <div className="grid grid-cols-7 gap-2 text-center text-[11px] font-bold tracking-wider text-[#64748B] dark:text-[#94A3B8] bg-[#F8FAFC] dark:bg-[#1E293B] py-2.5 rounded-[10px] border border-[#E2E8F0] dark:border-[#24344D]">
+              <div className="text-[#E11D48] dark:text-[#FB7185]">MINGGU</div>
               <div>SENIN</div>
               <div>SELASA</div>
               <div>RABU</div>
               <div>KAMIS</div>
               <div>JUMAT</div>
-              <div className="text-blue-600 dark:text-blue-400">SABTU</div>
+              <div className="text-[#2563EB] dark:text-[#60A5FA]">SABTU</div>
             </div>
 
-            {/* Calendar Cells Grid (Compact) */}
-            <div className="grid grid-cols-7 gap-1">
+            {/* Calendar Cells Grid (Flat Blue & White with Generous Padding) */}
+            <div className="grid grid-cols-7 gap-2">
               {calendarGridData.cells.map((cell, cIdx) => {
                 if (cell.type === 'padding') {
                   return (
-                    <div key={`pad-${cIdx}`} className="min-h-[68px] sm:min-h-[78px] bg-slate-50/50 dark:bg-slate-950/20 rounded-lg border border-dashed border-slate-200 dark:border-slate-800/50" />
+                    <div key={`pad-${cIdx}`} className="min-h-[82px] sm:min-h-[90px] bg-[#F8FAFC]/60 dark:bg-[#111C2D]/40 rounded-[10px] border border-dashed border-[#E2E8F0] dark:border-[#24344D]" />
                   );
                 }
 
@@ -5354,37 +5357,37 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                         setSelectedDayFilter(cell.dateString);
                       }
                     }}
-                    className={`min-h-[68px] sm:min-h-[78px] p-1.5 rounded-lg border transition cursor-pointer flex flex-col justify-between select-none relative ${
+                    className={`min-h-[82px] sm:min-h-[90px] p-2.5 rounded-[10px] border transition-colors cursor-pointer flex flex-col justify-between select-none ${
                       isSunday
                         ? isSelected
-                          ? 'bg-rose-100/90 dark:bg-rose-950/70 border-rose-500 ring-1 ring-rose-500 shadow-sm z-10'
-                          : 'bg-rose-50/90 dark:bg-rose-950/35 hover:bg-rose-100/80 dark:hover:bg-rose-950/55 border-rose-200 dark:border-rose-800/70'
+                          ? 'bg-[#FFF1F2] dark:bg-[#4C1D24]/50 border-2 border-[#E11D48]'
+                          : 'bg-[#FFF7F8] dark:bg-[#331820]/30 hover:bg-[#FFF1F2] dark:hover:bg-[#3E1C26]/50 border-[#FECDD3] dark:border-[#6B2737]'
                         : isSelected
-                        ? 'bg-emerald-100/90 dark:bg-emerald-950/60 border-emerald-500 ring-1 ring-emerald-500 shadow-sm z-10'
+                        ? 'bg-[#EFF6FF] dark:bg-[#1E3A5F] border-2 border-[#2563EB]'
                         : hasDeliveries
-                        ? 'bg-white dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-slate-700/80 border-slate-200 dark:border-slate-700'
-                        : 'bg-slate-50/80 dark:bg-slate-950/40 hover:bg-slate-100 dark:hover:bg-slate-900 border-slate-200 dark:border-slate-800 opacity-80'
+                        ? 'bg-white dark:bg-[#162234] hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B] border-[#CBD5E1] dark:border-[#334155] hover:border-[#93C5FD]'
+                        : 'bg-[#FAFCFF] dark:bg-[#111C2D]/60 hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B] border-[#E2E8F0] dark:border-[#24344D]'
                     }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className={`text-[11px] font-black px-1.5 py-0.2 rounded tabular-nums ${
+                    <div className="flex items-center justify-between gap-1">
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded-md tabular-nums ${
                         isSunday
                           ? isSelected
-                            ? 'bg-rose-600 text-white'
-                            : 'bg-rose-100 dark:bg-rose-900/70 text-rose-700 dark:text-rose-200 font-extrabold'
+                            ? 'bg-[#E11D48] text-white'
+                            : 'text-[#E11D48] dark:text-[#FB7185]'
                           : isSelected
-                          ? 'bg-emerald-600 text-white'
+                          ? 'bg-[#2563EB] text-white'
                           : hasDeliveries
-                          ? 'bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white font-extrabold'
-                          : 'text-slate-400'
+                          ? 'bg-[#EFF6FF] dark:bg-[#1E3A5F] text-[#1D4ED8] dark:text-[#93C5FD]'
+                          : 'text-[#64748B] dark:text-[#94A3B8]'
                       }`}>
                         {String(cell.dayNumber).padStart(2, '0')}
                       </span>
                       {hasDeliveries && (
-                        <span className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded-full border ${
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md tabular-nums ${
                           isSunday
-                            ? 'text-rose-700 dark:text-rose-200 bg-rose-100 dark:bg-rose-950/80 border-rose-300 dark:border-rose-800'
-                            : 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 border-emerald-300 dark:border-emerald-800'
+                            ? 'text-[#BE123C] dark:text-[#FDA4AF] bg-[#FFE4E6] dark:bg-[#5E1C2A]'
+                            : 'text-[#1D4ED8] dark:text-[#93C5FD] bg-[#EFF6FF] dark:bg-[#1E3A5F]'
                         }`}>
                           {cell.totalTrips} Rit
                         </span>
@@ -5393,45 +5396,45 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
                     {hasDeliveries ? (
                       isSidoarjoBranch ? (
-                        <div className="space-y-1 mt-1">
-                          <div className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800/90 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                            <span className="truncate">Total Area Kirim</span>
-                            <span className="font-mono font-black tabular-nums">{cell.uniqueAreaCount}</span>
+                        <div className="space-y-1 mt-1.5">
+                          <div className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-[#EFF6FF] dark:bg-[#1E3A5F] text-[#1D4ED8] dark:text-[#93C5FD] flex items-center justify-between">
+                            <span className="truncate">Area Kirim</span>
+                            <span className="font-mono font-bold tabular-nums">{cell.uniqueAreaCount}</span>
                           </div>
                           {cell.areaPreviewList.length > 0 && (
-                            <div className="text-[9px] font-semibold text-slate-500 dark:text-slate-400 truncate px-0.5">
+                            <div className="text-[10px] text-[#64748B] dark:text-[#94A3B8] truncate px-0.5">
                               {cell.areaPreviewList.slice(0, 2).join(', ')}
                               {cell.areaPreviewList.length > 2 ? ` +${cell.areaPreviewList.length - 2}` : ''}
                             </div>
                           )}
                         </div>
                       ) : (
-                        <div className="space-y-0.5 mt-1">
+                        <div className="space-y-1 mt-1.5">
                           {cell.lokalCount > 0 && (
-                            <div className="text-[9px] font-bold px-1 py-0.2 rounded bg-emerald-100 dark:bg-emerald-950/90 text-emerald-800 dark:text-emerald-300 border border-emerald-300/80 dark:border-emerald-800 flex items-center justify-between">
-                              <span className="truncate">🚛 Banyuwangi</span>
-                              <span className="font-mono font-black">{cell.lokalCount}</span>
+                            <div className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#F0F9FF] dark:bg-[#0C4A6E]/50 text-[#0369A1] dark:text-[#7DD3FC] flex items-center justify-between gap-1">
+                              <span className="truncate">Banyuwangi</span>
+                              <span className="font-mono font-bold tabular-nums">{cell.lokalCount}</span>
                             </div>
                           )}
                           {cell.luarKotaCount > 0 && (
-                            <div className="text-[9px] font-bold px-1 py-0.2 rounded bg-blue-100 dark:bg-blue-950/90 text-blue-800 dark:text-blue-300 border border-blue-300/80 dark:border-blue-800 flex items-center justify-between">
-                              <span className="truncate">🏙️ Luar Kota</span>
-                              <span className="font-mono font-black">{cell.luarKotaCount}</span>
+                            <div className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#EFF6FF] dark:bg-[#1E3A5F] text-[#1D4ED8] dark:text-[#93C5FD] flex items-center justify-between gap-1">
+                              <span className="truncate">Luar Kota</span>
+                              <span className="font-mono font-bold tabular-nums">{cell.luarKotaCount}</span>
                             </div>
                           )}
                           {cell.baliCount > 0 && (
-                            <div className="text-[9px] font-bold px-1 py-0.2 rounded bg-purple-100 dark:bg-purple-950/90 text-purple-800 dark:text-purple-300 border border-purple-300/80 dark:border-purple-800 flex items-center justify-between">
-                              <span className="truncate">🚢 Bali</span>
-                              <span className="font-mono font-black">{cell.baliCount}</span>
+                            <div className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#EEF2FF] dark:bg-[#312E81]/60 text-[#4338CA] dark:text-[#A5B4FC] flex items-center justify-between gap-1">
+                              <span className="truncate">Bali</span>
+                              <span className="font-mono font-bold tabular-nums">{cell.baliCount}</span>
                             </div>
                           )}
                         </div>
                       )
                     ) : (
-                      <div className={`text-[9px] text-center py-1 ${
+                      <div className={`text-[11px] text-center py-1 ${
                         isSunday
-                          ? 'font-bold text-rose-600 dark:text-rose-400'
-                          : 'font-medium text-slate-400 italic'
+                          ? 'font-semibold text-[#E11D48] dark:text-[#FB7185]'
+                          : 'text-[#94A3B8] dark:text-[#64748B]'
                       }`}>
                         {isSunday ? 'Libur' : 'Off'}
                       </div>
@@ -5442,8 +5445,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             </div>
           </div>
 
-          {/* Selected Date Details Panel (Rincian Driver, Helper, Kirim Area, Armada & Jadwal Kanvas LKT) */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 shadow-xs space-y-3">
+          {/* 4. Selected Date Details Panel */}
+          <div className="bg-white dark:bg-[#162234] border border-[#E2E8F0] dark:border-[#24344D] rounded-xl p-5 sm:p-6 space-y-5">
             {(() => {
               const allDaysFlat = filteredWeeks.flatMap((w: AdminScheduleWeek) => w.days);
               const activeDayObj = allDaysFlat.find((d: AdminScheduleDay) => d.dateString === selectedCalendarDate);
@@ -5462,13 +5465,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
               if (!activeDayObj || activeDayObj.pengiriman.length === 0) {
                 return (
-                  <div className="p-6 text-center bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1.5">
-                    <Calendar className="w-6 h-6 text-slate-400 mx-auto" />
-                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                  <div className="py-10 px-6 text-center space-y-2.5">
+                    <div className="w-12 h-12 rounded-xl bg-[#EFF6FF] dark:bg-[#1E3A5F] text-[#2563EB] dark:text-[#60A5FA] flex items-center justify-center mx-auto">
+                      <Calendar className="w-6 h-6" />
+                    </div>
+                    <h4 className="text-sm font-bold text-[#0F172A] dark:text-white">
                       Tidak Ada Jadwal Pengiriman pada {selectedCalendarDate}
                     </h4>
-                    <p className="text-[11px] text-slate-500">
-                      Silakan klik tanggal lain pada kalender di atas untuk melihat rincian pengiriman.
+                    <p className="text-xs text-[#64748B] dark:text-[#94A3B8] max-w-md mx-auto">
+                      Silakan klik tanggal lain pada kalender di atas untuk melihat rincian penugasan driver, helper, area kirim, dan armada.
                     </p>
                   </div>
                 );
@@ -5582,43 +5587,44 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               const standbyDataTop = computeDayCrewStandbyBreakdown(activeDayObj);
 
               return (
-                <div className="space-y-4">
-                  {/* 1. RINCIAN PENGIRIMAN TERFAKTUR (LANGSUNG DI BAWAH KALENDER PENGIRIMAN) */}
-                  <div className="space-y-2">
-                    <div className="bg-slate-100 dark:bg-slate-800/90 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold shadow-2xs">
-                          <Calendar className="w-3.5 h-3.5" />
+                <div className="space-y-6">
+                  {/* 1. Rincian Pengiriman Terfaktur */}
+                  <div className="space-y-4">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-[10px] bg-[#2563EB] text-white flex items-center justify-center shrink-0">
+                          <Calendar className="w-4 h-4" />
                         </div>
                         <div>
-                          <span className="text-[9px] font-black uppercase text-emerald-700 dark:text-emerald-400 tracking-wider block leading-tight">
-                            RINCIAN PENGIRIMAN TERFAKTUR
+                          <span className="text-[11px] font-semibold text-[#2563EB] dark:text-[#60A5FA] block">
+                            Rincian Pengiriman Terfaktur
                           </span>
-                          <h3 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white leading-tight">
+                          <h3 className="text-sm sm:text-base font-bold text-[#0F172A] dark:text-white">
                             {activeDayObj.dayName}, {activeDayObj.dateString}
                           </h3>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1.5 flex-wrap">
+                      <div className="flex items-center gap-2 flex-wrap">
                         {isSidoarjoBranch ? (
-                          <>
-                            <span className="px-2.5 py-0.5 rounded-lg text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 tabular-nums">
-                              Total Kirim: {activeDayObj.pengiriman.length} Rit
+                          <div className="flex items-center gap-4 text-xs font-semibold text-[#475569] dark:text-[#CBD5E1]">
+                            <span className="tabular-nums">
+                              Total Kirim: <strong className="text-[#0F172A] dark:text-white">{activeDayObj.pengiriman.length} Rit</strong>
                             </span>
-                            <span className="px-2.5 py-0.5 rounded-lg text-[11px] font-bold bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 tabular-nums">
-                              Total Area Kirim: {new Set(activeDayObj.pengiriman.map(item => standardizeAreaName(item.area, effectiveActiveBranchId).toUpperCase())).size} Area
+                            <span aria-hidden="true" className="text-[#CBD5E1] dark:text-[#475569]">·</span>
+                            <span className="tabular-nums">
+                              Total Area Kirim: <strong className="text-[#2563EB] dark:text-[#60A5FA]">{new Set(activeDayObj.pengiriman.map(item => standardizeAreaName(item.area, effectiveActiveBranchId).toUpperCase())).size} Area</strong>
                             </span>
-                          </>
+                          </div>
                         ) : (
-                          <>
+                          <div className="inline-flex items-center gap-1 p-1 bg-[#F1F5F9] dark:bg-[#1E293B] rounded-[10px] flex-wrap">
                             <button
                               type="button"
                               onClick={() => setCategoryFilter('all')}
-                              className={`px-2 py-0.5 rounded-lg text-[11px] font-black transition cursor-pointer ${
+                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                                 categoryFilter === 'all'
-                                  ? 'bg-emerald-600 text-white shadow-2xs'
-                                  : 'bg-slate-200 dark:bg-slate-900 text-slate-700 dark:text-slate-300'
+                                  ? 'bg-[#2563EB] text-white'
+                                  : 'text-[#475569] dark:text-[#94A3B8] hover:text-[#0F172A] dark:hover:text-white hover:bg-white dark:hover:bg-[#273549]'
                               }`}
                             >
                               Semua ({activeDayObj.pengiriman.length})
@@ -5627,77 +5633,77 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               type="button"
                               onClick={() => setCategoryFilter(categoryFilter === 'lokal' ? 'all' : 'lokal')}
                               title="Selain jadwal Luar Kota & Bali termasuk Area Banyuwangi"
-                              className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                                 categoryFilter === 'lokal'
-                                  ? 'bg-emerald-600 text-white border-emerald-500'
-                                  : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                                  ? 'bg-[#2563EB] text-white'
+                                  : 'text-[#475569] dark:text-[#94A3B8] hover:text-[#0F172A] dark:hover:text-white hover:bg-white dark:hover:bg-[#273549]'
                               }`}
                             >
-                              🚛 {lokalInSelected} Area Banyuwangi
+                              Banyuwangi ({lokalInSelected})
                             </button>
                             <button
                               type="button"
                               onClick={() => setCategoryFilter(categoryFilter === 'luar_kota' ? 'all' : 'luar_kota')}
                               title="Jember Selatan, Jember Barat, Jember Kota, Kanvas LKT, Situbondo, Bondowoso, Susulan Situbondo Bondowoso"
-                              className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                                 categoryFilter === 'luar_kota'
-                                  ? 'bg-blue-600 text-white border-blue-500'
-                                  : 'bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 border-blue-300 dark:border-blue-800'
+                                  ? 'bg-[#2563EB] text-white'
+                                  : 'text-[#475569] dark:text-[#94A3B8] hover:text-[#0F172A] dark:hover:text-white hover:bg-white dark:hover:bg-[#273549]'
                               }`}
                             >
-                              🏙️ {luarKotaInSelected} Area Luar Kota
+                              Luar Kota ({luarKotaInSelected})
                             </button>
                             <button
                               type="button"
                               onClick={() => setCategoryFilter(categoryFilter === 'bali' ? 'all' : 'bali')}
                               title="Negara, Singaraja, Denpasar 1, Denpasar 2, Kanvas LKT"
-                              className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                                 categoryFilter === 'bali'
-                                  ? 'bg-purple-600 text-white border-purple-500'
-                                  : 'bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300 border-purple-300 dark:border-purple-800'
+                                  ? 'bg-[#2563EB] text-white'
+                                  : 'text-[#475569] dark:text-[#94A3B8] hover:text-[#0F172A] dark:hover:text-white hover:bg-white dark:hover:bg-[#273549]'
                               }`}
                             >
-                              🚢 {baliInSelected} Area Bali
+                              Bali ({baliInSelected})
                             </button>
                             <button
                               type="button"
                               onClick={() => setCategoryFilter(categoryFilter === 'kanvas_lkt' ? 'all' : 'kanvas_lkt')}
-                              className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border transition cursor-pointer ${
+                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                                 categoryFilter === 'kanvas_lkt'
-                                  ? 'bg-indigo-600 text-white border-indigo-500'
-                                  : 'bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-300 border-indigo-300 dark:border-indigo-800'
+                                  ? 'bg-[#2563EB] text-white'
+                                  : 'text-[#475569] dark:text-[#94A3B8] hover:text-[#0F172A] dark:hover:text-white hover:bg-white dark:hover:bg-[#273549]'
                               }`}
                             >
-                              📦 {kanvasLktInSelected} Kanvas LKT
+                              Kanvas LKT ({kanvasLktInSelected})
                             </button>
-                          </>
+                          </div>
                         )}
                       </div>
                     </div>
 
-                    {/* Shipment Details Table - Compact & Rapat */}
-                    <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                    {/* Shipment Details Table - Flat Modern Clean Grid */}
+                    <div className="overflow-x-auto rounded-xl border border-[#E2E8F0] dark:border-[#24344D]">
                       <table className="w-full text-xs text-left border-collapse min-w-[880px]">
                         <thead>
-                          <tr className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-extrabold border-b border-slate-200 dark:border-slate-700 uppercase tracking-wider text-[10px]">
-                            <th className="py-1.5 px-2 text-center w-9 border-r border-slate-200 dark:border-slate-700">#</th>
-                            <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-36">DRIVER</th>
-                            <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-32">HELPER 1</th>
-                            <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-28">HELPER 2</th>
-                            <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-48">BACK UP / MENGGANTIKAN</th>
-                            <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700">KIRIM AREA (TUJUAN)</th>
-                            <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-28">ARMADA</th>
-                            <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-32">STATUS</th>
-                            <th className="py-1.5 px-2 text-center w-16">AKSI</th>
+                          <tr className="bg-[#F8FAFC] dark:bg-[#1E293B] text-[#475569] dark:text-[#94A3B8] font-bold border-b border-[#E2E8F0] dark:border-[#24344D] uppercase tracking-wider text-[10px]">
+                            <th className="py-3 px-3 text-center w-10">#</th>
+                            <th className="py-3 px-3.5 w-40">Driver</th>
+                            <th className="py-3 px-3.5 w-32">Helper 1</th>
+                            <th className="py-3 px-3.5 w-28">Helper 2</th>
+                            <th className="py-3 px-3.5 w-48">Back Up / Pengganti</th>
+                            <th className="py-3 px-3.5">Kirim Area (Tujuan)</th>
+                            <th className="py-3 px-3.5 w-32">Armada</th>
+                            <th className="py-3 px-3.5 w-32">Status</th>
+                            <th className="py-3 px-3 text-center w-20">Aksi</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-200 dark:divide-slate-800 font-medium">
+                        <tbody className="divide-y divide-[#E2E8F0] dark:divide-[#24344D] bg-white dark:bg-[#162234]">
                           {filteredPengiriman.length === 0 ? (
                             <tr>
-                              <td colSpan={9} className="p-6 text-center bg-slate-50 dark:bg-slate-900/50">
-                                <div className="max-w-md mx-auto space-y-1.5">
-                                  <Search className="w-5 h-5 text-slate-400 mx-auto" />
-                                  <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                              <td colSpan={9} className="p-8 text-center bg-[#FAFCFF] dark:bg-[#111C2D]">
+                                <div className="max-w-md mx-auto space-y-2.5">
+                                  <Search className="w-5 h-5 text-[#2563EB] mx-auto" />
+                                  <div className="text-xs font-semibold text-[#334155] dark:text-[#CBD5E1]">
                                     Tidak ada jadwal ritase yang cocok dengan filter
                                   </div>
                                   <button
@@ -5709,7 +5715,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                       setCrewDriverFilter('all');
                                       setCategoryFilter('all');
                                     }}
-                                    className="mt-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
+                                    className="px-4 py-2 rounded-[10px] text-xs font-semibold bg-[#2563EB] hover:bg-[#1D4ED8] text-white cursor-pointer transition-colors"
                                   >
                                     Reset Filter
                                   </button>
@@ -5787,11 +5793,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               const backupCrewName = isStaleDriverBackupRow ? undefined : rawBackupCrewName;
 
                               const driverInitials = getDriverInitials(displayDriver);
-                              const avatarStyle = DRIVER_AVATAR_COLORS[displayDriver] || { 
-                                bg: 'bg-slate-100 dark:bg-slate-800', 
-                                text: 'text-slate-700 dark:text-slate-300', 
-                                ring: 'border-slate-300 dark:border-slate-700' 
-                              };
 
                               const isFutureOrTodayUnverified =
                                 selectedYear >= 2026 &&
@@ -5804,12 +5805,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                 ? 'scheduled'
                                 : (matchedSch?.status || 'scheduled');
 
-                              const statusBadgeConfig: Record<ShipmentStatus, { label: string; bg: string; text: string; border: string }> = {
-                                scheduled: { label: 'Terjadwal', bg: 'bg-blue-50 dark:bg-blue-950/80', text: 'text-blue-700 dark:text-blue-300', border: 'border-blue-300 dark:border-blue-800' },
-                                picked_up: { label: 'Telah Dimuat', bg: 'bg-amber-50 dark:bg-amber-950/80', text: 'text-amber-800 dark:text-amber-300', border: 'border-amber-300 dark:border-amber-800' },
-                                in_transit: { label: 'Sedang Kirim', bg: 'bg-purple-50 dark:bg-purple-950/80', text: 'text-purple-700 dark:text-purple-300', border: 'border-purple-300 dark:border-purple-800' },
-                                delivered: { label: 'Terkirim', bg: 'bg-emerald-50 dark:bg-emerald-950/80', text: 'text-emerald-700 dark:text-emerald-300', border: 'border-emerald-300 dark:border-emerald-800' },
-                                delayed: { label: 'Tertunda', bg: 'bg-rose-50 dark:bg-rose-950/80', text: 'text-rose-700 dark:text-rose-300', border: 'border-rose-300 dark:border-rose-800' }
+                              const statusBadgeConfig: Record<ShipmentStatus, { label: string; bg: string; text: string }> = {
+                                scheduled: { label: 'Terjadwal', bg: 'bg-[#EFF6FF] dark:bg-[#1E3A5F]', text: 'text-[#1D4ED8] dark:text-[#93C5FD]' },
+                                picked_up: { label: 'Telah Dimuat', bg: 'bg-[#FEF3C7] dark:bg-[#451A03]/60', text: 'text-[#B45309] dark:text-[#FCD34D]' },
+                                in_transit: { label: 'Sedang Kirim', bg: 'bg-[#EEF2FF] dark:bg-[#312E81]/60', text: 'text-[#4338CA] dark:text-[#A5B4FC]' },
+                                delivered: { label: 'Terkirim', bg: 'bg-[#ECFDF5] dark:bg-[#064E3B]/60', text: 'text-[#047857] dark:text-[#6EE7B7]' },
+                                delayed: { label: 'Tertunda', bg: 'bg-[#FFF1F2] dark:bg-[#4C1D24]/60', text: 'text-[#BE123C] dark:text-[#FDA4AF]' }
                               };
 
                               const cfg = statusBadgeConfig[currentStatus] || statusBadgeConfig.scheduled;
@@ -5817,97 +5818,85 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               return (
                                 <tr
                                   key={`cal-detail-${pIdx}-${displayDriver}-${p.armada}`}
-                                  className={`hover:bg-slate-50 dark:hover:bg-slate-800/60 transition ${
-                                    isSidoarjoBranch
-                                      ? ''
-                                      : isKanvasLkt
-                                      ? 'bg-purple-50/30 dark:bg-purple-950/15'
-                                      : isBali
-                                      ? 'bg-purple-50/30 dark:bg-purple-950/15'
-                                      : isLuarKota
-                                      ? 'bg-blue-50/30 dark:bg-blue-950/15'
-                                      : ''
-                                  }`}
+                                  className="hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B]/60 transition-colors"
                                 >
-                                  <td className="py-1.5 px-2 text-center font-bold text-slate-500 border-r border-slate-200 dark:border-slate-800 text-[11px]">
+                                  <td className="py-3 px-3 text-center font-semibold text-[#64748B] dark:text-[#94A3B8] text-xs tabular-nums">
                                     {pIdx + 1}
                                   </td>
 
                                   {/* Driver */}
-                                  <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
-                                    <div className="flex items-center gap-1.5">
-                                      <div className={`w-5 h-5 rounded-full border ${avatarStyle.bg} ${avatarStyle.ring} ${avatarStyle.text} flex items-center justify-center font-black text-[9px] shrink-0`}>
+                                  <td className="py-3 px-3.5">
+                                    <div className="flex items-center gap-2.5">
+                                      <div className="w-7 h-7 rounded-full bg-[#EFF6FF] dark:bg-[#1E3A5F] text-[#2563EB] dark:text-[#93C5FD] flex items-center justify-center font-bold text-[10px] shrink-0">
                                         {driverInitials}
                                       </div>
-                                      <span className="font-extrabold text-slate-900 dark:text-white text-xs">
+                                      <span className="font-semibold text-[#0F172A] dark:text-white text-xs">
                                         {displayDriver}
                                       </span>
                                     </div>
                                   </td>
 
                                   {/* Helper 1 */}
-                                  <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
-                                    <span className={`font-semibold text-xs ${p.helper && p.helper !== '-' ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400'}`}>
+                                  <td className="py-3 px-3.5">
+                                    <span className={`font-medium text-xs ${p.helper && p.helper !== '-' ? 'text-[#334155] dark:text-[#E2E8F0]' : 'text-[#94A3B8]'}`}>
                                       {p.helper || '-'}
                                     </span>
                                   </td>
                                   {/* Helper 2 */}
-                                  <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
-                                    <span className={`font-semibold text-xs ${p.helper2 && p.helper2 !== '-' ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400'}`}>
+                                  <td className="py-3 px-3.5">
+                                    <span className={`font-medium text-xs ${p.helper2 && p.helper2 !== '-' ? 'text-[#334155] dark:text-[#E2E8F0]' : 'text-[#94A3B8]'}`}>
                                       {p.helper2 || '-'}
                                     </span>
                                   </td>
 
                                   {/* Back Up / Menggantikan */}
-                                  <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
+                                  <td className="py-3 px-3.5">
                                     {backupCrewName ? (
                                       <div className="flex flex-col gap-1 items-start">
                                         <div className="inline-flex items-center gap-1.5">
-                                          <span className="w-4 h-4 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center font-black text-[8px] shrink-0">
+                                          <span className="w-5 h-5 rounded-full bg-[#FEF3C7] dark:bg-[#451A03] text-[#B45309] dark:text-[#FCD34D] flex items-center justify-center font-bold text-[9px] shrink-0">
                                             {getDriverInitials(backupCrewName)}
                                           </span>
-                                          <span className="font-extrabold text-amber-700 dark:text-amber-300 text-xs">
+                                          <span className="font-semibold text-[#B45309] dark:text-[#FCD34D] text-xs">
                                             {backupCrewName}
                                           </span>
                                         </div>
-                                        <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                                        <span className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">
                                           Menggantikan {backupPosition === 'helper' ? 'Helper 1' : backupPosition === 'helper2' ? 'Helper 2' : 'Driver'} {backupTargetName}
                                         </span>
                                         {canEditSchedules && (
                                           <button
                                             type="button"
                                             onClick={() => handleCancelTripReplacement(p)}
-                                            className="mt-0.5 inline-flex items-center gap-1 text-[9px] font-bold text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 border border-rose-200 dark:border-rose-800/60 px-1.5 py-0.5 rounded cursor-pointer transition-colors w-fit shadow-2xs"
+                                            className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-semibold text-[#BE123C] dark:text-[#FDA4AF] bg-[#FFF1F2] dark:bg-[#4C1D24]/60 hover:bg-[#FFE4E6] px-2 py-0.5 rounded-md cursor-pointer transition-colors w-fit"
                                             title="Batalkan kru pengganti untuk rute ini"
                                           >
-                                            <XCircle className="w-2.5 h-2.5 text-rose-500" />
-                                            <span>Tidak Jadi Ganti</span>
+                                            <XCircle className="w-3 h-3" />
+                                            <span>Batalkan Ganti</span>
                                           </button>
                                         )}
                                       </div>
                                     ) : (
-                                      <span className="text-slate-400 text-xs font-semibold">-</span>
+                                      <span className="text-[#94A3B8] text-xs">-</span>
                                     )}
                                   </td>
 
                                   {/* Kirim Area */}
-                                  <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
+                                  <td className="py-3 px-3.5">
                                     <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className={`text-[11px] font-bold uppercase px-2 py-0.5 rounded-md border ${
+                                      <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-md ${
                                         isSidoarjoBranch
-                                          ? 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-100 border-slate-300 dark:border-slate-700'
-                                          : isKanvasLkt
-                                          ? 'bg-purple-50 text-purple-800 dark:bg-purple-950/70 dark:text-purple-200 border-purple-300 dark:border-purple-700'
-                                          : isBali
-                                          ? 'bg-purple-50 text-purple-800 dark:bg-purple-950/70 dark:text-purple-200 border-purple-300 dark:border-purple-700'
+                                          ? 'bg-[#F1F5F9] text-[#1E293B] dark:bg-[#1E293B] dark:text-[#E2E8F0]'
+                                          : isKanvasLkt || isBali
+                                          ? 'bg-[#EEF2FF] text-[#4338CA] dark:bg-[#312E81]/60 dark:text-[#A5B4FC]'
                                           : isLuarKota
-                                          ? 'bg-blue-50 text-blue-800 dark:bg-blue-950/60 dark:text-blue-200 border-blue-200 dark:border-blue-800'
-                                          : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800'
+                                          ? 'bg-[#EFF6FF] text-[#1D4ED8] dark:bg-[#1E3A5F] dark:text-[#93C5FD]'
+                                          : 'bg-[#F0F9FF] text-[#0369A1] dark:bg-[#0C4A6E]/50 dark:text-[#7DD3FC]'
                                       }`}>
                                         {standardArea}
                                       </span>
                                       {isKanvasLkt && (
-                                        <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-purple-600 text-white">
+                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-[#2563EB] text-white">
                                           KANVAS
                                         </span>
                                       )}
@@ -5915,24 +5904,24 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                   </td>
 
                                   {/* Armada & Cabang */}
-                                  <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
+                                  <td className="py-3 px-3.5">
                                     <div className="flex flex-col gap-1 items-start">
-                                      <span className={`px-2 py-0.5 rounded-md font-mono font-bold text-[11px] border ${
+                                      <span className={`px-2.5 py-1 rounded-md font-mono font-semibold text-[11px] ${
                                         sameFleetDayCount > 1
-                                          ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border-amber-400 dark:border-amber-600'
-                                          : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700'
+                                          ? 'bg-[#FEF3C7] dark:bg-[#451A03]/60 text-[#B45309] dark:text-[#FCD34D]'
+                                          : 'bg-[#F1F5F9] dark:bg-[#1E293B] text-[#0F172A] dark:text-[#E2E8F0]'
                                       }`}>
                                         {p.armada}
                                       </span>
                                       {sameFleetDayCount > 1 && (
-                                        <span className="text-[9px] font-black text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/70 px-1.5 py-0.2 rounded border border-amber-300 dark:border-amber-700">
-                                          Armada Ganda ({sameFleetDayCount}x)
+                                        <span className="text-[10px] font-semibold text-[#B45309] dark:text-[#FCD34D]">
+                                          Ganda ({sameFleetDayCount}x)
                                         </span>
                                       )}
                                       {selectedBranchId === 'ALL' && (() => {
                                         const br = branchStore.getScheduleBranch(p.id, p.area, p.armada);
                                         return (
-                                          <span className="text-[9px] font-bold text-slate-600 dark:text-slate-400 bg-slate-200/70 dark:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-300 dark:border-slate-700">
+                                          <span className="text-[10px] font-medium text-[#64748B] dark:text-[#94A3B8]">
                                             {br.name}
                                           </span>
                                         );
@@ -5941,21 +5930,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                   </td>
 
                                   {/* Status */}
-                                  <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
-                                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${cfg.bg} ${cfg.text} ${cfg.border}`}>
-                                      <span className={`w-1.5 h-1.5 rounded-full ${
-                                        currentStatus === 'delivered' ? 'bg-emerald-500' :
-                                        currentStatus === 'in_transit' ? 'bg-purple-500 animate-pulse' :
-                                        currentStatus === 'picked_up' ? 'bg-amber-500' :
-                                        currentStatus === 'delayed' ? 'bg-rose-500 animate-ping' : 'bg-blue-500'
-                                      }`} />
-                                      <span>{cfg.label}</span>
+                                  <td className="py-3 px-3.5">
+                                    <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-semibold ${cfg.bg} ${cfg.text}`}>
+                                      {cfg.label}
                                     </span>
                                   </td>
 
-                                   {/* Aksi */}
-                                  <td className="py-1.5 px-2 text-center">
-                                    <div className="flex items-center justify-center gap-1">
+                                  {/* Aksi */}
+                                  <td className="py-3 px-3 text-center">
+                                    <div className="flex items-center justify-center gap-1.5">
                                       {logisticsStore.getCurrentUser()?.role === 'super_admin' && currentStatus !== 'delivered' && (
                                         <button
                                           type="button"
@@ -5964,10 +5947,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                             if (!schId) return;
                                             setBypassConfirmModal({ schId, p, matchedSch });
                                           }}
-                                          className="p-1 rounded-md bg-amber-500/15 hover:bg-amber-500/30 text-amber-500 dark:text-amber-400 border border-amber-500/40 transition cursor-pointer"
+                                          className="p-1.5 rounded-lg bg-[#EFF6FF] hover:bg-[#DBEAFE] text-[#2563EB] dark:bg-[#1E3A5F] dark:text-[#60A5FA] transition-colors cursor-pointer"
                                           title="Tembus & Simpan Selesai Tanpa Checklist (Super Admin)"
                                         >
-                                          <Zap className="w-3 h-3 text-amber-500 fill-current" />
+                                          <Zap className="w-3.5 h-3.5" />
                                         </button>
                                       )}
                                       {canEditSchedules ? (
@@ -5975,24 +5958,24 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                           <button
                                             type="button"
                                             onClick={() => handleOpenEditTripModal(p, activeDayObj.dayNumber, activeDayObj.dateString, pIdx)}
-                                            className="p-1 rounded-md bg-amber-500/10 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 border border-amber-500/30 transition cursor-pointer"
+                                            className="p-1.5 rounded-lg bg-[#EFF6FF] hover:bg-[#DBEAFE] text-[#2563EB] dark:bg-[#1E3A5F] dark:text-[#60A5FA] transition-colors cursor-pointer"
                                             title="Edit Rincian Pengiriman Ini"
                                           >
-                                            <Edit className="w-3 h-3" />
+                                            <Edit className="w-3.5 h-3.5" />
                                           </button>
                                           <button
                                             type="button"
                                             onClick={() => setDeleteConfirmModal({ p, dayNumber: activeDayObj.dayNumber, tripIndex: pIdx, dateString: activeDayObj.dateString })}
-                                            className="p-1 rounded-md bg-rose-500/10 hover:bg-rose-500/25 text-rose-600 dark:text-rose-400 border border-rose-500/30 transition cursor-pointer"
+                                            className="p-1.5 rounded-lg bg-[#FFF1F2] hover:bg-[#FFE4E6] text-[#E11D48] dark:bg-[#4C1D24]/60 dark:text-[#FDA4AF] transition-colors cursor-pointer"
                                             title="Hapus Rincian Pengiriman Ini"
                                           >
-                                            <Trash2 className="w-3 h-3" />
+                                            <Trash2 className="w-3.5 h-3.5" />
                                           </button>
                                         </>
                                       ) : (
-                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 text-[10px] font-bold">
-                                          <Eye className="w-2.5 h-2.5" />
-                                          <span>Hanya Lihat</span>
+                                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[#F1F5F9] dark:bg-[#1E293B] text-[#64748B] dark:text-[#94A3B8] text-[10px] font-semibold">
+                                          <Eye className="w-3 h-3" />
+                                          <span>Lihat</span>
                                         </span>
                                       )}
                                     </div>
@@ -6006,27 +5989,24 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     </div>
                   </div>
 
-                  {/* 2. KRU FREE / STAND BY GUDANG DC (DI BAWAH RINCIAN PENGIRIMAN TERFAKTUR) */}
-                  <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-1.5">
-                    <div className="bg-amber-50/80 dark:bg-slate-800/90 px-3 py-2 rounded-xl border border-amber-200 dark:border-amber-700/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-lg bg-amber-600 text-white flex items-center justify-center font-bold shadow-2xs shrink-0">
-                          <Warehouse className="w-3.5 h-3.5" />
+                  {/* 2. Kru Free / Stand By Gudang DC */}
+                  <div className="pt-6 border-t border-[#E2E8F0] dark:border-[#24344D] space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-[10px] bg-[#EFF6FF] dark:bg-[#1E3A5F] text-[#2563EB] dark:text-[#60A5FA] flex items-center justify-center shrink-0">
+                          <Warehouse className="w-4 h-4" />
                         </div>
                         <div>
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="text-[9px] font-black uppercase text-amber-700 dark:text-amber-400 tracking-wider leading-tight">
-                              KRU FREE / STAND BY GUDANG DC (PENGGANTIAN KRU HARI H)
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[11px] font-semibold text-[#2563EB] dark:text-[#60A5FA]">
+                              Kru Free / Stand By Gudang DC
                             </span>
-                            <span className="px-1.5 py-0.2 rounded text-[8px] font-extrabold bg-emerald-600 text-white">
-                              Sinkron Portal • Driver &amp; Helper
+                            <span className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">
+                              · Sinkron Portal ({standbyDataTop.freeStandbyCrews.length} Kru Stand By)
                             </span>
                           </div>
-                          <h4 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white leading-tight">
-                            {activeDayObj.dayName}, {activeDayObj.dateString}{' '}
-                            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                              • Cadangan Siap Gantikan Driver / Helper Area Lain ({standbyDataTop.freeStandbyCrews.length} Kru Stand By)
-                            </span>
+                          <h4 className="text-sm sm:text-base font-bold text-[#0F172A] dark:text-white">
+                            {activeDayObj.dayName}, {activeDayObj.dateString}
                           </h4>
                         </div>
                       </div>
@@ -6049,30 +6029,30 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               routeSearchQuery: ''
                             });
                           }}
-                          className="px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-black text-[11px] transition cursor-pointer inline-flex items-center gap-1.5 shadow-2xs shrink-0"
+                          className="px-4 py-2 rounded-[10px] bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-semibold text-xs transition-colors cursor-pointer inline-flex items-center gap-2 shrink-0"
                         >
-                          <RefreshCw className="w-3 h-3" />
+                          <RefreshCw className="w-3.5 h-3.5" />
                           <span>Pilih &amp; Gantikan Kru Kiriman</span>
                         </button>
                       )}
                     </div>
 
-                    <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                    <div className="overflow-x-auto rounded-xl border border-[#E2E8F0] dark:border-[#24344D]">
                       <table className="w-full text-xs text-left border-collapse min-w-[680px]">
                         <thead>
-                          <tr className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-extrabold border-b border-slate-200 dark:border-slate-700 uppercase tracking-wider text-[10px]">
-                            <th className="py-1.5 px-2 text-center w-9 border-r border-slate-200 dark:border-slate-700">#</th>
-                            <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-44">KRU FREE / STAND BY</th>
-                            <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-28">POSISI</th>
-                            <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700">PENUGASAN STAND BY / AREA PENGGANTI</th>
-                            <th className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-700 w-36">STATUS</th>
-                            <th className="py-1.5 px-2 text-center w-28">AKSI HARI H</th>
+                          <tr className="bg-[#F8FAFC] dark:bg-[#1E293B] text-[#475569] dark:text-[#94A3B8] font-bold border-b border-[#E2E8F0] dark:border-[#24344D] uppercase tracking-wider text-[10px]">
+                            <th className="py-3 px-3 text-center w-10">#</th>
+                            <th className="py-3 px-3.5 w-48">Kru Free / Stand By</th>
+                            <th className="py-3 px-3.5 w-28">Posisi</th>
+                            <th className="py-3 px-3.5">Penugasan Stand By / Area Pengganti</th>
+                            <th className="py-3 px-3.5 w-36">Status</th>
+                            <th className="py-3 px-3 text-center w-32">Aksi Hari H</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-200 dark:divide-slate-800 font-medium">
+                        <tbody className="divide-y divide-[#E2E8F0] dark:divide-[#24344D] bg-white dark:bg-[#162234]">
                           {standbyDataTop.freeStandbyCrews.length === 0 ? (
                             <tr>
-                              <td colSpan={6} className="py-3 px-4 text-center bg-slate-50 dark:bg-slate-900/50 text-slate-500 dark:text-slate-400 text-[11px] font-semibold">
+                              <td colSpan={6} className="py-6 px-4 text-center bg-[#FAFCFF] dark:bg-[#111C2D] text-[#64748B] dark:text-[#94A3B8] text-xs font-medium">
                                 {selectedBranchId !== 'ALL' && stats.branchCrewCount === 0
                                   ? 'Belum ada personel kru driver/helper yang terdaftar pada cabang ini.'
                                   : 'Seluruh kru aktif telah terjadwal kirim pada tanggal ini.'}
@@ -6084,53 +6064,51 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               return (
                                 <tr
                                   key={`free-crew-top-${crew.id}-${idx}`}
-                                  className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition bg-white dark:bg-slate-900"
+                                  className="hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B]/60 transition-colors"
                                 >
-                                  <td className="py-1.5 px-2 text-center font-bold text-slate-500 border-r border-slate-200 dark:border-slate-800 text-[11px]">
+                                  <td className="py-3 px-3 text-center font-semibold text-[#64748B] dark:text-[#94A3B8] text-xs tabular-nums">
                                     {idx + 1}
                                   </td>
-                                  <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
-                                    <div className="flex items-center gap-1.5">
-                                      <div className="w-5 h-5 rounded-full bg-amber-100 dark:bg-amber-950/80 border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300 flex items-center justify-center font-black text-[9px] shrink-0">
+                                  <td className="py-3 px-3.5">
+                                    <div className="flex items-center gap-2.5">
+                                      <div className="w-7 h-7 rounded-full bg-[#EFF6FF] dark:bg-[#1E3A5F] text-[#2563EB] dark:text-[#93C5FD] flex items-center justify-center font-bold text-[10px] shrink-0">
                                         {initials}
                                       </div>
-                                      <span className="font-extrabold text-slate-900 dark:text-white text-xs truncate">
+                                      <span className="font-semibold text-[#0F172A] dark:text-white text-xs truncate">
                                         {crew.name}
                                       </span>
                                     </div>
                                   </td>
-                                  <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
-                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                  <td className="py-3 px-3.5">
+                                    <span className={`px-2.5 py-1 rounded-md text-[11px] font-semibold ${
                                       crew.role === 'Driver'
-                                        ? 'bg-blue-50 text-blue-800 dark:bg-blue-950/70 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-                                        : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                                        ? 'bg-[#EFF6FF] text-[#1D4ED8] dark:bg-[#1E3A5F] dark:text-[#93C5FD]'
+                                        : 'bg-[#F0F9FF] text-[#0369A1] dark:bg-[#0C4A6E]/50 dark:text-[#7DD3FC]'
                                     }`}>
                                       {crew.role}
                                     </span>
                                   </td>
-                                  <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
-                                    <span className={`text-[11px] font-bold ${
+                                  <td className="py-3 px-3.5">
+                                    <span className={`text-xs ${
                                       crew.isReplacing
-                                        ? 'text-emerald-700 dark:text-emerald-300'
-                                        : 'text-slate-700 dark:text-slate-300 font-semibold'
+                                        ? 'text-[#047857] dark:text-[#6EE7B7] font-semibold'
+                                        : 'text-[#475569] dark:text-[#CBD5E1]'
                                     }`}>
                                       {crew.warehouseDutyNote}
                                     </span>
                                   </td>
-                                  <td className="py-1.5 px-2.5 border-r border-slate-200 dark:border-slate-800">
+                                  <td className="py-3 px-3.5">
                                     {crew.isReplacing ? (
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
-                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                                        <span>Menggantikan</span>
+                                      <span className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-semibold bg-[#ECFDF5] dark:bg-[#064E3B]/60 text-[#047857] dark:text-[#6EE7B7]">
+                                        Menggantikan
                                       </span>
                                     ) : (
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
-                                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                                        <span>Stand By</span>
+                                      <span className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-semibold bg-[#EFF6FF] dark:bg-[#1E3A5F] text-[#1D4ED8] dark:text-[#93C5FD]">
+                                        Stand By
                                       </span>
                                     )}
                                   </td>
-                                  <td className="py-1.5 px-2 text-center">
+                                  <td className="py-3 px-3 text-center">
                                     {canEditSchedules ? (
                                       <div className="flex items-center justify-center gap-1.5 flex-wrap">
                                         <button
@@ -6150,28 +6128,28 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                               routeSearchQuery: ''
                                             })
                                           }
-                                          className="px-2 py-1 rounded-md bg-amber-500/15 hover:bg-amber-500 text-amber-700 dark:text-amber-300 hover:text-white border border-amber-500/30 font-bold text-[10px] transition cursor-pointer inline-flex items-center gap-1"
+                                          className="px-2.5 py-1.5 rounded-lg bg-[#EFF6FF] hover:bg-[#2563EB] text-[#2563EB] hover:text-white dark:bg-[#1E3A5F] dark:text-[#93C5FD] font-semibold text-[11px] transition-colors cursor-pointer inline-flex items-center gap-1"
                                           title="Gantikan Driver atau Helper kiriman area lain yang berhalangan hadir pada Hari H"
                                         >
-                                          <RefreshCw className="w-2.5 h-2.5" />
+                                          <RefreshCw className="w-3 h-3" />
                                           <span>{crew.isReplacing ? 'Ubah' : 'Gantikan'}</span>
                                         </button>
                                         {crew.isReplacing && (
                                           <button
                                             type="button"
                                             onClick={() => handleCancelReplaceAbsentCrew(crew.name)}
-                                            className="px-2 py-1 rounded-md bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 font-bold text-[10px] transition cursor-pointer inline-flex items-center gap-1"
+                                            className="px-2.5 py-1.5 rounded-lg bg-[#FFF1F2] hover:bg-[#FFE4E6] text-[#E11D48] dark:bg-[#4C1D24]/60 dark:text-[#FDA4AF] font-semibold text-[11px] transition-colors cursor-pointer inline-flex items-center gap-1"
                                             title="Batalkan penggantian dan kembalikan ke status Stand By di Gudang"
                                           >
-                                            <XCircle className="w-2.5 h-2.5 text-rose-500" />
-                                            <span>Tidak Jadi Ganti</span>
+                                            <XCircle className="w-3 h-3" />
+                                            <span>Batal</span>
                                           </button>
                                         )}
                                       </div>
                                     ) : (
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 text-[10px] font-bold">
-                                        <Eye className="w-2.5 h-2.5" />
-                                        <span>Hanya Lihat</span>
+                                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[#F1F5F9] dark:bg-[#1E293B] text-[#64748B] dark:text-[#94A3B8] text-[10px] font-semibold">
+                                        <Eye className="w-3 h-3" />
+                                        <span>Lihat</span>
                                       </span>
                                     )}
                                   </td>
@@ -6222,28 +6200,24 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                       });
 
                     return (
-                      <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
-                        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-4 sm:p-5 shadow-2xl space-y-4">
+                      <div className="fixed inset-0 z-50 akk-flat-schedule bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+                        <div className="bg-white dark:bg-[#162234] border border-[#E2E8F0] dark:border-[#24344D] rounded-2xl max-w-lg w-full p-5 sm:p-6 space-y-5">
                           {/* Header Modal */}
-                          <div className="flex items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-3">
-                            <div className="flex items-center gap-2.5">
-                              <div className="w-9 h-9 rounded-xl bg-amber-600 text-white flex items-center justify-center font-bold shrink-0 shadow-xs">
-                                <Warehouse className="w-4 h-4" />
+                          <div className="flex items-center justify-between gap-3 border-b border-[#E2E8F0] dark:border-[#24344D] pb-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-xl bg-[#2563EB] text-white flex items-center justify-center shrink-0">
+                                <Warehouse className="w-5 h-5" />
                               </div>
                               <div>
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span className="text-[10px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-400">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#2563EB] dark:text-[#60A5FA]">
                                     PENGGANTIAN KRU STAND BY • HARI H
                                   </span>
-                                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-black border ${
-                                    replaceAbsentModal.standbyCrewRole === 'Driver'
-                                      ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30'
-                                      : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                                  }`}>
+                                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA] border border-[#BFDBFE] dark:border-[#1E40AF]">
                                     Role Asli: {replaceAbsentModal.standbyCrewRole}
                                   </span>
                                 </div>
-                                <h3 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white mt-0.5">
+                                <h3 className="text-sm font-bold text-[#0F172A] dark:text-[#F1F5F9] mt-0.5">
                                   Kru Pengganti: {replaceAbsentModal.standbyCrewName}
                                 </h3>
                               </div>
@@ -6251,20 +6225,20 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                             <button
                               type="button"
                               onClick={() => setReplaceAbsentModal(null)}
-                              className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                              className="p-2 rounded-lg text-[#64748B] hover:text-[#0F172A] dark:hover:text-white hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B] transition cursor-pointer"
                             >
                               <X className="w-4 h-4" />
                             </button>
                           </div>
 
-                          <div className="space-y-3.5 text-xs">
-                            {/* 1. Pilih Kru Stand By Pengganti (Menampilkan SEMUA Kru Stand By: Driver & Helper) */}
+                          <div className="space-y-4 text-xs">
+                            {/* 1. Pilih Kru Stand By Pengganti */}
                             {standbyDataTop.freeStandbyCrews.length > 1 && (
                               <div className="relative">
-                                <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between mb-1.5">
+                                <label className="font-bold text-[#334155] dark:text-[#CBD5E1] flex items-center justify-between mb-1.5">
                                   <span>Kru Stand By yang Ditugaskan Menggantikan</span>
-                                  <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">
-                                    {standbyDataTop.freeStandbyCrews.length} Kru Stand By (Driver &amp; Helper)
+                                  <span className="text-[11px] font-semibold text-[#2563EB] dark:text-[#60A5FA]">
+                                    {standbyDataTop.freeStandbyCrews.length} Kru Stand By
                                   </span>
                                 </label>
                                 <button
@@ -6274,28 +6248,24 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                       prev ? { ...prev, isCrewDropdownOpen: !prev.isCrewDropdownOpen, isRouteDropdownOpen: false } : null
                                     )
                                   }
-                                  className="w-full flex items-center justify-between gap-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-left hover:border-amber-500 transition cursor-pointer"
+                                  className="w-full flex items-center justify-between gap-2.5 rounded-xl border border-[#CBD5E1] dark:border-[#334155] bg-[#F8FAFC] dark:bg-[#0F172A] px-3 py-2.5 text-left hover:border-[#2563EB] transition cursor-pointer"
                                 >
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <div className="w-6 h-6 rounded-lg bg-amber-500 text-slate-950 font-black text-[10px] flex items-center justify-center shrink-0">
+                                  <div className="flex items-center gap-2.5 min-w-0">
+                                    <div className="w-7 h-7 rounded-lg bg-[#2563EB] text-white font-bold text-[10px] flex items-center justify-center shrink-0">
                                       {getDriverInitials(replaceAbsentModal.standbyCrewName)}
                                     </div>
-                                    <span className="font-extrabold text-slate-900 dark:text-white truncate">
+                                    <span className="font-bold text-[#0F172A] dark:text-[#F1F5F9] truncate">
                                       {replaceAbsentModal.standbyCrewName}
                                     </span>
-                                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
-                                      replaceAbsentModal.standbyCrewRole === 'Driver'
-                                        ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/25'
-                                        : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25'
-                                    }`}>
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA] border border-[#BFDBFE] dark:border-[#1E40AF]">
                                       {replaceAbsentModal.standbyCrewRole}
                                     </span>
                                   </div>
-                                  <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${replaceAbsentModal.isCrewDropdownOpen ? 'rotate-180 text-amber-500' : ''}`} />
+                                  <ChevronDown className={`w-4 h-4 text-[#64748B] transition-transform ${replaceAbsentModal.isCrewDropdownOpen ? 'rotate-180 text-[#2563EB]' : ''}`} />
                                 </button>
 
                                 {replaceAbsentModal.isCrewDropdownOpen && (
-                                  <div className="absolute left-0 right-0 z-50 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl max-h-48 overflow-y-auto p-1.5 space-y-1">
+                                  <div className="absolute left-0 right-0 z-50 mt-1.5 bg-white dark:bg-[#162234] border border-[#CBD5E1] dark:border-[#334155] rounded-xl shadow-sm max-h-48 overflow-y-auto p-1.5 space-y-1">
                                     {standbyDataTop.freeStandbyCrews.map(stb => {
                                       const isSelectedCrew = isSameCrewPerson(stb.name, replaceAbsentModal.standbyCrewName);
                                       return (
@@ -6316,22 +6286,22 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                           }
                                           className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg text-left transition cursor-pointer ${
                                             isSelectedCrew
-                                              ? 'bg-amber-500 text-slate-950 font-black'
-                                              : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200'
+                                              ? 'bg-[#2563EB] text-white font-bold'
+                                              : 'hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B] text-[#0F172A] dark:text-[#F1F5F9]'
                                           }`}
                                         >
                                           <div className="flex items-center gap-2 min-w-0">
-                                            <span className="w-6 h-6 rounded-lg bg-amber-500/20 border border-amber-500/30 flex items-center justify-center font-black text-[10px] shrink-0">
+                                            <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-bold text-[10px] shrink-0 ${
+                                              isSelectedCrew ? 'bg-white/20 text-white' : 'bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA]'
+                                            }`}>
                                               {getDriverInitials(stb.name)}
                                             </span>
                                             <span className="truncate font-bold">{stb.name}</span>
                                           </div>
                                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold border shrink-0 ${
                                             isSelectedCrew
-                                              ? 'bg-slate-950/15 text-slate-950 border-slate-950/20'
-                                              : stb.role === 'Driver'
-                                              ? 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-                                              : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                                              ? 'bg-white/20 text-white border-white/30'
+                                              : 'bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA] border-[#BFDBFE] dark:border-[#1E40AF]'
                                           }`}>
                                             Role: {stb.role}
                                           </span>
@@ -6343,15 +6313,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               </div>
                             )}
 
-                            {/* 2. Posisi Kru yang Digantikan (Bisa Gantikan Driver Utama, Helper 1, maupun Helper 2 Lintas Role) */}
+                            {/* 2. Posisi Kru yang Digantikan */}
                             <div>
-                              <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between mb-1.5">
+                              <label className="font-bold text-[#334155] dark:text-[#CBD5E1] flex items-center justify-between mb-1.5">
                                 <span>Posisi Kru yang Digantikan</span>
-                                <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">
-                                  Bebas Lintas Role (Driver ⇄ Helper)
+                                <span className="text-[11px] font-medium text-[#64748B] dark:text-[#94A3B8]">
+                                  Lintas Role (Driver &harr; Helper)
                                 </span>
                               </label>
-                              <div className="grid grid-cols-3 gap-2">
+                              <div className="grid grid-cols-3 gap-2.5">
                                 {([
                                   { id: 'driver' as const, label: 'Driver Utama', roleTag: 'Supir' },
                                   { id: 'helper' as const, label: 'Helper 1', roleTag: 'Kernet 1' },
@@ -6374,19 +6344,19 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                           prev ? { ...prev, replacePosition: posOpt.id } : null
                                         )
                                       }
-                                      className={`p-2.5 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between ${
+                                      className={`p-3 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between ${
                                         isActivePos
-                                          ? 'bg-amber-500/15 border-amber-500 ring-2 ring-amber-500/20 text-slate-900 dark:text-white'
-                                          : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
+                                          ? 'bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 border-[#2563EB] ring-1 ring-[#2563EB] text-[#0F172A] dark:text-white'
+                                          : 'bg-[#F8FAFC] dark:bg-[#0F172A] border-[#E2E8F0] dark:border-[#24344D] text-[#475569] dark:text-[#94A3B8] hover:border-[#2563EB]/50'
                                       }`}
                                     >
                                       <div className="flex items-center justify-between gap-1">
-                                        <span className={`text-[11px] font-black ${isActivePos ? 'text-amber-700 dark:text-amber-400' : 'text-slate-800 dark:text-slate-200'}`}>
+                                        <span className={`text-[11px] font-bold ${isActivePos ? 'text-[#2563EB] dark:text-[#60A5FA]' : 'text-[#0F172A] dark:text-[#F1F5F9]'}`}>
                                           {posOpt.label}
                                         </span>
-                                        {isActivePos && <CheckCircle2 className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
+                                        {isActivePos && <CheckCircle2 className="w-3.5 h-3.5 text-[#2563EB] shrink-0" />}
                                       </div>
-                                      <div className="text-[10px] font-bold truncate mt-1 text-slate-700 dark:text-slate-300">
+                                      <div className="text-[11px] font-semibold truncate mt-1 text-[#475569] dark:text-[#CBD5E1]">
                                         {previewName}
                                       </div>
                                     </button>
@@ -6395,16 +6365,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               </div>
                             </div>
 
-                            {/* 3. Custom Modern Interactive Dropdown: Pilih Rute Area Kirim & Kru yang Digantikan (Menampilkan Driver, Helper 1 & Helper 2) */}
+                            {/* 3. Pilih Rute Area Kirim & Kru yang Digantikan */}
                             <div className="relative">
-                              <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between mb-1.5">
+                              <label className="font-bold text-[#334155] dark:text-[#CBD5E1] flex items-center justify-between mb-1.5">
                                 <span>Pilih Rute Area Kirim &amp; Kru yang Digantikan</span>
-                                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                                <span className="text-[11px] font-semibold text-[#2563EB] dark:text-[#60A5FA]">
                                   {activeDayObj.pengiriman.length} Rute Terjadwal
                                 </span>
                               </label>
 
-                              {/* Custom Dropdown Trigger Card */}
                               <button
                                 type="button"
                                 onClick={() =>
@@ -6418,50 +6387,49 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                       : null
                                   )
                                 }
-                                className={`w-full rounded-xl border bg-slate-50 dark:bg-slate-950 p-3 text-left transition cursor-pointer ${
+                                className={`w-full rounded-xl border bg-[#F8FAFC] dark:bg-[#0F172A] p-3 text-left transition cursor-pointer ${
                                   replaceAbsentModal.isRouteDropdownOpen
-                                    ? 'border-amber-500 ring-2 ring-amber-500/20'
-                                    : 'border-slate-300 dark:border-slate-700 hover:border-amber-500/60'
+                                    ? 'border-[#2563EB] ring-1 ring-[#2563EB]'
+                                    : 'border-[#CBD5E1] dark:border-[#334155] hover:border-[#2563EB]/60'
                                 }`}
                               >
                                 {selectedTrip ? (
                                   <div className="space-y-2">
                                     <div className="flex items-center justify-between gap-2">
                                       <div className="flex items-center gap-2 min-w-0">
-                                        <span className="px-2 py-0.5 rounded-md bg-amber-500 text-slate-950 font-black text-[10px] shrink-0">
+                                        <span className="px-2 py-0.5 rounded-md bg-[#2563EB] text-white font-bold text-[10px] shrink-0">
                                           #{replaceAbsentModal.selectedTripIndex + 1}
                                         </span>
-                                        <span className="font-black text-slate-900 dark:text-white text-xs sm:text-sm truncate">
+                                        <span className="font-bold text-[#0F172A] dark:text-[#F1F5F9] text-xs sm:text-sm truncate">
                                           {selectedAreaName}
                                         </span>
-                                        <span className="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/25 font-mono font-bold text-[10px] shrink-0">
+                                        <span className="px-2 py-0.5 rounded-md bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA] border border-[#BFDBFE] dark:border-[#1E40AF] font-mono font-bold text-[10px] shrink-0">
                                           {selectedTrip.armada}
                                         </span>
                                       </div>
-                                      <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${replaceAbsentModal.isRouteDropdownOpen ? 'rotate-180 text-amber-500' : ''}`} />
+                                      <ChevronDown className={`w-4 h-4 text-[#64748B] shrink-0 transition-transform ${replaceAbsentModal.isRouteDropdownOpen ? 'rotate-180 text-[#2563EB]' : ''}`} />
                                     </div>
 
-                                    {/* Semua kru di rute ini ditampilkan jelas (Driver, Helper 1, Helper 2) */}
-                                    <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-200/80 dark:border-slate-800/80">
+                                    <div className="flex items-center gap-1.5 flex-wrap pt-1.5 border-t border-[#E2E8F0] dark:border-[#24344D]">
                                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${
                                         replaceAbsentModal.replacePosition === 'driver'
-                                          ? 'bg-amber-500 text-slate-950 border-amber-500 font-black'
-                                          : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800'
+                                          ? 'bg-[#2563EB] text-white border-[#2563EB]'
+                                          : 'bg-white dark:bg-[#162234] text-[#334155] dark:text-[#CBD5E1] border-[#E2E8F0] dark:border-[#24344D]'
                                       }`}>
                                         <span>Driver: {selectedTrip.driver || '-'}</span>
                                       </span>
                                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${
                                         replaceAbsentModal.replacePosition === 'helper'
-                                          ? 'bg-amber-500 text-slate-950 border-amber-500 font-black'
-                                          : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800'
+                                          ? 'bg-[#2563EB] text-white border-[#2563EB]'
+                                          : 'bg-white dark:bg-[#162234] text-[#334155] dark:text-[#CBD5E1] border-[#E2E8F0] dark:border-[#24344D]'
                                       }`}>
                                         <span>Helper 1: {selectedTrip.helper && selectedTrip.helper !== '-' ? selectedTrip.helper : 'Kosong'}</span>
                                       </span>
                                       {(selectedTrip.helper2 && selectedTrip.helper2 !== '-' || replaceAbsentModal.replacePosition === 'helper2') && (
                                         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${
                                           replaceAbsentModal.replacePosition === 'helper2'
-                                            ? 'bg-amber-500 text-slate-950 border-amber-500 font-black'
-                                            : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800'
+                                            ? 'bg-[#2563EB] text-white border-[#2563EB]'
+                                            : 'bg-white dark:bg-[#162234] text-[#334155] dark:text-[#CBD5E1] border-[#E2E8F0] dark:border-[#24344D]'
                                         }`}>
                                           <span>Helper 2: {selectedTrip.helper2 && selectedTrip.helper2 !== '-' ? selectedTrip.helper2 : 'Kosong'}</span>
                                         </span>
@@ -6469,19 +6437,18 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                     </div>
                                   </div>
                                 ) : (
-                                  <div className="flex items-center justify-between text-slate-400">
+                                  <div className="flex items-center justify-between text-[#64748B]">
                                     <span>Tidak ada pengiriman terjadwal pada tanggal ini</span>
                                     <ChevronDown className="w-4 h-4" />
                                   </div>
                                 )}
                               </button>
 
-                              {/* Custom Dropdown Panel: Daftar Rute + Klik Langsung Driver / Helper 1 / Helper 2 */}
                               {replaceAbsentModal.isRouteDropdownOpen && (
-                                <div className="mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-                                  <div className="p-2 bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800">
+                                <div className="mt-1.5 bg-white dark:bg-[#162234] border border-[#CBD5E1] dark:border-[#334155] rounded-xl shadow-sm overflow-hidden animate-in fade-in duration-150">
+                                  <div className="p-2 bg-[#F8FAFC] dark:bg-[#0F172A] border-b border-[#E2E8F0] dark:border-[#24344D]">
                                     <div className="relative">
-                                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                                      <Search className="w-3.5 h-3.5 text-[#64748B] absolute left-2.5 top-1/2 -translate-y-1/2" />
                                       <input
                                         type="text"
                                         value={replaceAbsentModal.routeSearchQuery || ''}
@@ -6492,14 +6459,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                         }
                                         placeholder="Cari area kirim, nama driver, atau nama helper..."
                                         autoFocus
-                                        className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-amber-500"
+                                        className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-white dark:bg-[#162234] border border-[#CBD5E1] dark:border-[#334155] text-xs text-[#0F172A] dark:text-[#F1F5F9] placeholder-[#94A3B8] focus:outline-none focus:border-[#2563EB]"
                                       />
                                     </div>
                                   </div>
 
                                   <div className="max-h-60 overflow-y-auto p-1.5 space-y-1.5">
                                     {filteredRoutesForModal.length === 0 ? (
-                                      <div className="py-5 text-center text-[11px] text-slate-400">
+                                      <div className="py-5 text-center text-[11px] text-[#64748B]">
                                         Tidak ada rute atau kru yang cocok dengan pencarian.
                                       </div>
                                     ) : (
@@ -6522,27 +6489,26 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                             }
                                             className={`p-2.5 rounded-xl border transition cursor-pointer ${
                                               isSelectedRoute
-                                                ? 'bg-amber-500/10 border-amber-500 ring-1 ring-amber-500/30'
-                                                : 'bg-slate-50/70 dark:bg-slate-950/60 border-slate-200 dark:border-slate-800 hover:border-amber-500/50 hover:bg-slate-100/70 dark:hover:bg-slate-800/50'
+                                                ? 'bg-[#EFF6FF] dark:bg-[#1E3A8A]/30 border-[#2563EB]'
+                                                : 'bg-[#F8FAFC] dark:bg-[#0F172A] border-[#E2E8F0] dark:border-[#24344D] hover:border-[#2563EB]/50'
                                             }`}
                                           >
                                             <div className="flex items-center justify-between gap-2 mb-1.5">
                                               <div className="flex items-center gap-1.5 min-w-0">
-                                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-black shrink-0 ${
-                                                  isSelectedRoute ? 'bg-amber-500 text-slate-950' : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${
+                                                  isSelectedRoute ? 'bg-[#2563EB] text-white' : 'bg-[#E2E8F0] dark:bg-[#1E293B] text-[#334155] dark:text-[#CBD5E1]'
                                                 }`}>
                                                   #{idx + 1}
                                                 </span>
-                                                <span className="font-black text-slate-900 dark:text-white text-xs truncate">
+                                                <span className="font-bold text-[#0F172A] dark:text-[#F1F5F9] text-xs truncate">
                                                   {stdArea}
                                                 </span>
                                               </div>
-                                              <span className="px-2 py-0.5 rounded bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20 font-mono font-bold text-[10px] shrink-0">
+                                              <span className="px-2 py-0.5 rounded bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA] border border-[#BFDBFE] dark:border-[#1E40AF] font-mono font-bold text-[10px] shrink-0">
                                                 {trip.armada}
                                               </span>
                                             </div>
 
-                                            {/* Klik langsung pada Driver, Helper 1, atau Helper 2 untuk memilih rute + posisi sekaligus */}
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                                               <button
                                                 type="button"
@@ -6561,8 +6527,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                                 }}
                                                 className={`px-2 py-1.5 rounded-lg border text-left text-[11px] flex items-center justify-between gap-1 transition cursor-pointer ${
                                                   isSelectedRoute && replaceAbsentModal.replacePosition === 'driver'
-                                                    ? 'bg-amber-500 text-slate-950 border-amber-500 font-black'
-                                                    : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800 hover:border-amber-500'
+                                                    ? 'bg-[#2563EB] text-white border-[#2563EB] font-bold'
+                                                    : 'bg-white dark:bg-[#162234] text-[#334155] dark:text-[#CBD5E1] border-[#E2E8F0] dark:border-[#24344D] hover:border-[#2563EB]'
                                                 }`}
                                               >
                                                 <span className="truncate">
@@ -6590,8 +6556,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                                 }}
                                                 className={`px-2 py-1.5 rounded-lg border text-left text-[11px] flex items-center justify-between gap-1 transition cursor-pointer ${
                                                   isSelectedRoute && replaceAbsentModal.replacePosition === 'helper'
-                                                    ? 'bg-amber-500 text-slate-950 border-amber-500 font-black'
-                                                    : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800 hover:border-amber-500'
+                                                    ? 'bg-[#2563EB] text-white border-[#2563EB] font-bold'
+                                                    : 'bg-white dark:bg-[#162234] text-[#334155] dark:text-[#CBD5E1] border-[#E2E8F0] dark:border-[#24344D] hover:border-[#2563EB]'
                                                 }`}
                                               >
                                                 <span className="truncate">
@@ -6611,16 +6577,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               )}
                             </div>
 
-                            {/* Ringkasan Konfirmasi Penggantian */}
                             {selectedTrip && (
-                              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2">
+                              <div className="p-3.5 rounded-xl bg-[#EFF6FF] dark:bg-[#1E3A8A]/25 border border-[#BFDBFE] dark:border-[#1E40AF] flex items-center justify-between gap-2">
                                 <div className="min-w-0">
-                                  <span className="text-[10px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-400 block">
+                                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#2563EB] dark:text-[#60A5FA] block">
                                     RINGKASAN PENUGASAN PENGGANTI
                                   </span>
-                                  <p className="text-xs font-bold text-slate-900 dark:text-white mt-0.5">
+                                  <p className="text-xs font-medium text-[#0F172A] dark:text-[#F1F5F9] mt-0.5">
                                     <strong>{replaceAbsentModal.standbyCrewName}</strong> menggantikan{' '}
-                                    <strong className="text-amber-600 dark:text-amber-400">
+                                    <strong className="text-[#2563EB] dark:text-[#60A5FA]">
                                       {posLabelActive} ({selectedTargetCrewName})
                                     </strong>{' '}
                                     di rute <strong>{selectedAreaName}</strong> ({selectedTrip.armada})
@@ -6630,12 +6595,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                             )}
                           </div>
 
-                          <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                          <div className="flex items-center justify-between gap-2 pt-3 border-t border-[#E2E8F0] dark:border-[#24344D]">
                             {activeDayObj.pengiriman.some(p => p.backupCrewName && isSameCrewPerson(p.backupCrewName, replaceAbsentModal.standbyCrewName)) ? (
                               <button
                                 type="button"
                                 onClick={() => handleCancelReplaceAbsentCrew(replaceAbsentModal.standbyCrewName)}
-                                className="px-3 py-2 rounded-xl bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 dark:hover:bg-rose-900/60 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                                className="px-3 py-2 rounded-lg bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
                                 title="Batalkan penggantian dan kembalikan ke status Stand By di Gudang"
                               >
                                 <XCircle className="w-3.5 h-3.5 text-rose-500" />
@@ -6648,14 +6613,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               <button
                                 type="button"
                                 onClick={() => setReplaceAbsentModal(null)}
-                                className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                                className="px-4 py-2 rounded-lg border border-[#CBD5E1] dark:border-[#334155] text-[#475569] dark:text-[#CBD5E1] text-xs font-bold hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B] transition cursor-pointer"
                               >
                                 Batal
                               </button>
                               <button
                                 type="button"
                                 onClick={handleConfirmReplaceAbsentCrew}
-                                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-black transition cursor-pointer shadow-sm flex items-center gap-1.5"
+                                className="px-4 py-2 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
                               >
                                 <Check className="w-3.5 h-3.5" />
                                 <span>Konfirmasi Gantikan</span>
@@ -6674,38 +6639,41 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         </>
       ) : activeSubPage === 'upload_excel' ? (
         /* HALAMAN BARU 1: FORM UNGGAH FILE JADWAL PENGIRIMAN (Tanpa Cabang Data) */
-        <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-8 shadow-sm space-y-6 animate-in fade-in duration-200">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-4">
-            <div>
-              <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center gap-2.5">
-                <FileSpreadsheet className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-                <span>Unggah File Jadwal Pengiriman</span>
-              </h2>
-              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-                Pilih periode bulan, mode import, dan unggah file Excel (.xls, .xlsx, .csv) untuk diproses pada halaman pemrosesan jadwal.
-              </p>
+        <div className="bg-white dark:bg-[#162234] border border-[#E2E8F0] dark:border-[#24344D] rounded-xl p-6 sm:p-8 space-y-6 animate-in fade-in duration-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#E2E8F0] dark:border-[#24344D] pb-5">
+            <div className="flex items-start gap-3.5">
+              <div className="w-11 h-11 rounded-xl bg-[#2563EB] text-white flex items-center justify-center shrink-0">
+                <FileSpreadsheet className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-lg sm:text-xl font-bold text-[#0F172A] dark:text-[#F1F5F9]">
+                  Unggah File Jadwal Pengiriman
+                </h2>
+                <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8] mt-1">
+                  Pilih periode bulan, mode import, dan unggah file Excel (.xls, .xlsx, .csv) untuk diproses pada halaman pemrosesan jadwal.
+                </p>
+              </div>
             </div>
             <button
               type="button"
               onClick={() => setActiveSubPage('schedule')}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold border border-slate-300 dark:border-slate-700 transition cursor-pointer w-fit shadow-2xs"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-white dark:bg-[#1E293B] hover:bg-[#F8FAFC] dark:hover:bg-[#24344D] text-[#334155] dark:text-[#E2E8F0] text-xs font-semibold border border-[#CBD5E1] dark:border-[#334155] transition cursor-pointer w-fit"
             >
               <ChevronLeft className="w-4 h-4" />
               <span>Kembali ke Jadwal Pengiriman</span>
             </button>
           </div>
 
-          <div className="max-w-3xl space-y-5">
-            {/* BULAN DATA & TAHUN DATA (Cabang Data Dihapus) */}
+          <div className="max-w-3xl space-y-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 mb-2">
+                <label className="block text-xs font-bold uppercase tracking-wider text-[#334155] dark:text-[#CBD5E1] mb-2">
                   BULAN DATA
                 </label>
                 <select
                   value={importMonth}
                   onChange={(e) => setImportMonth(e.target.value)}
-                  className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer shadow-2xs"
+                  className="w-full bg-[#F8FAFC] dark:bg-[#0F172A] border border-[#CBD5E1] dark:border-[#334155] rounded-lg px-4 py-3 text-sm font-medium text-[#0F172A] dark:text-[#F1F5F9] focus:outline-none focus:border-[#2563EB] cursor-pointer"
                 >
                   {MONTH_NAMES.map(m => (
                     <option key={m} value={m}>{m}</option>
@@ -6714,13 +6682,13 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               </div>
 
               <div>
-                <label className="block text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 mb-2">
+                <label className="block text-xs font-bold uppercase tracking-wider text-[#334155] dark:text-[#CBD5E1] mb-2">
                   TAHUN DATA
                 </label>
                 <select
                   value={importYear}
                   onChange={(e) => setImportYear(e.target.value)}
-                  className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer shadow-2xs"
+                  className="w-full bg-[#F8FAFC] dark:bg-[#0F172A] border border-[#CBD5E1] dark:border-[#334155] rounded-lg px-4 py-3 text-sm font-medium text-[#0F172A] dark:text-[#F1F5F9] focus:outline-none focus:border-[#2563EB] cursor-pointer"
                 >
                   {['2024', '2025', '2026', '2027', '2028', '2029', '2030'].map(yr => (
                     <option key={yr} value={yr}>{yr}</option>
@@ -6729,18 +6697,17 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               </div>
             </div>
 
-            {/* MODE IMPORT */}
             <div>
-              <label className="block text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 mb-2">
+              <label className="block text-xs font-bold uppercase tracking-wider text-[#334155] dark:text-[#CBD5E1] mb-2">
                 MODE IMPORT
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <label
                   onClick={() => setImportMode('tambahkan')}
-                  className={`flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition bg-white dark:bg-slate-950 ${
+                  className={`flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition ${
                     importMode === 'tambahkan'
-                      ? 'border-blue-600 ring-2 ring-blue-500/20'
-                      : 'border-slate-300 dark:border-slate-700 hover:border-slate-400'
+                      ? 'bg-[#EFF6FF] dark:bg-[#1E3A8A]/30 border-[#2563EB] ring-1 ring-[#2563EB]'
+                      : 'bg-white dark:bg-[#0F172A] border-[#CBD5E1] dark:border-[#334155] hover:border-[#2563EB]/60'
                   }`}
                 >
                   <input
@@ -6748,11 +6715,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     name="importModeRadio"
                     checked={importMode === 'tambahkan'}
                     onChange={() => setImportMode('tambahkan')}
-                    className="mt-1 w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    className="mt-1 w-4 h-4 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
                   />
                   <div>
-                    <div className="text-sm font-black text-slate-900 dark:text-white">Tambahkan data</div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    <div className="text-sm font-bold text-[#0F172A] dark:text-[#F1F5F9]">Tambahkan data</div>
+                    <div className="text-xs text-[#64748B] dark:text-[#94A3B8] mt-0.5">
                       Data bulan yang sama tidak dihapus.
                     </div>
                   </div>
@@ -6760,10 +6727,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
                 <label
                   onClick={() => setImportMode('ganti')}
-                  className={`flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition bg-white dark:bg-slate-950 ${
+                  className={`flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition ${
                     importMode === 'ganti'
-                      ? 'border-blue-600 ring-2 ring-blue-500/20'
-                      : 'border-slate-300 dark:border-slate-700 hover:border-slate-400'
+                      ? 'bg-[#EFF6FF] dark:bg-[#1E3A8A]/30 border-[#2563EB] ring-1 ring-[#2563EB]'
+                      : 'bg-white dark:bg-[#0F172A] border-[#CBD5E1] dark:border-[#334155] hover:border-[#2563EB]/60'
                   }`}
                 >
                   <input
@@ -6771,11 +6738,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     name="importModeRadio"
                     checked={importMode === 'ganti'}
                     onChange={() => setImportMode('ganti')}
-                    className="mt-1 w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    className="mt-1 w-4 h-4 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
                   />
                   <div>
-                    <div className="text-sm font-black text-slate-900 dark:text-white">Ganti data bulan ini</div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    <div className="text-sm font-bold text-[#0F172A] dark:text-[#F1F5F9]">Ganti data bulan ini</div>
+                    <div className="text-xs text-[#64748B] dark:text-[#94A3B8] mt-0.5">
                       Data lama periode sama dihapus lalu diimport ulang.
                     </div>
                   </div>
@@ -6783,16 +6750,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               </div>
             </div>
 
-            {/* FILE JADWAL PENGIRIMAN */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="block text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                <label className="block text-xs font-bold uppercase tracking-wider text-[#334155] dark:text-[#CBD5E1]">
                   FILE JADWAL PENGIRIMAN
                 </label>
                 <button
                   type="button"
                   onClick={downloadScheduleTemplate}
-                  className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-[#2563EB] dark:text-[#60A5FA] hover:underline cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5" />
                   <span>Unduh Template Excel</span>
@@ -6833,17 +6799,17 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 }}
               />
 
-              <div className="bg-blue-50/40 dark:bg-slate-950 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl p-4 space-y-2.5">
-                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-2 flex items-center gap-3">
+              <div className="bg-[#EFF6FF]/60 dark:bg-[#0F172A] border-2 border-dashed border-[#BFDBFE] dark:border-[#334155] rounded-xl p-4 space-y-2.5">
+                <div className="bg-white dark:bg-[#162234] border border-[#E2E8F0] dark:border-[#24344D] rounded-lg p-2 flex items-center gap-3">
                   <button
                     type="button"
                     onClick={() => modalFileInputRef.current?.click()}
-                    className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs cursor-pointer transition shrink-0 shadow-xs"
+                    className="px-4 py-2 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold text-xs cursor-pointer transition shrink-0"
                   >
-                    Choose File
+                    Pilih File Excel
                   </button>
-                  <span className="text-sm text-slate-700 dark:text-slate-300 truncate flex-1">
-                    {selectedUploadFile ? selectedUploadFile.name : 'No file chosen'}
+                  <span className="text-sm text-[#334155] dark:text-[#CBD5E1] truncate flex-1">
+                    {selectedUploadFile ? selectedUploadFile.name : 'Belum ada file dipilih'}
                   </span>
                   {selectedUploadFile && (
                     <button
@@ -6853,19 +6819,18 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                         setStagedCombinedTrips([]);
                         if (modalFileInputRef.current) modalFileInputRef.current.value = '';
                       }}
-                      className="text-xs font-bold text-rose-500 hover:text-rose-400 px-2 cursor-pointer"
+                      className="text-xs font-bold text-rose-600 hover:text-rose-500 px-2 cursor-pointer"
                     >
                       Hapus
                     </button>
                   )}
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
+                <p className="text-xs text-[#64748B] dark:text-[#94A3B8]">
                   Format didukung: .xls, .xlsx, .csv. Maksimal 10MB. Sistem akan menampilkan halaman pemrosesan &amp; preview jadwal sebelum import.
                 </p>
               </div>
             </div>
 
-            {/* TOMBOL AKSI: Preview & Proses File (Membuka Halaman Baru Pemrosesan) & Lihat Riwayat Upload */}
             <div className="flex items-center gap-3 pt-2 flex-wrap">
               <button
                 type="button"
@@ -6876,7 +6841,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   }
                   setActiveSubPage('upload_process');
                 }}
-                className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-black shadow-md transition cursor-pointer"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-sm font-bold transition cursor-pointer"
               >
                 <Search className="w-4 h-4" />
                 <span>Preview Dulu</span>
@@ -6888,8 +6853,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   setScheduleChangeLogs(logisticsStore.getScheduleChangeLogs());
                   setIsHistoryModalOpen(true);
                 }}
-                className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-white dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm font-black border border-slate-300 dark:border-slate-700 transition cursor-pointer"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-white dark:bg-[#1E293B] hover:bg-[#F8FAFC] dark:hover:bg-[#24344D] text-[#334155] dark:text-[#E2E8F0] text-sm font-bold border border-[#CBD5E1] dark:border-[#334155] transition cursor-pointer"
               >
+                <HistoryIcon className="w-4 h-4 text-[#2563EB] dark:text-[#60A5FA]" />
                 <span>Lihat Riwayat Upload</span>
               </button>
             </div>
@@ -6897,19 +6863,17 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         </div>
       ) : activeSubPage === 'upload_process' ? (
         /* HALAMAN BARU 2: HALAMAN PEMROSESAN & PREVIEW FILE JADWAL EXCEL */
-        <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-8 shadow-sm space-y-6 animate-in fade-in duration-200">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-4">
+        <div className="bg-white dark:bg-[#162234] border border-[#E2E8F0] dark:border-[#24344D] rounded-xl p-6 sm:p-8 space-y-6 animate-in fade-in duration-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#E2E8F0] dark:border-[#24344D] pb-5">
             <div>
-              <div className="flex items-center gap-2">
-                <span className="px-2.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 text-[11px] font-black uppercase tracking-wider border border-blue-300 dark:border-blue-800">
-                  Halaman Pemrosesan File
-                </span>
-              </div>
-              <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center gap-2 mt-1.5">
-                <CheckCircle2 className="w-6 h-6 text-emerald-500" />
+              <span className="inline-block px-2.5 py-0.5 rounded-md bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA] text-[11px] font-bold uppercase tracking-wider border border-[#BFDBFE] dark:border-[#1E40AF]">
+                Halaman Pemrosesan File
+              </span>
+              <h2 className="text-lg sm:text-xl font-bold text-[#0F172A] dark:text-[#F1F5F9] flex items-center gap-2 mt-2">
+                <CheckCircle2 className="w-5 h-5 text-[#2563EB]" />
                 <span>Pemrosesan &amp; Preview Jadwal Excel</span>
               </h2>
-              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+              <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8] mt-0.5">
                 Periksa hasil pembacaan file <strong>{selectedUploadFile?.name || '-'}</strong> sebelum disimpan ke jadwal utama.
               </p>
             </div>
@@ -6918,7 +6882,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               <button
                 type="button"
                 onClick={() => setActiveSubPage('upload_excel')}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold border border-slate-300 dark:border-slate-700 transition cursor-pointer"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-white dark:bg-[#1E293B] hover:bg-[#F8FAFC] dark:hover:bg-[#24344D] text-[#334155] dark:text-[#E2E8F0] text-xs font-semibold border border-[#CBD5E1] dark:border-[#334155] transition cursor-pointer"
               >
                 <ChevronLeft className="w-4 h-4" />
                 <span>Kembali ke Form Unggah</span>
@@ -6945,7 +6909,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   setSelectedUploadFile(null);
                   setActiveSubPage('schedule');
                 }}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black shadow-md transition cursor-pointer"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold transition cursor-pointer"
               >
                 <Save className="w-4 h-4" />
                 <span>Simpan &amp; Import Jadwal ({stagedCombinedTrips.filter(x => x.source === 'excel').length} Baris)</span>
@@ -6953,47 +6917,45 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             </div>
           </div>
 
-          {/* Ringkasan Parameter Pemrosesan */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="bg-white dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">NAMA FILE EXCEL</span>
-              <span className="text-sm font-black text-slate-900 dark:text-white mt-1 block truncate">
+            <div className="bg-[#F8FAFC] dark:bg-[#0F172A] p-4 rounded-xl border border-[#E2E8F0] dark:border-[#24344D]">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#64748B] block">NAMA FILE EXCEL</span>
+              <span className="text-sm font-bold text-[#0F172A] dark:text-[#F1F5F9] mt-1 block truncate">
                 {selectedUploadFile?.name || '-'}
               </span>
             </div>
-            <div className="bg-white dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">PERIODE BULAN &amp; TAHUN</span>
-              <span className="text-sm font-black text-slate-900 dark:text-white mt-1 block">
+            <div className="bg-[#F8FAFC] dark:bg-[#0F172A] p-4 rounded-xl border border-[#E2E8F0] dark:border-[#24344D]">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#64748B] block">PERIODE BULAN &amp; TAHUN</span>
+              <span className="text-sm font-bold text-[#0F172A] dark:text-[#F1F5F9] mt-1 block">
                 {importMonth} {importYear}
               </span>
             </div>
-            <div className="bg-white dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">MODE IMPORT &amp; BARIS TERBACA</span>
-              <span className="text-sm font-black text-blue-600 dark:text-blue-400 mt-1 block">
+            <div className="bg-[#F8FAFC] dark:bg-[#0F172A] p-4 rounded-xl border border-[#E2E8F0] dark:border-[#24344D]">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#64748B] block">MODE IMPORT &amp; BARIS TERBACA</span>
+              <span className="text-sm font-bold text-[#2563EB] dark:text-[#60A5FA] mt-1 block">
                 {importMode === 'tambahkan' ? 'Tambahkan data' : 'Ganti data bulan ini'} ({stagedCombinedTrips.filter(x => x.source === 'excel').length} Jadwal)
               </span>
             </div>
           </div>
 
-          {/* Tabel Pratinjau Pemrosesan File */}
-          <div className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
+          <div className="bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#24344D] rounded-xl overflow-hidden">
             <div className="max-h-[60vh] overflow-y-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-slate-800 sticky top-0">
-                    <th className="p-3 font-bold">NO</th>
-                    <th className="p-3 font-bold">TANGGAL KIRIM</th>
-                    <th className="p-3 font-bold">DRIVER / SUPIR</th>
-                    <th className="p-3 font-bold">HELPER</th>
-                    <th className="p-3 font-bold">AREA KIRIM TUJUAN</th>
-                    <th className="p-3 font-bold">ARMADA</th>
-                    <th className="p-3 font-bold text-center">HAPUS BARIS</th>
+                  <tr className="bg-[#F8FAFC] dark:bg-[#1E293B] text-[#475569] dark:text-[#94A3B8] border-b border-[#E2E8F0] dark:border-[#24344D] sticky top-0">
+                    <th className="p-3.5 font-bold">NO</th>
+                    <th className="p-3.5 font-bold">TANGGAL KIRIM</th>
+                    <th className="p-3.5 font-bold">DRIVER / SUPIR</th>
+                    <th className="p-3.5 font-bold">HELPER</th>
+                    <th className="p-3.5 font-bold">AREA KIRIM TUJUAN</th>
+                    <th className="p-3.5 font-bold">ARMADA</th>
+                    <th className="p-3.5 font-bold text-center">HAPUS BARIS</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
+                <tbody className="divide-y divide-[#E2E8F0] dark:divide-[#24344D] text-[#0F172A] dark:text-[#E2E8F0]">
                   {stagedCombinedTrips.filter(x => x.source === 'excel').length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="p-8 text-center text-slate-500">
+                      <td colSpan={7} className="p-8 text-center text-[#64748B]">
                         Tidak ada baris jadwal yang terbaca dari file ini. Silakan kembali dan pilih file sesuai template.
                       </td>
                     </tr>
@@ -7001,20 +6963,20 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     stagedCombinedTrips
                       .filter(x => x.source === 'excel')
                       .map((item, idx) => (
-                        <tr key={item.tempId} className="hover:bg-slate-50 dark:hover:bg-slate-900/50">
-                          <td className="p-3 font-mono text-slate-500">{idx + 1}</td>
-                          <td className="p-3 font-mono font-semibold">{item.dateStr || '-'}</td>
-                          <td className="p-3 font-bold text-slate-900 dark:text-white">{item.driver}</td>
-                          <td className="p-3">
+                        <tr key={item.tempId} className="hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B]/60">
+                          <td className="p-3.5 font-mono text-[#64748B]">{idx + 1}</td>
+                          <td className="p-3.5 font-mono font-semibold">{item.dateStr || '-'}</td>
+                          <td className="p-3.5 font-bold text-[#0F172A] dark:text-[#F1F5F9]">{item.driver}</td>
+                          <td className="p-3.5 text-[#475569] dark:text-[#94A3B8]">
                             {item.helper || '-'}{item.helper2 && item.helper2 !== '-' ? `, ${item.helper2}` : ''}
                           </td>
-                          <td className="p-3 font-bold text-emerald-700 dark:text-emerald-400">{item.area}</td>
-                          <td className="p-3 font-mono font-bold text-blue-700 dark:text-blue-400">{item.armada}</td>
-                          <td className="p-3 text-center">
+                          <td className="p-3.5 font-bold text-[#2563EB] dark:text-[#60A5FA]">{item.area}</td>
+                          <td className="p-3.5 font-mono font-bold text-[#334155] dark:text-[#CBD5E1]">{item.armada}</td>
+                          <td className="p-3.5 text-center">
                             <button
                               type="button"
                               onClick={() => setStagedCombinedTrips(prev => prev.filter(x => x.tempId !== item.tempId))}
-                              className="text-rose-500 hover:text-rose-400 cursor-pointer p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
+                              className="text-rose-500 hover:text-rose-600 cursor-pointer p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
                               title="Hapus baris ini"
                             >
                               <Trash2 className="w-4 h-4 mx-auto" />
@@ -7032,18 +6994,18 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
       {/* Modal Edit / Tambah Ritase Pengiriman */}
       {editingTripModal?.isOpen && typeof document !== 'undefined' && createPortal(
-        <div className="fixed inset-0 z-[10000] grid place-items-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-xs overflow-hidden animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 max-w-5xl w-full shadow-2xl flex flex-col max-h-[calc(100dvh-1rem)] overflow-hidden">
-            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3 mb-4 shrink-0">
+        <div className="fixed inset-0 z-[10000] akk-flat-schedule grid place-items-center p-2 sm:p-4 bg-slate-950/60 backdrop-blur-xs overflow-hidden animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#162234] border border-[#E2E8F0] dark:border-[#24344D] rounded-2xl p-5 sm:p-6 max-w-5xl w-full flex flex-col max-h-[calc(100dvh-1rem)] overflow-hidden">
+            <div className="flex items-center justify-between border-b border-[#E2E8F0] dark:border-[#24344D] pb-3.5 mb-4 shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-500 flex items-center justify-center border border-amber-500/30">
+                <div className="w-10 h-10 rounded-xl bg-[#2563EB] text-white flex items-center justify-center shrink-0">
                   <Edit className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  <h3 className="text-sm sm:text-base font-bold text-[#0F172A] dark:text-[#F1F5F9]">
                     {editingTripModal.isNew ? 'Tambah Ritase Pengiriman' : 'Edit Rincian Pengiriman'}
                   </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                  <p className="text-xs text-[#64748B] dark:text-[#94A3B8]">
                     Tanggal: {editingTripModal.dateString}
                   </p>
                 </div>
@@ -7052,7 +7014,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               <button
                 type="button"
                 onClick={() => setEditingTripModal(null)}
-                className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center justify-center transition cursor-pointer"
+                className="w-8 h-8 rounded-lg bg-[#F1F5F9] dark:bg-[#1E293B] hover:bg-[#E2E8F0] dark:hover:bg-[#24344D] text-[#64748B] hover:text-[#0F172A] dark:hover:text-white flex items-center justify-center transition cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -7060,7 +7022,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
             <div className="text-xs flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1">
               {editTripModalError && (
-                <div className="mb-3 p-3 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-800 dark:text-amber-200 text-xs font-bold flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="mb-3 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 text-xs font-bold flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                   <div className="flex items-start gap-2">
                     <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
                     <span>{editTripModalError}</span>
@@ -7088,7 +7050,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   emptyLabel="- Tanpa Helper 1 -"
                   emptyValue=""
                   roleBadgeText="Kru Helper"
-                  accentColor="emerald"
+                  accentColor="blue"
                   scheduledCrewMap={editingScheduledCrewMap}
                 />
 
@@ -7100,19 +7062,19 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   emptyLabel="- Tanpa Helper 2 -"
                   emptyValue=""
                   roleBadgeText="Kru Helper"
-                  accentColor="emerald"
+                  accentColor="blue"
                   scheduledCrewMap={editingScheduledCrewMap}
                 />
               </div>
 
               <div>
-                <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1.5">
+                <label className="block text-[#334155] dark:text-[#CBD5E1] font-bold mb-1.5">
                   Kirim Area / Tujuan ({getOfficialAreasForBranch(editingTripModal.branchId || effectiveActiveBranchId).length} Area Resmi Cabang {branchStore.getBranchById(editingTripModal.branchId || effectiveActiveBranchId)?.name || 'Aktif'}) *
                 </label>
                 <select
                   value={editingTripModal.area}
                   onChange={(e) => setEditingTripModal({ ...editingTripModal, area: e.target.value })}
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                  className="w-full bg-[#F8FAFC] dark:bg-[#0F172A] border border-[#CBD5E1] dark:border-[#334155] text-[#0F172A] dark:text-[#F1F5F9] text-xs font-bold rounded-lg px-3.5 py-2.5 focus:outline-none focus:border-[#2563EB] cursor-pointer"
                 >
                   <option value="">-- Pilih Area Tujuan --</option>
                   {getOfficialAreasForBranch(editingTripModal.branchId || effectiveActiveBranchId).map(areaOpt => (
@@ -7138,16 +7100,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
                 </div>
                 <div className="space-y-3.5 min-w-0">
-              {/* Tanggal & Jam Keberangkatan serta Tanggal & Jam Kepulangan (Kepulangan Sesuai Tanggal Kirim) */}
-              <div className="p-3.5 rounded-xl bg-blue-500/5 border border-blue-500/25 space-y-3">
+              {/* Tanggal & Jam Keberangkatan serta Tanggal & Jam Kepulangan */}
+              <div className="p-4 rounded-xl bg-[#F8FAFC] dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#24344D] space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="text-[11px] font-bold text-[#2563EB] dark:text-[#60A5FA] uppercase tracking-wider flex items-center gap-1.5">
                     <Calendar className="w-3.5 h-3.5" />
                     <span>Jadwal Waktu: Keberangkatan &amp; Kepulangan</span>
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                  {/* Keberangkatan */}
                   <div className="space-y-2.5">
                     <ModernDatePicker
                       label="Tanggal Keberangkatan *"
@@ -7173,7 +7134,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     />
                   </div>
 
-                  {/* Kepulangan (Sesuai Tanggal Kirim) */}
                   <div className="space-y-2.5">
                     <ModernDatePicker
                       label="Tanggal Kepulangan *"
@@ -7202,8 +7162,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 </div>
 
                 {editingTripModal.departureDateIso && editingTripModal.returnDateIso && editingTripModal.departureDateIso !== editingTripModal.returnDateIso && (
-                  <div className="text-[11px] font-semibold text-blue-600 dark:text-blue-300 bg-blue-500/10 px-2.5 py-1.5 rounded-lg border border-blue-500/20">
-                    📌 Berangkat: {editingTripModal.departureDateIso} ({editingTripModal.departureTime} WIB) • Pulang: {editingTripModal.returnDateIso} ({editingTripModal.targetReturnTime} WIB). Jadwal penugasan kalender mengikuti Tanggal Kirim / Kepulangan.
+                  <div className="text-[11px] font-semibold text-[#2563EB] dark:text-[#60A5FA] bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 px-3 py-2 rounded-lg border border-[#BFDBFE] dark:border-[#1E40AF]">
+                    Berangkat: {editingTripModal.departureDateIso} ({editingTripModal.departureTime} WIB) • Pulang: {editingTripModal.returnDateIso} ({editingTripModal.targetReturnTime} WIB). Jadwal kalender mengikuti Tanggal Kirim / Kepulangan.
                   </div>
                 )}
               </div>
@@ -7211,18 +7171,18 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               </div>
             </div>
 
-            <div className="pt-3 mt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2 shrink-0 bg-white dark:bg-slate-900">
+            <div className="pt-3.5 mt-4 border-t border-[#E2E8F0] dark:border-[#24344D] flex items-center justify-end gap-2.5 shrink-0">
               <button
                 type="button"
                 onClick={() => setEditingTripModal(null)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                className="px-4 py-2 rounded-lg border border-[#CBD5E1] dark:border-[#334155] text-xs font-semibold text-[#475569] dark:text-[#CBD5E1] hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B] transition cursor-pointer"
               >
                 Batal
               </button>
               <button
                 type="button"
                 onClick={handleSaveTripModal}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md transition cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-[#2563EB] hover:bg-[#1D4ED8] text-white transition cursor-pointer"
               >
                 <Save className="w-3.5 h-3.5" />
                 <span>Simpan Perubahan Permanen</span>
@@ -7236,41 +7196,41 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       {/* Pop-up Modal: Form Tambah Jadwal Baru (Manual) */}
       {isUploadConfigModalOpen && typeof document !== 'undefined' && createPortal(
         <div
-          className="fixed inset-0 z-[10000] grid place-items-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-xs overflow-hidden animate-in fade-in duration-200"
+          className="fixed inset-0 z-[10000] akk-flat-schedule grid place-items-center p-3 sm:p-4 bg-slate-950/60 backdrop-blur-xs overflow-hidden animate-in fade-in duration-200"
           onClick={() => setIsUploadConfigModalOpen(false)}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 max-w-xl w-full shadow-2xl flex flex-col max-h-[calc(100dvh-1.5rem)] overflow-hidden"
+            className="bg-white dark:bg-[#162234] border border-[#E2E8F0] dark:border-[#24344D] rounded-2xl p-5 sm:p-6 max-w-xl w-full flex flex-col max-h-[calc(100dvh-1.5rem)] overflow-hidden"
           >
-            {/* Modal Header (Sticky at Top so always visible at 80%-150% zoom) */}
-            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3 mb-3 shrink-0">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-[#E2E8F0] dark:border-[#24344D] pb-3.5 mb-4 shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-sm shrink-0">
+                <div className="w-10 h-10 rounded-xl bg-[#2563EB] text-white flex items-center justify-center shrink-0">
                   <Plus className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-black text-slate-900 dark:text-white">
+                  <h3 className="text-base font-bold text-[#0F172A] dark:text-[#F1F5F9]">
                     Form Tambah Jadwal Baru (Manual)
                   </h3>
-                  <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                    Cabang Aktif: <span className="text-emerald-600 dark:text-emerald-400 font-bold">Cabang {activeBranchRecord?.name || 'Nusantara'}</span> · Data armada, kru, dan area otomatis terkunci per cabang
+                  <p className="text-[11px] font-medium text-[#64748B] dark:text-[#94A3B8]">
+                    Cabang Aktif: <span className="text-[#2563EB] dark:text-[#60A5FA] font-bold">Cabang {activeBranchRecord?.name || 'Nusantara'}</span> · Data armada, kru, dan area otomatis terkunci per cabang
                   </p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setIsUploadConfigModalOpen(false)}
-                className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center justify-center transition cursor-pointer shrink-0"
+                className="w-8 h-8 rounded-lg bg-[#F1F5F9] dark:bg-[#1E293B] hover:bg-[#E2E8F0] dark:hover:bg-[#24344D] text-[#64748B] hover:text-[#0F172A] dark:hover:text-white flex items-center justify-center transition cursor-pointer shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Form Body (Scrollable inside modal card) */}
-            <div className="space-y-3 text-xs flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1">
+            {/* Form Body */}
+            <div className="space-y-3.5 text-xs flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1">
               {manualScheduleFormError && (
-                <div className="p-3 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-800 dark:text-amber-200 text-xs font-bold flex flex-col gap-2">
+                <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 text-xs font-bold flex flex-col gap-2">
                   <div className="flex items-start gap-2">
                     <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
                     <span>{manualScheduleFormError}</span>
@@ -7294,7 +7254,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                           : manualScheduleForm.departureDateIso
                       });
                     }}
-                    accentColor="emerald"
+                    accentColor="blue"
                   />
                 </div>
                 <div className="w-full">
@@ -7307,21 +7267,19 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                       setManualScheduleFormError(null);
                       setManualScheduleForm({ ...manualScheduleForm, armada: val });
                     }}
-                    accentColor="emerald"
+                    accentColor="blue"
                   />
                 </div>
               </div>
 
-              {/* Tanggal & Jam Keberangkatan serta Tanggal & Jam Kepulangan (Kepulangan Sesuai Tanggal Kirim) */}
-              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
+              <div className="p-4 rounded-xl bg-[#F8FAFC] dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#24344D] space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="text-[11px] font-bold text-[#2563EB] dark:text-[#60A5FA] uppercase tracking-wider flex items-center gap-1.5">
                     <Clock className="w-3.5 h-3.5" />
                     <span>Jadwal Waktu: Keberangkatan &amp; Kepulangan</span>
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                  {/* Keberangkatan */}
                   <div className="space-y-2.5">
                     <ModernDatePicker
                       label="Tanggal Keberangkatan *"
@@ -7332,7 +7290,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                           departureDateIso: nextDep
                         });
                       }}
-                      accentColor="emerald"
+                      accentColor="blue"
                     />
                     <ModernTimePicker
                       label="Jam Keberangkatan *"
@@ -7343,11 +7301,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                           departureTime: nextTime
                         });
                       }}
-                      accentColor="emerald"
+                      accentColor="blue"
                     />
                   </div>
 
-                  {/* Kepulangan (Sesuai Tanggal Kirim) */}
                   <div className="space-y-2.5">
                     <ModernDatePicker
                       label="Tanggal Kepulangan *"
@@ -7361,7 +7318,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                           dateIso: nextRet
                         });
                       }}
-                      accentColor="emerald"
+                      accentColor="blue"
                     />
                     <ModernTimePicker
                       label="Target Jam Kepulangan *"
@@ -7372,14 +7329,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                           targetReturnTime: nextRetTime
                         });
                       }}
-                      accentColor="emerald"
+                      accentColor="blue"
                     />
                   </div>
                 </div>
 
                 {manualScheduleForm.departureDateIso && manualScheduleForm.returnDateIso && manualScheduleForm.departureDateIso !== manualScheduleForm.returnDateIso && (
-                  <div className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20">
-                    📌 Berangkat: {manualScheduleForm.departureDateIso} ({manualScheduleForm.departureTime} WIB) • Pulang: {manualScheduleForm.returnDateIso} ({manualScheduleForm.targetReturnTime} WIB). Jadwal penugasan kalender mengikuti Tanggal Kirim / Kepulangan.
+                  <div className="text-[11px] font-semibold text-[#2563EB] dark:text-[#60A5FA] bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 px-3 py-2 rounded-lg border border-[#BFDBFE] dark:border-[#1E40AF]">
+                    Berangkat: {manualScheduleForm.departureDateIso} ({manualScheduleForm.departureTime} WIB) • Pulang: {manualScheduleForm.returnDateIso} ({manualScheduleForm.targetReturnTime} WIB). Jadwal penugasan kalender mengikuti Tanggal Kirim / Kepulangan.
                   </div>
                 )}
               </div>
@@ -7406,7 +7363,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                       emptyLabel="Pilih Helper 1..."
                       emptyValue="-"
                       roleBadgeText="Kru Helper"
-                      accentColor="emerald"
+                      accentColor="blue"
                       scheduledCrewMap={manualScheduledCrewMap}
                     />
                   </div>
@@ -7420,57 +7377,56 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                       emptyLabel="- Tanpa Helper 2 -"
                       emptyValue=""
                       roleBadgeText="Kru Helper"
-                      accentColor="emerald"
+                      accentColor="blue"
                       scheduledCrewMap={manualScheduledCrewMap}
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Area Kirim Tujuan (UI/UX Modern Tanpa Select OS Bawaan & Tanpa Angka Nomor) */}
+              {/* Area Kirim Tujuan */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5 text-emerald-500" />
+                  <label className="text-xs font-bold text-[#334155] dark:text-[#CBD5E1] flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-[#2563EB]" />
                     <span>Area Kirim Tujuan *</span>
                   </label>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => setQuickCreateAreaTarget('AREA BARU')}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold transition cursor-pointer shadow-2xs"
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-[10px] font-bold transition cursor-pointer"
                     >
                       <Plus className="w-3 h-3" />
                       <span>Tambah Area</span>
                     </button>
-                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                    <span className="text-[10px] font-bold text-[#2563EB] dark:text-[#60A5FA] bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 px-2 py-0.5 rounded border border-[#BFDBFE] dark:border-[#1E40AF]">
                       {branchOfficialAreas.length} Area Resmi Cabang {activeBranchRecord?.name || 'Nusantara'}
                     </span>
                   </div>
                 </div>
 
-                {/* Selected Area Card with Expandable Searchable Picker */}
-                <div className="rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 p-2.5 transition">
+                <div className="rounded-xl border border-[#CBD5E1] dark:border-[#334155] bg-[#F8FAFC] dark:bg-[#0F172A] p-3 transition">
                   <div
                     onClick={() => setIsAreaPickerExpanded(!isAreaPickerExpanded)}
                     className="flex items-center justify-between gap-2 cursor-pointer select-none"
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                      <div className="w-9 h-9 rounded-lg bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 border border-[#BFDBFE] dark:border-[#1E40AF] text-[#2563EB] dark:text-[#60A5FA] flex items-center justify-center shrink-0">
                         <MapPin className="w-4 h-4" />
                       </div>
                       <div className="min-w-0">
-                        <div className="text-xs font-black text-slate-900 dark:text-white truncate">
+                        <div className="text-xs font-bold text-[#0F172A] dark:text-[#F1F5F9] truncate">
                           {manualScheduleForm.area || 'Klik untuk Pilih Area Tujuan'}
                         </div>
                         {manualScheduleForm.area ? (
                           !isSidoarjoBranch && (
-                            <span className={`inline-block text-[9px] font-bold px-1.5 py-0.2 rounded border mt-0.5 ${getAreaRegionCategory(manualScheduleForm.area).badgeColor}`}>
+                            <span className={`inline-block text-[9px] font-bold px-1.5 py-0.5 rounded border mt-0.5 ${getAreaRegionCategory(manualScheduleForm.area).badgeColor}`}>
                               {getAreaRegionCategory(manualScheduleForm.area).label}
                             </span>
                           )
                         ) : (
-                          <span className="text-[10px] text-slate-500 dark:text-slate-400 italic">
+                          <span className="text-[10px] text-[#64748B] dark:text-[#94A3B8] italic">
                             Pilih dari {branchOfficialAreas.length} area pengiriman resmi Cabang {activeBranchRecord?.name || 'Nusantara'}
                           </span>
                         )}
@@ -7483,19 +7439,17 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                         e.stopPropagation();
                         setIsAreaPickerExpanded(!isAreaPickerExpanded);
                       }}
-                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer shadow-xs shrink-0"
+                      className="px-3 py-1.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer shrink-0"
                     >
                       <span>{isAreaPickerExpanded ? 'Tutup Pilihan' : 'Pilih / Ganti Area'}</span>
                       <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isAreaPickerExpanded ? 'rotate-180' : ''}`} />
                     </button>
                   </div>
 
-                  {/* Expanded Custom Interactive Area Selector */}
                   {isAreaPickerExpanded && (
-                    <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2.5 animate-in fade-in duration-150">
-                      {/* Search Bar with clear button */}
+                    <div className="mt-3 pt-3 border-t border-[#E2E8F0] dark:border-[#24344D] space-y-2.5 animate-in fade-in duration-150">
                       <div className="relative">
-                        <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[#64748B]" />
                         <input
                           type="text"
                           value={areaSearchFilter}
@@ -7526,21 +7480,20 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               ? 'Cari area Sidoarjo (misal: BLIKETUT, PONOMADI, SURABAYA, MALANG)...'
                               : 'Cari area (misal: Denpasar, Toko DR. Soetomo)... (Tekan Enter untuk memilih)'
                           }
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs rounded-lg pl-8 pr-8 py-2 focus:outline-none focus:border-emerald-500"
+                          className="w-full bg-white dark:bg-[#162234] border border-[#CBD5E1] dark:border-[#334155] text-[#0F172A] dark:text-[#F1F5F9] text-xs rounded-lg pl-8 pr-8 py-2 focus:outline-none focus:border-[#2563EB]"
                           autoFocus
                         />
                         {areaSearchFilter && (
                           <button
                             type="button"
                             onClick={() => setAreaSearchFilter('')}
-                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-white text-xs cursor-pointer"
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#64748B] hover:text-[#0F172A] dark:hover:text-white text-xs cursor-pointer"
                           >
                             <X className="w-3.5 h-3.5" />
                           </button>
                         )}
                       </div>
 
-                      {/* Region Category Chips (Cabang Nusantara only) */}
                       {!isSidoarjoBranch && (
                         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[10px]">
                           {[
@@ -7554,10 +7507,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               key={cat.id}
                               type="button"
                               onClick={() => setAreaCategoryFilter(cat.id as any)}
-                              className={`px-2.5 py-1 rounded-md font-bold whitespace-nowrap transition cursor-pointer ${
+                              className={`px-2.5 py-1 rounded-lg font-bold whitespace-nowrap transition cursor-pointer ${
                                 areaCategoryFilter === cat.id
-                                  ? 'bg-emerald-600 text-white shadow-xs'
-                                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800'
+                                  ? 'bg-[#2563EB] text-white'
+                                  : 'bg-white dark:bg-[#162234] text-[#475569] dark:text-[#94A3B8] border border-[#E2E8F0] dark:border-[#24344D] hover:bg-[#F1F5F9]'
                               }`}
                             >
                               {cat.label}
@@ -7566,7 +7519,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                         </div>
                       )}
 
-                      {/* Interactive Area Options Grid */}
                       <div className="max-h-56 overflow-y-auto pr-1 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                         {filteredOfficialAreas.map(areaName => {
                           const isSelected = manualScheduleForm.area === areaName;
@@ -7592,30 +7544,30 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               }}
                               className={`flex items-center justify-between p-2 rounded-lg text-left transition cursor-pointer border ${
                                 isSelected
-                                  ? 'bg-emerald-500/15 border-emerald-500 text-emerald-950 dark:text-emerald-200 shadow-2xs font-extrabold'
-                                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-emerald-500/50 hover:bg-slate-50 dark:hover:bg-slate-800/60 text-slate-800 dark:text-slate-200'
+                                  ? 'bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 border-[#2563EB] text-[#2563EB] dark:text-[#60A5FA] font-bold'
+                                  : 'bg-white dark:bg-[#162234] border-[#E2E8F0] dark:border-[#24344D] hover:border-[#2563EB]/60 text-[#0F172A] dark:text-[#F1F5F9]'
                               }`}
                             >
                               <div className="min-w-0 pr-2">
                                 <div className="text-xs font-semibold truncate">{areaName}</div>
                                 {!isSidoarjoBranch && (
-                                  <span className={`inline-block text-[9px] font-bold px-1.5 py-0.2 rounded border mt-0.5 ${meta.badgeColor}`}>
+                                  <span className={`inline-block text-[9px] font-bold px-1.5 py-0.5 rounded border mt-0.5 ${meta.badgeColor}`}>
                                     {meta.label}
                                   </span>
                                 )}
                               </div>
                               {isSelected ? (
-                                <div className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                                <div className="w-5 h-5 rounded-full bg-[#2563EB] text-white flex items-center justify-center shrink-0">
                                   <Check className="w-3 h-3" />
                                 </div>
                               ) : (
-                                <span className="text-[10px] text-slate-400 font-semibold">Pilih</span>
+                                <span className="text-[10px] text-[#64748B] font-semibold">Pilih</span>
                               )}
                             </button>
                           );
                         })}
                         {filteredOfficialAreas.length === 0 && (
-                          <div className="col-span-2 py-4 text-center text-xs text-slate-400">
+                          <div className="col-span-2 py-4 text-center text-xs text-[#64748B]">
                             Tidak ada area yang cocok dengan pencarian "{areaSearchFilter}"
                           </div>
                         )}
@@ -7627,21 +7579,21 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
               {/* Opsi Tembus Jadwal Langsung Selesai (Khusus Akun Super Admin) */}
               {logisticsStore.getCurrentUser()?.role === 'super_admin' && (
-                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3">
-                  <Zap className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 flex items-start gap-3">
+                  <Zap className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
                   <div className="flex-1">
                     <label className="flex items-center gap-2.5 cursor-pointer select-none">
                       <input
                         type="checkbox"
                         checked={manualScheduleForm.bypassChecklistDirectComplete}
                         onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, bypassChecklistDirectComplete: e.target.checked })}
-                        className="rounded border-slate-700 text-amber-500 focus:ring-amber-400 w-4 h-4 cursor-pointer"
+                        className="rounded border-amber-400 text-[#2563EB] focus:ring-[#2563EB] w-4 h-4 cursor-pointer"
                       />
-                      <span className="text-xs font-black text-amber-500 dark:text-amber-300">
-                        ⚡ Tembus &amp; Simpan Langsung ke Riwayat Selesai (Bypass Checklist)
+                      <span className="text-xs font-bold text-amber-800 dark:text-amber-300">
+                        Tembus &amp; Simpan Langsung ke Riwayat Selesai (Bypass Checklist)
                       </span>
                     </label>
-                    <p className="text-[11px] text-slate-600 dark:text-amber-200/80 mt-1 leading-relaxed">
+                    <p className="text-[11px] text-[#64748B] dark:text-amber-200/80 mt-1 leading-relaxed">
                       Khusus Super Admin: Centang opsi ini jika Anda menginput jadwal pengiriman masa lalu/lampau agar langsung berstatus Selesai (Terkirim) dan tercatat di histori tanpa harus mengisi checklist di portal supir.
                     </p>
                   </div>
@@ -7650,11 +7602,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             </div>
 
             {/* Modal Footer */}
-            <div className="flex items-center justify-end gap-2.5 pt-3 mt-4 border-t border-slate-200 dark:border-slate-800 shrink-0">
+            <div className="flex items-center justify-end gap-2.5 pt-3.5 mt-4 border-t border-[#E2E8F0] dark:border-[#24344D] shrink-0">
               <button
                 type="button"
                 onClick={() => setIsUploadConfigModalOpen(false)}
-                className="px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold transition cursor-pointer"
+                className="px-4 py-2.5 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#1E293B] hover:bg-[#F8FAFC] dark:hover:bg-[#24344D] text-[#475569] dark:text-[#CBD5E1] text-xs font-bold transition cursor-pointer"
               >
                 Batal
               </button>
@@ -7730,7 +7682,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     `Form Tambah Jadwal Baru (Cabang ${activeBranchRecord?.name || 'Nusantara'})`
                   );
                   if (!savedOk) return;
-                  // Reset form after submitting strictly scoped to active branch
                   const initDrivers = getIntegratedDrivers(targetBranchId);
                   const initHelpers = getIntegratedHelpers(targetBranchId);
                   const today = getTodayIso();
@@ -7753,7 +7704,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   setIsAreaPickerExpanded(false);
                   setIsUploadConfigModalOpen(false);
                 }}
-                className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-black transition flex items-center gap-2 cursor-pointer shadow-sm"
+                className="px-5 py-2.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer"
               >
                 <Save className="w-4 h-4" />
                 <span>Simpan Jadwal Baru</span>
@@ -7764,31 +7715,31 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         document.body
       )}
 
-      {/* Riwayat / Log Unggah & Perubahan Jadwal Modal (with User Name & Detailed Changes) */}
+      {/* Riwayat / Log Unggah & Perubahan Jadwal Modal */}
       {isHistoryModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-2xl w-full shadow-2xl space-y-4 my-6">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center border border-amber-500/30">
-                  <HistoryIcon className="w-4 h-4" />
+        <div className="fixed inset-0 z-50 akk-flat-schedule flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#162234] border border-[#E2E8F0] dark:border-[#24344D] rounded-2xl p-6 max-w-2xl w-full space-y-4 my-6">
+            <div className="flex items-center justify-between border-b border-[#E2E8F0] dark:border-[#24344D] pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA] flex items-center justify-center border border-[#BFDBFE] dark:border-[#1E40AF]">
+                  <HistoryIcon className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white">Riwayat / Log Unggah &amp; Perubahan Jadwal</h3>
-                  <p className="text-[11px] text-slate-400">Catatan lengkap aktivitas unggah Excel, penambahan jadwal, dan rincian perubahan beserta nama pengguna</p>
+                  <h3 className="text-sm font-bold text-[#0F172A] dark:text-[#F1F5F9]">Riwayat / Log Unggah &amp; Perubahan Jadwal</h3>
+                  <p className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">Catatan lengkap aktivitas unggah Excel, penambahan jadwal, dan rincian perubahan beserta nama pengguna</p>
                 </div>
               </div>
               <button
                 onClick={() => setIsHistoryModalOpen(false)}
-                className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+                className="w-8 h-8 rounded-lg bg-[#F1F5F9] dark:bg-[#1E293B] hover:bg-[#E2E8F0] dark:hover:bg-[#24344D] text-[#64748B] hover:text-[#0F172A] dark:hover:text-white flex items-center justify-center transition cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="space-y-3 text-xs text-slate-300 max-h-[60vh] overflow-y-auto pr-1">
+            <div className="space-y-3 text-xs text-[#334155] dark:text-[#CBD5E1] max-h-[60vh] overflow-y-auto pr-1">
               {scheduleChangeLogs.length === 0 ? (
-                <div className="p-6 text-center text-slate-500 bg-slate-950 rounded-xl border border-slate-800">
+                <div className="p-8 text-center text-[#64748B] bg-[#F8FAFC] dark:bg-[#0F172A] rounded-xl border border-[#E2E8F0] dark:border-[#24344D]">
                   Belum ada riwayat unggah atau perubahan jadwal.
                 </div>
               ) : (
@@ -7802,12 +7753,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   });
                   const badgeStyle =
                     log.actionType === 'upload_excel'
-                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                      ? 'bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA] border-[#BFDBFE] dark:border-[#1E40AF]'
                       : log.actionType === 'manual_create'
-                      ? 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+                      ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
                       : log.actionType === 'manual_edit'
-                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                      : 'bg-rose-500/20 text-rose-300 border-rose-500/30';
+                      ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                      : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800';
 
                   const badgeLabel =
                     log.actionType === 'upload_excel'
@@ -7819,44 +7770,44 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                       : 'Hapus Jadwal';
 
                   return (
-                    <div key={log.id} className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2.5">
+                    <div key={log.id} className="bg-[#F8FAFC] dark:bg-[#0F172A] p-4 rounded-xl border border-[#E2E8F0] dark:border-[#24344D] space-y-2.5">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                         <div>
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-bold text-white text-xs">{log.fileName}</span>
+                            <span className="font-bold text-[#0F172A] dark:text-[#F1F5F9] text-xs">{log.fileName}</span>
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${badgeStyle}`}>
                               {badgeLabel}
                             </span>
                           </div>
-                          <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-2 flex-wrap">
-                            <span>🕒 {dateFormatted} WIB</span>
+                          <div className="text-[11px] text-[#64748B] dark:text-[#94A3B8] mt-1 flex items-center gap-2 flex-wrap">
+                            <span>{dateFormatted} WIB</span>
                             <span>&bull;</span>
-                            <span className="text-emerald-400 font-bold">
-                              👤 Oleh: {log.userName} ({log.userRole})
+                            <span className="text-[#2563EB] dark:text-[#60A5FA] font-bold">
+                              Oleh: {log.userName} ({log.userRole})
                             </span>
                             {typeof log.rowCount === 'number' && (
                               <>
                                 <span>&bull;</span>
-                                <span className="font-mono text-slate-300">{log.rowCount} Baris Tervalidasi</span>
+                                <span className="font-mono text-[#334155] dark:text-[#CBD5E1]">{log.rowCount} Baris Tervalidasi</span>
                               </>
                             )}
                           </div>
                         </div>
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 w-fit">
+                        <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA] border border-[#BFDBFE] dark:border-[#1E40AF] w-fit">
                           Tersimpan
                         </span>
                       </div>
 
-                      <div className="text-xs text-slate-200 font-semibold border-t border-slate-800/80 pt-2">
+                      <div className="text-xs text-[#0F172A] dark:text-[#E2E8F0] font-semibold border-t border-[#E2E8F0] dark:border-[#24344D] pt-2">
                         {log.summary}
                       </div>
 
                       {log.changes && log.changes.length > 0 && (
-                        <div className="bg-slate-900/90 rounded-lg p-2.5 border border-slate-800 space-y-1">
-                          <span className="text-[10px] font-black uppercase tracking-wider text-amber-400 block">
+                        <div className="bg-white dark:bg-[#162234] rounded-lg p-2.5 border border-[#E2E8F0] dark:border-[#24344D] space-y-1">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-[#2563EB] dark:text-[#60A5FA] block">
                             Rincian Perubahan:
                           </span>
-                          <ul className="space-y-1 text-[11px] text-slate-300 list-disc list-inside">
+                          <ul className="space-y-1 text-[11px] text-[#475569] dark:text-[#CBD5E1] list-disc list-inside">
                             {log.changes.map((chg, idx) => (
                               <li key={idx} className="leading-relaxed">{chg}</li>
                             ))}
@@ -7869,10 +7820,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               )}
             </div>
 
-            <div className="pt-2 flex justify-end border-t border-slate-800">
+            <div className="pt-3 flex justify-end border-t border-[#E2E8F0] dark:border-[#24344D]">
               <button
                 onClick={() => setIsHistoryModalOpen(false)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition cursor-pointer"
+                className="px-4 py-2 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#1E293B] hover:bg-[#F8FAFC] dark:hover:bg-[#24344D] text-[#334155] dark:text-[#CBD5E1] text-xs font-bold transition cursor-pointer"
               >
                 Tutup
               </button>
@@ -7883,36 +7834,36 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
       {/* 5. Upload Preview Modal with Validation & Intelligent Area Auto-Mapping */}
       {isUploadModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-4xl w-full shadow-2xl space-y-4 my-6">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="fixed inset-0 z-50 akk-flat-schedule flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#162234] border border-[#E2E8F0] dark:border-[#24344D] rounded-2xl p-6 max-w-4xl w-full space-y-4 my-6">
+            <div className="flex items-center justify-between border-b border-[#E2E8F0] dark:border-[#24344D] pb-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+                <div className="w-10 h-10 rounded-xl bg-[#2563EB] text-white flex items-center justify-center">
                   <FileSpreadsheet className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white">Pratinjau, Validasi &amp; Pemetaan Spreadsheet</h3>
-                  <p className="text-xs text-slate-400">{uploadedFileName}</p>
+                  <h3 className="text-sm font-bold text-[#0F172A] dark:text-[#F1F5F9]">Pratinjau, Validasi &amp; Pemetaan Spreadsheet</h3>
+                  <p className="text-xs text-[#64748B] dark:text-[#94A3B8]">{uploadedFileName}</p>
                 </div>
               </div>
 
               <button
                 onClick={() => setIsUploadModalOpen(false)}
-                className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+                className="w-8 h-8 rounded-lg bg-[#F1F5F9] dark:bg-[#1E293B] hover:bg-[#E2E8F0] dark:hover:bg-[#24344D] text-[#64748B] hover:text-[#0F172A] dark:hover:text-white flex items-center justify-center transition cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             {/* Tab switchers */}
-            <div className="flex items-center gap-2 border-b border-slate-800 pb-2 flex-wrap">
+            <div className="flex items-center gap-2 border-b border-[#E2E8F0] dark:border-[#24344D] pb-3 flex-wrap">
               <button
                 type="button"
                 onClick={() => setActiveUploadTab('audit')}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+                className={`px-3.5 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
                   activeUploadTab === 'audit'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'bg-slate-800 text-slate-400 hover:text-white'
+                    ? 'bg-[#2563EB] text-white'
+                    : 'bg-[#F1F5F9] dark:bg-[#1E293B] text-[#475569] dark:text-[#CBD5E1] hover:bg-[#E2E8F0]'
                 }`}
               >
                 <CheckCircle2 className="w-3.5 h-3.5" />
@@ -7922,20 +7873,22 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               <button
                 type="button"
                 onClick={() => setActiveUploadTab('area_mapping')}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+                className={`px-3.5 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
                   activeUploadTab === 'area_mapping'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'bg-slate-800 text-slate-400 hover:text-white'
+                    ? 'bg-[#2563EB] text-white'
+                    : 'bg-[#F1F5F9] dark:bg-[#1E293B] text-[#475569] dark:text-[#CBD5E1] hover:bg-[#E2E8F0]'
                 }`}
               >
-                <MapPin className="w-3.5 h-3.5 text-rose-400" />
+                <MapPin className="w-3.5 h-3.5" />
                 <span>Pemetaan Area Cerdas</span>
                 {Object.values(detectedAreaMappings).some(m => m.confidence === 'unmapped') ? (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-rose-500 text-white font-black animate-pulse">
+                  <span className="px-2 py-0.5 rounded-md text-[10px] bg-rose-500 text-white font-bold">
                     {Object.values(detectedAreaMappings).filter(m => m.confidence === 'unmapped').length} Belum Dikenali
                   </span>
                 ) : (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 font-mono">
+                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono ${
+                    activeUploadTab === 'area_mapping' ? 'bg-white/20 text-white' : 'bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA]'
+                  }`}>
                     {Object.keys(detectedAreaMappings).length} Area Terpetakan
                   </span>
                 )}
@@ -7944,20 +7897,22 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               <button
                 type="button"
                 onClick={() => setActiveUploadTab('crew_mapping')}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+                className={`px-3.5 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
                   activeUploadTab === 'crew_mapping'
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'bg-slate-800 text-slate-400 hover:text-white'
+                    ? 'bg-[#2563EB] text-white'
+                    : 'bg-[#F1F5F9] dark:bg-[#1E293B] text-[#475569] dark:text-[#CBD5E1] hover:bg-[#E2E8F0]'
                 }`}
               >
-                <Users className="w-3.5 h-3.5 text-blue-300" />
+                <Users className="w-3.5 h-3.5" />
                 <span>Pemetaan Kru Pengirim</span>
                 {Object.values(detectedCrewMappings).some(m => m.confidence === 'unmapped') ? (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-rose-500 text-white font-black animate-pulse">
+                  <span className="px-2 py-0.5 rounded-md text-[10px] bg-rose-500 text-white font-bold">
                     {Object.values(detectedCrewMappings).filter(m => m.confidence === 'unmapped').length} Belum Dikenali
                   </span>
                 ) : (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-blue-500/20 text-blue-300 font-mono">
+                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono ${
+                    activeUploadTab === 'crew_mapping' ? 'bg-white/20 text-white' : 'bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA]'
+                  }`}>
                     {Object.keys(detectedCrewMappings).length} Kru Terpetakan
                   </span>
                 )}
@@ -7968,60 +7923,58 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             {activeUploadTab === 'audit' && (
               <div className="space-y-4">
                 {uploadedValidationReport ? (
-                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3 text-xs text-slate-300">
+                  <div className="bg-[#F8FAFC] dark:bg-[#0F172A] p-4 rounded-xl border border-[#E2E8F0] dark:border-[#24344D] space-y-3 text-xs text-[#334155] dark:text-[#CBD5E1]">
                     <div className="flex items-center justify-between">
-                      <span className="text-slate-400">Total Baris Terdeteksi:</span>
-                      <span className="font-bold text-white">{uploadedValidationReport.totalRows} baris</span>
+                      <span className="text-[#64748B] dark:text-[#94A3B8]">Total Baris Terdeteksi:</span>
+                      <span className="font-bold text-[#0F172A] dark:text-[#F1F5F9]">{uploadedValidationReport.totalRows} baris</span>
                     </div>
 
-                    {/* Audit Grid */}
-                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-850">
-                      <div className="bg-emerald-950/20 p-2 rounded-lg border border-emerald-500/30 text-center">
-                        <span className="text-[10px] text-emerald-400 font-bold block">🟢 Lolos</span>
-                        <span className="text-base font-bold text-emerald-300">{uploadedValidationReport.validCount}</span>
+                    <div className="grid grid-cols-3 gap-2.5 pt-2 border-t border-[#E2E8F0] dark:border-[#24344D]">
+                      <div className="bg-emerald-50 dark:bg-emerald-950/30 p-2.5 rounded-lg border border-emerald-200 dark:border-emerald-800 text-center">
+                        <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-bold block">Lolos</span>
+                        <span className="text-base font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">{uploadedValidationReport.validCount}</span>
                       </div>
 
-                      <div className="bg-amber-950/20 p-2 rounded-lg border border-amber-500/30 text-center">
-                        <span className="text-[10px] text-amber-400 font-bold block">🟡 Duplikat</span>
-                        <span className="text-base font-bold text-amber-300">{uploadedValidationReport.duplicateCount}</span>
+                      <div className="bg-amber-50 dark:bg-amber-950/30 p-2.5 rounded-lg border border-amber-200 dark:border-amber-800 text-center">
+                        <span className="text-[10px] text-amber-700 dark:text-amber-400 font-bold block">Duplikat</span>
+                        <span className="text-base font-bold text-amber-700 dark:text-amber-300 tabular-nums">{uploadedValidationReport.duplicateCount}</span>
                       </div>
 
-                      <div className="bg-rose-950/20 p-2 rounded-lg border border-rose-500/30 text-center">
-                        <span className="text-[10px] text-rose-400 font-bold block">🔴 Format Salah</span>
-                        <span className="text-base font-bold text-rose-300">
+                      <div className="bg-rose-50 dark:bg-rose-950/30 p-2.5 rounded-lg border border-rose-200 dark:border-rose-800 text-center">
+                        <span className="text-[10px] text-rose-700 dark:text-rose-400 font-bold block">Format Salah</span>
+                        <span className="text-base font-bold text-rose-700 dark:text-rose-300 tabular-nums">
                           {uploadedValidationReport.invalidDateCount + uploadedValidationReport.invalidPoCount + uploadedValidationReport.missingFieldCount}
                         </span>
                       </div>
                     </div>
 
-                    {/* Protections */}
-                    <div className="pt-2 border-t border-slate-850 space-y-2 text-[11px]">
-                      <div className="flex items-start gap-2 text-emerald-400 bg-emerald-950/40 p-2.5 rounded-xl border border-emerald-500/30">
+                    <div className="pt-2 border-t border-[#E2E8F0] dark:border-[#24344D] space-y-2 text-[11px]">
+                      <div className="flex items-start gap-2 text-[#2563EB] dark:text-[#60A5FA] bg-[#EFF6FF] dark:bg-[#1E3A8A]/30 p-3 rounded-xl border border-[#BFDBFE] dark:border-[#1E40AF]">
                         <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
                         <div>
                           <span className="font-bold block">Mode Sistem Rotasi Area Berputar Aktif</span>
-                          <span className="text-slate-300 text-[10px]">
-                            Semua {uploadedValidationReport.validCount} jadwal pengiriman tervalidasi sebagai rotasi area berputar yang sah dan siap disinkronkan (*overwrite* otomatis).
+                          <span className="text-[#475569] dark:text-[#CBD5E1] text-[10px]">
+                            Semua {uploadedValidationReport.validCount} jadwal pengiriman tervalidasi sebagai rotasi area berputar yang sah dan siap disinkronkan (overwrite otomatis).
                           </span>
                         </div>
                       </div>
 
-                      <label className="flex items-center gap-2 text-slate-300 cursor-pointer pt-1">
+                      <label className="flex items-center gap-2 text-[#334155] dark:text-[#CBD5E1] cursor-pointer pt-1">
                         <input
                           type="checkbox"
                           checked={skipInvalidUpload}
                           onChange={(e) => setSkipInvalidUpload(e.target.checked)}
-                          className="rounded text-emerald-500 focus:ring-emerald-500"
+                          className="rounded text-[#2563EB] focus:ring-[#2563EB]"
                         />
                         <span>Tolak baris jika ada format tanggal atau PO yang rusak / tidak valid</span>
                       </label>
                     </div>
                   </div>
                 ) : (
-                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2 text-xs text-slate-300">
+                  <div className="bg-[#F8FAFC] dark:bg-[#0F172A] p-4 rounded-xl border border-[#E2E8F0] dark:border-[#24344D] space-y-2 text-xs text-[#334155] dark:text-[#CBD5E1]">
                     <div className="flex justify-between">
-                      <span className="text-slate-400">Total Baris:</span>
-                      <span className="font-bold text-white">{uploadedRowsCount} baris</span>
+                      <span className="text-[#64748B]">Total Baris:</span>
+                      <span className="font-bold text-[#0F172A] dark:text-[#F1F5F9]">{uploadedRowsCount} baris</span>
                     </div>
                   </div>
                 )}
@@ -8052,15 +8005,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               </div>
             )}
 
-            <div className="flex items-center justify-between gap-2.5 pt-2 border-t border-slate-800">
-              <div className="text-xs text-slate-400">
+            <div className="flex items-center justify-between gap-2.5 pt-3 border-t border-[#E2E8F0] dark:border-[#24344D]">
+              <div className="text-xs text-[#64748B] dark:text-[#94A3B8]">
                 {Object.values(detectedAreaMappings).some(m => m.confidence === 'unmapped') || Object.values(detectedCrewMappings).some(m => m.confidence === 'unmapped') ? (
-                  <span className="text-amber-400 font-semibold flex items-center gap-1.5">
+                  <span className="text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-1.5">
                     <AlertTriangle className="w-3.5 h-3.5" />
                     <span>Tip: Lengkapi pemetaan area &amp; kru sebelum konfirmasi sinkronisasi.</span>
                   </span>
                 ) : (
-                  <span className="text-emerald-400 font-semibold flex items-center gap-1.5">
+                  <span className="text-[#2563EB] dark:text-[#60A5FA] font-semibold flex items-center gap-1.5">
                     <Check className="w-3.5 h-3.5" />
                     <span>Area &amp; Kru telah terharmonisasi dengan Jadwal serta Histori &amp; Otorisasi.</span>
                   </span>
@@ -8071,7 +8024,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 <button
                   type="button"
                   onClick={() => setIsUploadModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition cursor-pointer"
+                  className="px-4 py-2 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#1E293B] hover:bg-[#F8FAFC] dark:hover:bg-[#24344D] text-[#334155] dark:text-[#CBD5E1] text-xs font-bold transition cursor-pointer"
                 >
                   Batal
                 </button>
@@ -8114,7 +8067,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                       setScheduleChangeLogs(logisticsStore.getScheduleChangeLogs());
 
                       setIsUploadModalOpen(false);
-                      const msg = `⚡ Berhasil menyinkronkan ${syncRes.syncedCount + syncRes.overwrittenCount} jadwal pengiriman valid! Riwayat perubahan tercatat.`;
+                      const msg = `Berhasil menyinkronkan ${syncRes.syncedCount + syncRes.overwrittenCount} jadwal pengiriman valid! Riwayat perubahan tercatat.`;
                       setSyncSuccessMessage(msg);
                       if (onSyncComplete) onSyncComplete(syncRes.syncedCount + syncRes.overwrittenCount);
                       setTimeout(() => setSyncSuccessMessage(null), 8000);
@@ -8123,10 +8076,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                       handleSyncToOperationalSchedules();
                     }
                   }}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-md"
+                  className="px-4 py-2 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer"
                 >
                   <Sparkles className="w-4 h-4" />
-                  <span>⚡ Sinkronkan {uploadedValidationReport ? uploadedValidationReport.validCount : uploadedRowsCount} Jadwal</span>
+                  <span>Sinkronkan {uploadedValidationReport ? uploadedValidationReport.validCount : uploadedRowsCount} Jadwal</span>
                 </button>
               </div>
             </div>
@@ -8136,23 +8089,19 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
       {/* 6. Simplified Area & Crew Mapping Modal */}
       {isAreaMappingModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-3xl w-full shadow-2xl space-y-4 my-6">
+        <div className="fixed inset-0 z-50 akk-flat-schedule flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#162234] border border-[#E2E8F0] dark:border-[#24344D] rounded-2xl p-6 max-w-3xl w-full space-y-4 my-6">
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className={`w-9 h-9 rounded-xl flex items-center justify-center border ${
-                  activeMappingCategory === 'area'
-                    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                    : 'bg-blue-500/15 text-blue-400 border-blue-500/30'
-                }`}>
-                  {activeMappingCategory === 'area' ? <MapPin className="w-4 h-4 text-rose-400" /> : <Users className="w-4 h-4 text-blue-400" />}
+            <div className="flex items-center justify-between border-b border-[#E2E8F0] dark:border-[#24344D] pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA] border border-[#BFDBFE] dark:border-[#1E40AF]">
+                  {activeMappingCategory === 'area' ? <MapPin className="w-5 h-5" /> : <Users className="w-5 h-5" />}
                 </div>
                 <div>
-                  <h3 className="text-sm font-black text-white">
+                  <h3 className="text-sm font-bold text-[#0F172A] dark:text-[#F1F5F9]">
                     {activeMappingCategory === 'area' ? 'Pemetaan Area Kirim' : 'Pemetaan Kru (Driver & Helper)'}
                   </h3>
-                  <p className="text-[11px] text-slate-400">
+                  <p className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">
                     {activeMappingCategory === 'area'
                       ? 'Selaraskan nama area di Excel dengan daftar area kirim resmi'
                       : 'Terintegrasi dengan Data Kru & Supir serta User Manajemen'}
@@ -8165,7 +8114,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   <button
                     type="button"
                     onClick={() => setQuickCreateAreaTarget('AREA BARU')}
-                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                    className="px-3 py-1.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Area Baru</span>
@@ -8174,7 +8123,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   <button
                     type="button"
                     onClick={() => setQuickCreateCrewTarget({ name: '', roleHint: 'Driver' })}
-                    className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                    className="px-3 py-1.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Kru Baru</span>
@@ -8182,7 +8131,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 )}
                 <button
                   onClick={() => setIsAreaMappingModalOpen(false)}
-                  className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+                  className="w-8 h-8 rounded-lg bg-[#F1F5F9] dark:bg-[#1E293B] hover:bg-[#E2E8F0] dark:hover:bg-[#24344D] text-[#64748B] hover:text-[#0F172A] dark:hover:text-white flex items-center justify-center transition cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -8190,14 +8139,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             </div>
 
             {/* Category Selector Tabs */}
-            <div className="flex items-center gap-2 p-1 bg-slate-950 rounded-xl border border-slate-800">
+            <div className="flex items-center gap-2 p-1 bg-[#F1F5F9] dark:bg-[#0F172A] rounded-xl border border-[#E2E8F0] dark:border-[#24344D]">
               <button
                 type="button"
                 onClick={() => setActiveMappingCategory('area')}
-                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
                   activeMappingCategory === 'area'
-                    ? 'bg-emerald-600 text-white'
-                    : 'text-slate-400 hover:text-white'
+                    ? 'bg-[#2563EB] text-white'
+                    : 'text-[#64748B] dark:text-[#94A3B8] hover:text-[#0F172A] dark:hover:text-white'
                 }`}
               >
                 <MapPin className="w-3.5 h-3.5" />
@@ -8207,10 +8156,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               <button
                 type="button"
                 onClick={() => setActiveMappingCategory('crew')}
-                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
                   activeMappingCategory === 'crew'
-                    ? 'bg-blue-600 text-white'
-                    : 'text-slate-400 hover:text-white'
+                    ? 'bg-[#2563EB] text-white'
+                    : 'text-[#64748B] dark:text-[#94A3B8] hover:text-[#0F172A] dark:hover:text-white'
                 }`}
               >
                 <Users className="w-3.5 h-3.5" />
@@ -8237,18 +8186,18 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               )}
             </div>
 
-            <div className="flex items-center justify-between pt-3 border-t border-slate-800 text-xs">
-              <span className="text-slate-400">
+            <div className="flex items-center justify-between pt-3 border-t border-[#E2E8F0] dark:border-[#24344D] text-xs">
+              <span className="text-[#64748B] dark:text-[#94A3B8]">
                 {activeMappingCategory === 'area' ? (
-                  <>Area Resmi Terdaftar: <strong className="text-white">{officialAreasList.length}</strong> area</>
+                  <>Area Resmi Terdaftar: <strong className="text-[#0F172A] dark:text-[#F1F5F9]">{officialAreasList.length}</strong> area</>
                 ) : (
-                  <>Kru Terdaftar (Aktif &amp; Nonaktif): <strong className="text-white">{officialCrewsList.length}</strong> kru</>
+                  <>Kru Terdaftar (Aktif &amp; Nonaktif): <strong className="text-[#0F172A] dark:text-[#F1F5F9]">{officialCrewsList.length}</strong> kru</>
                 )}
               </span>
               <button
                 type="button"
                 onClick={() => setIsAreaMappingModalOpen(false)}
-                className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition cursor-pointer"
+                className="px-4 py-2 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#1E293B] hover:bg-[#F8FAFC] dark:hover:bg-[#24344D] text-[#334155] dark:text-[#CBD5E1] text-xs font-bold transition cursor-pointer"
               >
                 Tutup
               </button>
@@ -8279,7 +8228,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         isOpen={isApiSyncModalOpen}
         onClose={() => setIsApiSyncModalOpen(false)}
         onSyncComplete={(count) => {
-          setSyncSuccessMessage(`⚡ Berhasil menyinkronkan ${count} rute pengiriman langsung dari Google Sheets API v4!`);
+          setSyncSuccessMessage(`Berhasil menyinkronkan ${count} rute pengiriman langsung dari Google Sheets API v4!`);
           if (onSyncComplete) onSyncComplete(count);
           setTimeout(() => setSyncSuccessMessage(null), 8000);
         }}
@@ -8287,46 +8236,46 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
       {/* Excel Top 5 Rows Preview Modal */}
       {isExcelPreviewModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200 overflow-y-auto">
-          <div className="w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-5 shadow-2xl my-6">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div className="fixed inset-0 z-50 akk-flat-schedule bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200 overflow-y-auto">
+          <div className="w-full max-w-4xl bg-white dark:bg-[#162234] border border-[#E2E8F0] dark:border-[#24344D] rounded-2xl p-6 space-y-5 my-6">
+            <div className="flex items-center justify-between pb-4 border-b border-[#E2E8F0] dark:border-[#24344D]">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-500/15 text-blue-400 flex items-center justify-center border border-blue-500/30">
+                <div className="w-10 h-10 rounded-xl bg-[#2563EB] text-white flex items-center justify-center">
                   <FileSpreadsheet className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white">Pratinjau Spreadsheet (Semua Data sampai Bawah)</h3>
-                  <p className="text-xs text-slate-400">Verifikasi isi file sebelum diproses permanen ke sistem • {previewFile?.name} ({previewTotalRows} baris total, Sheet: {previewSheetName})</p>
+                  <h3 className="text-sm font-bold text-[#0F172A] dark:text-[#F1F5F9]">Pratinjau Spreadsheet (Semua Data sampai Bawah)</h3>
+                  <p className="text-xs text-[#64748B] dark:text-[#94A3B8]">Verifikasi isi file sebelum diproses permanen ke sistem • {previewFile?.name} ({previewTotalRows} baris total, Sheet: {previewSheetName})</p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setIsExcelPreviewModalOpen(false)}
-                className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+                className="w-8 h-8 rounded-lg bg-[#F1F5F9] dark:bg-[#1E293B] hover:bg-[#E2E8F0] dark:hover:bg-[#24344D] text-[#64748B] hover:text-[#0F172A] dark:hover:text-white flex items-center justify-center transition cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             <div className="space-y-3 text-xs">
-              <div className="p-3 rounded-2xl bg-blue-500/10 border border-blue-500/25 text-blue-200">
-                <p className="font-semibold">💡 Pastikan data di bawah ini sesuai dengan format roster operasional sebelum melanjutkan pemrosesan jadwal.</p>
+              <div className="p-3 rounded-xl bg-[#EFF6FF] dark:bg-[#1E3A8A]/30 border border-[#BFDBFE] dark:border-[#1E40AF] text-[#1E40AF] dark:text-[#93C5FD]">
+                <p className="font-semibold">Pastikan data di bawah ini sesuai dengan format roster operasional sebelum melanjutkan pemrosesan jadwal.</p>
               </div>
 
-              <div className="overflow-x-auto border border-slate-800 rounded-2xl bg-slate-950 max-h-[72vh]">
+              <div className="overflow-x-auto border border-[#E2E8F0] dark:border-[#24344D] rounded-xl bg-white dark:bg-[#0F172A] max-h-[72vh]">
                 <table className="w-full text-left border-collapse text-[11px]">
                   <thead>
-                    <tr className="bg-slate-900 border-b border-slate-800 text-slate-400">
-                      <th className="p-3 font-bold border-r border-slate-800 w-12 text-center">#</th>
+                    <tr className="bg-[#F8FAFC] dark:bg-[#1E293B] border-b border-[#E2E8F0] dark:border-[#24344D] text-[#475569] dark:text-[#94A3B8]">
+                      <th className="p-3 font-bold border-r border-[#E2E8F0] dark:border-[#24344D] w-12 text-center">#</th>
                       {previewHeaders.map((h, i) => (
-                        <th key={i} className="p-3 font-bold border-r border-slate-800 whitespace-nowrap">{h || `Kolom ${i+1}`}</th>
+                        <th key={i} className="p-3 font-bold border-r border-[#E2E8F0] dark:border-[#24344D] whitespace-nowrap">{h || `Kolom ${i+1}`}</th>
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800 text-slate-200">
+                  <tbody className="divide-y divide-[#E2E8F0] dark:divide-[#24344D] text-[#0F172A] dark:text-[#E2E8F0]">
                     {previewTopRows.length === 0 ? (
                       <tr>
-                        <td colSpan={previewHeaders.length + 1} className="p-6 text-center text-slate-500 italic">Tidak ada data baris ditemukan.</td>
+                        <td colSpan={previewHeaders.length + 1} className="p-6 text-center text-[#64748B] italic">Tidak ada data baris ditemukan.</td>
                       </tr>
                     ) : (() => {
                       let activeDate = '';
@@ -8334,9 +8283,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                         const isSeparator = row.some(cell => String(cell).includes('---'));
                         if (isSeparator) {
                           return (
-                            <tr key={rIdx} className="bg-slate-900 border-y-2 border-slate-700 text-slate-400">
-                              <td colSpan={previewHeaders.length + 1} className="py-2.5 px-3 text-center font-mono text-[11px] font-black tracking-widest bg-slate-950/90 text-slate-400 border-y-2 border-slate-700">
-                                ─────── PEMBATAS TANGGAL &amp; PENGELOMPOKAN PENGIRIMAN ───────
+                            <tr key={rIdx} className="bg-[#F8FAFC] dark:bg-[#1E293B] border-y border-[#CBD5E1] dark:border-[#334155] text-[#64748B]">
+                              <td colSpan={previewHeaders.length + 1} className="py-2.5 px-3 text-center font-mono text-[11px] font-bold tracking-wider">
+                                PEMBATAS TANGGAL &amp; PENGELOMPOKAN PENGIRIMAN
                               </td>
                             </tr>
                           );
@@ -8348,36 +8297,36 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                         const hasExplicitDate = Boolean(firstCell && !firstCell.startsWith('-'));
 
                         return (
-                          <tr key={rIdx} className={`hover:bg-slate-900/80 transition border-b border-slate-800 ${hasExplicitDate ? 'border-t-2 border-slate-700 bg-slate-900/40' : ''}`}>
-                            <td className="p-3 font-mono text-slate-500 text-center border-r border-slate-800">{rIdx + 1}</td>
+                          <tr key={rIdx} className={`hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B]/60 transition border-b border-[#E2E8F0] dark:border-[#24344D] ${hasExplicitDate ? 'border-t border-[#CBD5E1] dark:border-[#334155] bg-[#F8FAFC]/60 dark:bg-[#1E293B]/30' : ''}`}>
+                            <td className="p-3 font-mono text-[#64748B] text-center border-r border-[#E2E8F0] dark:border-[#24344D]">{rIdx + 1}</td>
                             {previewHeaders.map((h, cIdx) => {
                               const cellVal = row[cIdx];
                               const hasVal = cellVal !== undefined && cellVal !== null && String(cellVal).trim() !== '';
                               const hUpper = (h || '').toUpperCase();
 
                               return (
-                                <td key={cIdx} className="p-3 border-r border-slate-800 whitespace-nowrap">
+                                <td key={cIdx} className="p-3 border-r border-[#E2E8F0] dark:border-[#24344D] whitespace-nowrap">
                                   {hasVal ? (
                                     <span className={
                                       hUpper.includes('TANGGAL')
-                                        ? "font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20"
+                                        ? "font-semibold text-[#2563EB] dark:text-[#60A5FA] bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 px-2 py-0.5 rounded border border-[#BFDBFE] dark:border-[#1E40AF]"
                                         : hUpper.includes('DRIVER') || hUpper.includes('SUPIR')
-                                        ? "font-bold text-white"
+                                        ? "font-bold text-[#0F172A] dark:text-[#F1F5F9]"
                                         : hUpper.includes('AREA')
-                                        ? "font-semibold text-amber-300"
+                                        ? "font-semibold text-[#1D4ED8] dark:text-[#93C5FD]"
                                         : hUpper.includes('ARMADA')
-                                        ? "font-mono font-bold text-blue-300"
+                                        ? "font-mono font-bold text-[#334155] dark:text-[#CBD5E1]"
                                         : ""
                                     }>
                                       {String(cellVal)}
                                     </span>
                                   ) : (
                                     hUpper.includes('TANGGAL') ? (
-                                      <span className="text-slate-500 text-[10px] italic">
-                                        ↳ {activeDate || 'sesi hari'}
+                                      <span className="text-[#64748B] text-[10px] italic">
+                                        {activeDate || 'sesi hari'}
                                       </span>
                                     ) : (
-                                      <span className="text-slate-600">-</span>
+                                      <span className="text-[#94A3B8]">-</span>
                                     )
                                   )}
                                 </td>
@@ -8392,11 +8341,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               </div>
             </div>
 
-            <div className="flex items-center justify-between pt-3 border-t border-slate-800">
+            <div className="flex items-center justify-between pt-3 border-t border-[#E2E8F0] dark:border-[#24344D]">
               <button
                 type="button"
                 onClick={() => setIsExcelPreviewModalOpen(false)}
-                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs cursor-pointer transition"
+                className="px-4 py-2.5 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#1E293B] hover:bg-[#F8FAFC] dark:hover:bg-[#24344D] text-[#334155] dark:text-[#CBD5E1] font-bold text-xs cursor-pointer transition"
               >
                 Batal
               </button>
@@ -8405,7 +8354,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 onClick={() => {
                   if (previewFile) executeFinalUpload(previewFile);
                 }}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white font-bold text-xs shadow-md shadow-emerald-600/30 cursor-pointer active:scale-95 transition"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold text-xs cursor-pointer transition"
               >
                 <Sparkles className="w-4 h-4" />
                 <span>Lanjutkan Proses &amp; Validasi ({previewTotalRows} Baris)</span>
@@ -8417,45 +8366,45 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
       {/* 10. Spreadsheet Schema Validation Error / Warning Modal */}
       {schemaValidationError && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-lg bg-slate-900 border border-rose-500/40 rounded-3xl p-6 space-y-5 shadow-2xl">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <div className="flex items-center gap-2 text-rose-400">
-                <AlertTriangle className="w-6 h-6 shrink-0 animate-bounce" />
-                <h3 className="text-base font-black text-white">{schemaValidationError.error || 'Format Kolom Tidak Sesuai'}</h3>
+        <div className="fixed inset-0 z-50 akk-flat-schedule bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-lg bg-white dark:bg-[#162234] border border-rose-200 dark:border-rose-900/60 rounded-2xl p-6 space-y-5">
+            <div className="flex items-center justify-between pb-3.5 border-b border-[#E2E8F0] dark:border-[#24344D]">
+              <div className="flex items-center gap-2.5 text-rose-600 dark:text-rose-400">
+                <AlertTriangle className="w-5 h-5 shrink-0" />
+                <h3 className="text-base font-bold text-[#0F172A] dark:text-[#F1F5F9]">{schemaValidationError.error || 'Format Kolom Tidak Sesuai'}</h3>
               </div>
               <button
                 type="button"
                 onClick={() => setSchemaValidationError(null)}
-                className="p-1.5 rounded-xl text-slate-400 hover:text-white bg-slate-800/80 cursor-pointer"
+                className="p-1.5 rounded-lg text-[#64748B] hover:text-[#0F172A] dark:hover:text-white bg-[#F1F5F9] dark:bg-[#1E293B] cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
             <div className="space-y-3 text-xs">
-              <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/25 text-rose-200 space-y-1.5">
+              <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-200 space-y-1.5">
                 <p className="font-bold">{schemaValidationError.message}</p>
                 {schemaValidationError.missingColumns?.length > 0 && (
-                  <p className="text-[11px] text-rose-300">
+                  <p className="text-[11px] text-rose-600 dark:text-rose-300">
                     <span className="font-semibold">Kolom Wajib yang Belum Ada:</span> {schemaValidationError.missingColumns.join(', ')}
                   </p>
                 )}
               </div>
 
-              <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-1.5">
-                <span className="font-bold text-amber-400 block">📌 Panduan Format Kolom Standar:</span>
-                <p className="font-mono text-[11px] text-slate-300 bg-slate-900 p-2.5 rounded-xl border border-slate-800">
+              <div className="p-3.5 rounded-xl bg-[#F8FAFC] dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#24344D] space-y-1.5">
+                <span className="font-bold text-[#2563EB] dark:text-[#60A5FA] block">Panduan Format Kolom Standar:</span>
+                <p className="font-mono text-[11px] text-[#334155] dark:text-[#CBD5E1] bg-white dark:bg-[#162234] p-2.5 rounded-lg border border-[#E2E8F0] dark:border-[#24344D]">
                   {schemaValidationError.correctFormat}
                 </p>
               </div>
 
               {schemaValidationError.detectedHeaders?.length > 0 && (
-                <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
-                  <span className="font-semibold text-slate-400 block">Header yang Terdeteksi di File Anda:</span>
-                  <div className="flex flex-wrap gap-1 pt-1">
+                <div className="p-3.5 rounded-xl bg-[#F8FAFC] dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#24344D] space-y-1">
+                  <span className="font-semibold text-[#64748B] dark:text-[#94A3B8] block">Header yang Terdeteksi di File Anda:</span>
+                  <div className="flex flex-wrap gap-1.5 pt-1">
                     {schemaValidationError.detectedHeaders.map((h: string, idx: number) => (
-                      <span key={idx} className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 font-mono text-[10px]">
+                      <span key={idx} className="px-2 py-0.5 rounded-md bg-white dark:bg-[#162234] border border-[#E2E8F0] dark:border-[#24344D] text-[#334155] dark:text-[#CBD5E1] font-mono text-[10px]">
                         {h}
                       </span>
                     ))}
@@ -8464,18 +8413,18 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               )}
             </div>
 
-            <div className="flex items-center gap-3 pt-3 border-t border-slate-800">
+            <div className="flex items-center gap-3 pt-3 border-t border-[#E2E8F0] dark:border-[#24344D]">
               <button
                 type="button"
                 onClick={() => setSchemaValidationError(null)}
-                className="flex-1 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs cursor-pointer transition"
+                className="flex-1 py-2.5 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#1E293B] hover:bg-[#F8FAFC] dark:hover:bg-[#24344D] text-[#334155] dark:text-[#CBD5E1] font-bold text-xs cursor-pointer transition"
               >
                 Tutup &amp; Pilih File Lain
               </button>
               <button
                 type="button"
                 onClick={downloadScheduleTemplate}
-                className="flex-1 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md shadow-emerald-600/30 cursor-pointer active:scale-95 transition"
+                className="flex-1 py-2.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition"
               >
                 <Download className="w-4 h-4" />
                 <span>Unduh Template .XLSX Standar</span>
@@ -8487,37 +8436,37 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
       {/* Pop-Up Modal Konfirmasi Tembus Status Selesai (Bypass Checklist Super Admin) */}
       {bypassConfirmModal && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl space-y-5 animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-60 akk-flat-schedule flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#162234] border border-[#E2E8F0] dark:border-[#24344D] rounded-2xl p-6 max-w-md w-full space-y-5">
             <div className="flex items-start gap-3.5">
-              <div className="p-3 rounded-2xl bg-amber-500/20 text-amber-500 border border-amber-500/30 shrink-0">
-                <Zap className="w-6 h-6 fill-current" />
+              <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800 shrink-0">
+                <Zap className="w-5 h-5 fill-current" />
               </div>
               <div className="space-y-1 min-w-0">
-                <div className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
                   Akses Khusus Super Admin
                 </div>
-                <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
+                <h3 className="text-base font-bold text-[#0F172A] dark:text-[#F1F5F9]">
                   Tembus Status Selesai Tanpa Checklist?
                 </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                <p className="text-xs text-[#64748B] dark:text-[#94A3B8] leading-relaxed">
                   Jadwal pengiriman armada ini akan langsung diubah ke status <strong>Selesai (Delivered)</strong> dan disimpan ke riwayat tanpa melalui checklist supir.
                 </p>
               </div>
             </div>
 
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
-              <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
+            <div className="p-4 rounded-xl bg-[#F8FAFC] dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#24344D] space-y-2 text-xs">
+              <div className="flex justify-between items-center text-[#64748B] dark:text-[#94A3B8]">
                 <span className="font-semibold">Area Tujuan:</span>
-                <span className="font-black text-emerald-600 dark:text-emerald-400">{bypassConfirmModal.p.area}</span>
+                <span className="font-bold text-[#2563EB] dark:text-[#60A5FA]">{bypassConfirmModal.p.area}</span>
               </div>
-              <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
+              <div className="flex justify-between items-center text-[#64748B] dark:text-[#94A3B8]">
                 <span className="font-semibold">Driver / Supir:</span>
-                <span className="font-bold text-slate-900 dark:text-white">{bypassConfirmModal.p.driver}</span>
+                <span className="font-bold text-[#0F172A] dark:text-[#F1F5F9]">{bypassConfirmModal.p.driver}</span>
               </div>
-              <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
+              <div className="flex justify-between items-center text-[#64748B] dark:text-[#94A3B8]">
                 <span className="font-semibold">Armada:</span>
-                <span className="font-bold text-slate-900 dark:text-white">{bypassConfirmModal.p.armada}</span>
+                <span className="font-bold text-[#0F172A] dark:text-[#F1F5F9]">{bypassConfirmModal.p.armada}</span>
               </div>
             </div>
 
@@ -8525,7 +8474,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               <button
                 type="button"
                 onClick={() => setBypassConfirmModal(null)}
-                className="flex-1 py-3 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs transition cursor-pointer"
+                className="flex-1 py-2.5 px-4 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white hover:bg-[#F8FAFC] dark:bg-[#1E293B] dark:hover:bg-[#24344D] text-[#475569] dark:text-[#CBD5E1] font-bold text-xs transition cursor-pointer"
               >
                 Batal
               </button>
@@ -8581,7 +8530,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     ]
                   });
 
-                  setSyncSuccessMessage(`⚡ Jadwal ${p.area} (${p.driver}) berhasil ditembus & disimpan ke status Terkirim (Selesai).`);
+                  setSyncSuccessMessage(`Jadwal ${p.area} (${p.driver}) berhasil ditembus & disimpan ke status Terkirim (Selesai).`);
                   setTimeout(() => setSyncSuccessMessage(null), 5000);
 
                   try {
@@ -8601,7 +8550,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     console.warn("[Bypass Checklist Admin Sync Warning]", netErr);
                   }
                 }}
-                className="flex-1 py-3 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition shadow-lg shadow-amber-500/25 cursor-pointer flex items-center justify-center gap-1.5"
+                className="flex-1 py-2.5 px-4 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold text-xs transition cursor-pointer flex items-center justify-center gap-1.5"
               >
                 <Zap className="w-3.5 h-3.5 fill-current" />
                 <span>Ya, Tembus Selesai</span>
@@ -8613,46 +8562,46 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
       {/* Pop-Up Modal Konfirmasi Hapus Jadwal */}
       {deleteConfirmModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl space-y-5 animate-in zoom-in-95 duration-200">
-            <div className="flex items-start gap-4">
-              <div className="p-3 rounded-2xl bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 shrink-0">
-                <AlertTriangle className="w-6 h-6" />
+        <div className="fixed inset-0 z-50 akk-flat-schedule flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#162234] border border-[#E2E8F0] dark:border-[#24344D] rounded-2xl p-6 max-w-md w-full space-y-5">
+            <div className="flex items-start gap-3.5">
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
               </div>
               <div className="space-y-1">
-                <h3 className="text-lg font-black text-slate-900 dark:text-white">
+                <h3 className="text-base font-bold text-[#0F172A] dark:text-[#F1F5F9]">
                   Konfirmasi Hapus Jadwal
                 </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                <p className="text-xs text-[#64748B] dark:text-[#94A3B8] leading-relaxed">
                   Apakah Anda yakin ingin menghapus ritase pengiriman ini dari jadwal operasional? Data yang dihapus akan tersinkronisasi ke riwayat kru dan dashboard.
                 </p>
               </div>
             </div>
 
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
-              <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
+            <div className="p-4 rounded-xl bg-[#F8FAFC] dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#24344D] space-y-2 text-xs">
+              <div className="flex justify-between items-center text-[#64748B] dark:text-[#94A3B8]">
                 <span className="font-semibold">Tanggal Kirim:</span>
-                <span className="font-bold text-slate-900 dark:text-white">{deleteConfirmModal.dateString}</span>
+                <span className="font-bold text-[#0F172A] dark:text-[#F1F5F9]">{deleteConfirmModal.dateString}</span>
               </div>
-              <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
+              <div className="flex justify-between items-center text-[#64748B] dark:text-[#94A3B8]">
                 <span className="font-semibold">Driver:</span>
-                <span className="font-bold text-slate-900 dark:text-white">{deleteConfirmModal.p.driver}</span>
+                <span className="font-bold text-[#0F172A] dark:text-[#F1F5F9]">{deleteConfirmModal.p.driver}</span>
               </div>
-              <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
+              <div className="flex justify-between items-center text-[#64748B] dark:text-[#94A3B8]">
                 <span className="font-semibold">Area Tujuan:</span>
-                <span className="font-bold text-emerald-600 dark:text-emerald-400">{deleteConfirmModal.p.area}</span>
+                <span className="font-bold text-[#2563EB] dark:text-[#60A5FA]">{deleteConfirmModal.p.area}</span>
               </div>
-              <div className="flex justify-between items-center text-slate-600 dark:text-slate-400">
+              <div className="flex justify-between items-center text-[#64748B] dark:text-[#94A3B8]">
                 <span className="font-semibold">Armada:</span>
-                <span className="font-bold text-slate-900 dark:text-white">{deleteConfirmModal.p.armada}</span>
+                <span className="font-bold text-[#0F172A] dark:text-[#F1F5F9]">{deleteConfirmModal.p.armada}</span>
               </div>
             </div>
 
-            <div className="flex items-center gap-3 pt-2">
+            <div className="flex items-center gap-3 pt-1">
               <button
                 type="button"
                 onClick={() => setDeleteConfirmModal(null)}
-                className="flex-1 py-3 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs transition cursor-pointer"
+                className="flex-1 py-2.5 px-4 rounded-lg border border-[#CBD5E1] dark:border-[#334155] bg-white hover:bg-[#F8FAFC] dark:bg-[#1E293B] dark:hover:bg-[#24344D] text-[#475569] dark:text-[#CBD5E1] font-bold text-xs transition cursor-pointer"
               >
                 Tidak, Batal
               </button>
@@ -8667,7 +8616,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   );
                   setDeleteConfirmModal(null);
                 }}
-                className="flex-1 py-3 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition shadow-lg shadow-rose-600/30 cursor-pointer active:scale-95 ring-2 ring-rose-500/50"
+                className="flex-1 py-2.5 px-4 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition cursor-pointer"
               >
                 Ya, Hapus Jadwal
               </button>
@@ -8678,44 +8627,37 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
       {/* Floating Toast Notification for Upload Validation */}
       {uploadToast && (
-        <div className="fixed bottom-6 right-6 z-50 max-w-md w-full bg-slate-900 dark:bg-slate-900 border border-slate-700 dark:border-slate-700 text-white rounded-2xl p-4 shadow-2xl flex items-start gap-3 animate-in fade-in slide-in-from-bottom-5 duration-300">
-          <div className={`p-2.5 rounded-xl shrink-0 ${uploadToast.type === 'error' ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+        <div className="fixed bottom-6 right-6 z-50 max-w-md w-full bg-white dark:bg-[#162234] border border-[#E2E8F0] dark:border-[#24344D] text-[#0F172A] dark:text-[#F1F5F9] rounded-xl p-4 shadow-sm flex items-start gap-3 animate-in fade-in slide-in-from-bottom-5 duration-200">
+          <div className={`p-2 rounded-lg shrink-0 ${uploadToast.type === 'error' ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400' : 'bg-[#EFF6FF] dark:bg-[#1E3A8A]/40 text-[#2563EB] dark:text-[#60A5FA]'}`}>
             {uploadToast.type === 'error' ? <AlertTriangle className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
           </div>
           <div className="flex-1 space-y-1">
             <div className="flex items-center justify-between">
-              <span className={`text-xs font-black uppercase tracking-wider ${uploadToast.type === 'error' ? 'text-rose-400' : 'text-emerald-400'}`}>
+              <span className={`text-xs font-bold uppercase tracking-wider ${uploadToast.type === 'error' ? 'text-rose-600 dark:text-rose-400' : 'text-[#2563EB] dark:text-[#60A5FA]'}`}>
                 {uploadToast.type === 'error' ? 'Gagal Unggah Spreadsheet' : 'Berhasil'}
               </span>
               <button
                 type="button"
                 onClick={() => setUploadToast(null)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+                className="text-[#64748B] hover:text-[#0F172A] dark:hover:text-white p-1 rounded-lg hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B] transition cursor-pointer"
                 title="Tutup Notifikasi"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <p className="text-xs text-slate-300 font-medium">{uploadToast.message}</p>
+            <p className="text-xs text-[#475569] dark:text-[#CBD5E1] font-medium">{uploadToast.message}</p>
             {uploadToast.type === 'error' && (
               <div className="pt-2 flex items-center gap-2">
                 <button
                   type="button"
                   onClick={downloadScheduleTemplate}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] shadow-sm transition cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold text-[11px] transition cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5" />
                   <span>Unduh Template Excel Benar</span>
                 </button>
               </div>
             )}
-            {/* Auto-dismiss timer indicator */}
-            <div className="w-full bg-slate-800 h-1 rounded-full overflow-hidden mt-2">
-              <div
-                className={`h-full ${uploadToast.type === 'error' ? 'bg-rose-500' : 'bg-emerald-500'} animate-pulse`}
-                style={{ width: '100%' }}
-              />
-            </div>
           </div>
         </div>
       )}

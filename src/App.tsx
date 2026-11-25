@@ -45,6 +45,7 @@ import {
   loadE2ETesterModule,
   loadMasterCabang,
   loadSchedulePortalValidationReport,
+  loadIntegratedRouteValidation,
   preloadTabsSequential,
   lazyWithRetry
 } from './utils/tabLoaders';
@@ -83,6 +84,7 @@ const AnalyticsReportingModule = lazyWithRetry(loadAnalyticsReportingModule);
 const E2ETesterModule = lazyWithRetry(loadE2ETesterModule);
 const MasterCabang = lazyWithRetry(loadMasterCabang);
 const SchedulePortalValidationReport = lazyWithRetry(loadSchedulePortalValidationReport);
+const IntegratedRouteValidation = lazyWithRetry(loadIntegratedRouteValidation);
 
 const AppShellSkeleton: React.FC<{
   statusLabel?: string;
@@ -92,33 +94,33 @@ const AppShellSkeleton: React.FC<{
   // Portal Driver uses a compact mobile loader rather than a desktop dashboard skeleton.
   if (typeof window !== 'undefined' && /\/portal-driver(?:\/|$)/.test(window.location.pathname)) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-5">
-        <div className="w-full max-w-sm rounded-3xl border border-slate-800 bg-slate-900 p-6 text-center space-y-5 shadow-xl">
-          <div className="mx-auto h-16 w-16 rounded-2xl bg-white p-3 flex items-center justify-center">
+      <div className="min-h-screen bg-[#f3f6fb] dark:bg-[#111d2c] text-[#18283d] dark:text-[#edf4ff] flex items-center justify-center px-5">
+        <div className="w-full max-w-sm rounded-[24px] border border-[#e4eaf2] dark:border-[#2b3b50] bg-white dark:bg-[#192a40] p-6 text-center space-y-5 shadow-[0_12px_32px_-8px_rgba(24,40,61,0.12)]">
+          <div className="mx-auto h-16 w-16 rounded-[18px] bg-[#e5f0ff] dark:bg-[#253e64] p-3 flex items-center justify-center">
             <img src="/favicon.svg" alt="AKK" className="h-full w-full object-contain" />
           </div>
           <div className="space-y-1">
-            <h1 className="text-xl font-bold tracking-tight">Portal Kiriman</h1>
-            <p className="text-sm text-slate-300">Menyiapkan jadwal Anda...</p>
+            <h1 className="text-xl font-extrabold tracking-tight text-[#18283d] dark:text-[#edf4ff]">Portal Kiriman</h1>
+            <p className="text-sm text-[#5a6b80] dark:text-[#b2c1d3]">Menyiapkan jadwal Anda...</p>
           </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
-            <div className="h-full w-1/3 rounded-full bg-blue-400 animate-pulse" />
+          <div className="h-1.5 overflow-hidden rounded-full bg-[#e4eaf2] dark:bg-[#2b3b50]">
+            <div className="h-full w-1/3 rounded-full bg-[#1764db] dark:bg-[#3079ea] animate-pulse" />
           </div>
-          <p className="text-xs text-slate-400">{statusLabel}</p>
+          <p className="text-xs text-[#5a6b80] dark:text-[#b2c1d3]">{statusLabel}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex">
+    <div className="min-h-screen bg-[#f3f6fb] dark:bg-[#111d2c] text-[#18283d] dark:text-[#edf4ff] flex">
       {/* Top Progress Bar */}
-      <div className="fixed top-0 left-0 right-0 h-[3px] z-50 bg-blue-500/15 overflow-hidden">
-        <div className="h-full w-1/3 bg-gradient-to-r from-blue-600 via-sky-400 to-indigo-500 rounded-full animate-[shimmer_1.2s_infinite]" />
+      <div className="fixed top-0 left-0 right-0 h-[3px] z-50 bg-[#1764db]/15 overflow-hidden">
+        <div className="h-full w-1/3 bg-gradient-to-r from-[#1454c2] via-[#1768db] to-[#3597ef] rounded-full animate-[shimmer_1.2s_infinite]" />
       </div>
 
       {/* Desktop Sidebar Skeleton */}
-      <aside className="hidden lg:flex w-72 shrink-0 flex-col justify-between bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 p-4">
+      <aside className="hidden lg:flex w-72 shrink-0 flex-col justify-between bg-white dark:bg-[#192a40] border-r border-[#e4eaf2] dark:border-[#2b3b50] p-4">
         <div className="space-y-5">
           <div className="flex items-center gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
             <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-slate-800 border border-blue-200/70 dark:border-slate-700 p-1.5 flex items-center justify-center shrink-0">
@@ -351,14 +353,14 @@ const LiveClockBadge: React.FC = () => {
   }).replace(/\./g, ':');
 
   return (
-    <div className="hidden xl:flex items-center gap-2.5 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold shadow-2xs font-mono">
+    <div className="hidden xl:flex items-center gap-2.5 px-4 py-2 rounded-full bg-[#f3f6fb] dark:bg-[#111d2c] border border-[#e4eaf2] dark:border-[#2b3b50] text-[#18283d] dark:text-[#edf4ff] text-xs font-semibold font-mono">
       <div className="flex items-center gap-2">
-        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-        <span className="font-sans font-medium text-slate-600 dark:text-slate-300">{dateStr}</span>
-        <span className="text-slate-300 dark:text-slate-700">&bull;</span>
-        <span className="font-bold text-slate-900 dark:text-white tracking-wider">{timeStr} WIB</span>
+        <span className="w-2 h-2 rounded-full bg-[#08774e] dark:bg-[#85dfb5] animate-pulse" />
+        <span className="font-sans font-medium text-[#5a6b80] dark:text-[#b2c1d3]">{dateStr}</span>
+        <span className="text-[#cbd5e1] dark:text-[#34465d]">&bull;</span>
+        <span className="font-bold text-[#18283d] dark:text-[#edf4ff] tracking-wider tabular-nums">{timeStr} WIB</span>
       </div>
-      <Clock className="w-3.5 h-3.5 text-blue-500 ml-0.5" />
+      <Clock className="w-3.5 h-3.5 text-[#1764db] dark:text-[#6ea8ff] ml-0.5" />
     </div>
   );
 };
@@ -683,6 +685,7 @@ export default function App() {
       case 'operational_dashboard': return 'Dashboard Logistik & Pengiriman';
       case 'schedules': return 'Manajemen Jadwal Pengiriman & Muat';
       case 'portal_validation': return 'Validasi Portal Driver & Helper';
+      case 'integrated_validation': return 'Validasi Rute & Form Kiriman (Three-Way Matching)';
       case 'fleets': return 'Manajemen Armada & Kru Supir';
       case 'spareparts': return 'Manajemen Stok & Pemakaian Sparepart';
       case 'maintenance_costs': return 'Biaya Servis & Pemeliharaan Armada';
@@ -838,7 +841,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex antialiased selection:bg-amber-500 selection:text-slate-950">
+    <div className="min-h-screen bg-[#f3f6fb] dark:bg-[#111d2c] text-[#18283d] dark:text-[#edf4ff] flex antialiased selection:bg-[#1764db] selection:text-white">
       {/* Network Connectivity & Offline Real-Time Tracking Warning Banner */}
       <NetworkStatusBanner />
       <RealtimeShipmentListener />
@@ -854,15 +857,15 @@ export default function App() {
 
       {/* Main Content Area with smooth offset transition for Sidebar */}
       <div className={`flex-1 flex flex-col min-h-screen w-full transition-[padding] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[padding] ${isSidebarMinimized ? 'lg:pl-20' : 'lg:pl-72'}`}>
-        {/* Desktop Top Header Bar Matching Modern SaaS Layout */}
-        <header className="hidden lg:flex sticky top-0 z-[1050] h-16 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-100 dark:border-slate-800 px-6 lg:px-8 items-center justify-between">
+        {/* Desktop Top Header Bar Matching Portal Driver Header */}
+        <header className="hidden lg:flex sticky top-0 z-[1050] h-16 bg-white/95 dark:bg-[#192a40]/95 backdrop-blur-md border-b border-[#e4eaf2] dark:border-[#2b3b50] px-6 lg:px-8 items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
-            <h1 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white tracking-tight truncate">
+            <h1 className="text-base sm:text-lg font-bold text-[#18283d] dark:text-[#edf4ff] tracking-tight truncate">
               Selamat datang kembali, {currentUser.fullName ? currentUser.fullName.split(' ')[0] : 'Admin'}!
             </h1>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2.5 shrink-0">
             {/* Date Range Pill */}
             <LiveClockBadge />
 
@@ -872,11 +875,11 @@ export default function App() {
             {/* Notification Bell Button */}
             <button
               onClick={() => setIsDrawerOpen(true)}
-              className="relative p-2.5 rounded-xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition cursor-pointer flex items-center justify-center shadow-2xs"
+              className="relative p-2.5 rounded-full border border-[#e4eaf2] dark:border-[#2b3b50] bg-[#f3f6fb] dark:bg-[#111d2c] text-[#5a6b80] dark:text-[#b2c1d3] hover:bg-[#e9f2ff] dark:hover:bg-[#253e64] hover:text-[#1764db] transition cursor-pointer flex items-center justify-center"
               title="Pusat Notifikasi Admin"
             >
-              <Bell className="w-4 h-4 text-slate-600 dark:text-slate-300" />
-              <span className="absolute -top-1 -right-1 flex h-4 min-w-4 px-1 items-center justify-center rounded-full bg-blue-600 text-[9px] font-bold text-white shadow-xs">
+              <Bell className="w-4 h-4" />
+              <span className="absolute -top-1 -right-1 flex h-4 min-w-4 px-1 items-center justify-center rounded-full bg-[#1764db] text-[9px] font-bold text-white">
                 {unreadCount > 0 ? unreadCount : 3}
               </span>
             </button>
@@ -886,33 +889,33 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setIsProfileMenuOpen(prev => !prev)}
-                className="flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/80 border border-transparent hover:border-slate-200/80 dark:hover:border-slate-700/80 transition cursor-pointer text-left"
+                className="flex items-center gap-2.5 pl-1.5 pr-3 py-1 rounded-full hover:bg-[#f3f6fb] dark:hover:bg-[#253e64]/60 border border-transparent hover:border-[#e4eaf2] dark:hover:border-[#2b3b50] transition cursor-pointer text-left"
                 title="Menu Profil Akun & Ganti Password"
               >
-                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs">
+                <div className="w-9 h-9 rounded-full bg-[#e9f2ff] dark:bg-[#253e64] text-[#1764db] dark:text-[#c5dbff] font-extrabold text-xs flex items-center justify-center shrink-0">
                   {currentUser.fullName ? currentUser.fullName.charAt(0).toUpperCase() : 'A'}
                 </div>
                 <div className="hidden sm:block min-w-0">
-                  <div className="text-xs font-bold text-slate-900 dark:text-white truncate max-w-[130px]">
+                  <div className="text-xs font-bold text-[#18283d] dark:text-[#edf4ff] truncate max-w-[130px]">
                     {currentUser.fullName || 'Pengguna'}
                   </div>
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400 capitalize truncate">
+                  <div className="text-[11px] text-[#5a6b80] dark:text-[#b2c1d3] capitalize truncate">
                     {String(currentUser.role || 'unassigned').replace(/_/g, ' ')}
                   </div>
                 </div>
-                <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform duration-200 ${isProfileMenuOpen ? 'rotate-180 text-blue-600' : ''}`} />
+                <ChevronDown className={`w-3.5 h-3.5 text-[#5a6b80] shrink-0 transition-transform duration-200 ${isProfileMenuOpen ? 'rotate-180 text-[#1764db]' : ''}`} />
               </button>
 
               {isProfileMenuOpen && (
-                <div className="absolute right-0 mt-2 w-64 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-2xl shadow-slate-900/20 py-2 z-[1200] animate-in fade-in zoom-in-95 duration-150">
-                  <div className="px-4 py-2.5 border-b border-slate-100 dark:border-slate-800">
-                    <div className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
+                <div className="absolute right-0 mt-2 w-64 rounded-[21px] bg-white dark:bg-[#192a40] border border-[#e4eaf2] dark:border-[#2b3b50] shadow-xl py-2 z-[1200] animate-in fade-in zoom-in-95 duration-150">
+                  <div className="px-4 py-2.5 border-b border-[#e4eaf2] dark:border-[#2b3b50]">
+                    <div className="text-xs font-extrabold text-[#18283d] dark:text-[#edf4ff] truncate">
                       {currentUser.fullName || 'Pengguna'}
                     </div>
-                    <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                    <div className="text-[11px] text-[#5a6b80] dark:text-[#b2c1d3] truncate mt-0.5">
                       {currentUser.email || 'user@akk-logistics.co.id'}
                     </div>
-                    <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-500/15 text-[10px] font-bold text-blue-600 dark:text-blue-400">
+                    <span className="inline-flex items-center gap-1 mt-1.5 px-2.5 py-0.5 rounded-full bg-[#e9f2ff] dark:bg-[#253e64] text-[10px] font-bold text-[#1764db] dark:text-[#c5dbff]">
                       <ShieldCheck className="w-3 h-3" />
                       {getUserRoleDisplayTitle(currentUser.role)}
                     </span>
@@ -922,28 +925,28 @@ export default function App() {
                     <button
                       type="button"
                       onClick={handleOpenAccountProfileModal}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-blue-500/15 hover:text-blue-600 dark:hover:text-blue-400 transition cursor-pointer text-left"
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[14px] text-xs font-semibold text-[#18283d] dark:text-[#edf4ff] hover:bg-[#e9f2ff] dark:hover:bg-[#253e64] hover:text-[#1764db] transition cursor-pointer text-left"
                     >
-                      <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                      <div className="w-8 h-8 rounded-[11px] bg-[#e9f2ff] dark:bg-[#253e64] text-[#1764db] dark:text-[#c5dbff] flex items-center justify-center shrink-0">
                         <User className="w-4 h-4" />
                       </div>
                       <div>
                         <div className="font-bold">Profil Akun</div>
-                        <div className="text-[10px] text-slate-400 dark:text-slate-500 font-normal">Lihat & perbarui informasi akun</div>
+                        <div className="text-[10px] text-[#5a6b80] dark:text-[#b2c1d3] font-normal">Lihat & perbarui informasi akun</div>
                       </div>
                     </button>
 
                     <button
                       type="button"
                       onClick={handleOpenChangePasswordModal}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-amber-50 dark:hover:bg-amber-500/15 hover:text-amber-600 dark:hover:text-amber-400 transition cursor-pointer text-left"
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[14px] text-xs font-semibold text-[#18283d] dark:text-[#edf4ff] hover:bg-[#fff2db] dark:hover:bg-[#483923] hover:text-[#925500] dark:hover:text-[#ffd18a] transition cursor-pointer text-left"
                     >
-                      <div className="w-7 h-7 rounded-lg bg-amber-50 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                      <div className="w-8 h-8 rounded-[11px] bg-[#fff2db] dark:bg-[#483923] text-[#925500] dark:text-[#ffd18a] flex items-center justify-center shrink-0">
                         <KeyRound className="w-4 h-4" />
                       </div>
                       <div>
                         <div className="font-bold">Ganti Password</div>
-                        <div className="text-[10px] text-slate-400 dark:text-slate-500 font-normal">Ubah kata sandi keamanan akun</div>
+                        <div className="text-[10px] text-[#5a6b80] dark:text-[#b2c1d3] font-normal">Ubah kata sandi keamanan akun</div>
                       </div>
                     </button>
                   </div>
@@ -955,9 +958,9 @@ export default function App() {
 
         {/* Pending Approval Top Banner Alert if current user is pending */}
         {currentUser.status === 'pending' && (
-          <div className="bg-amber-500/15 border-b border-amber-500/30 px-4 py-2.5 text-xs text-amber-200 flex flex-wrap items-center justify-between gap-2 mt-14 lg:mt-0">
+          <div className="bg-[#fff2db] dark:bg-[#483923]/60 border-b border-[#f5d08c] dark:border-[#6f552d] px-4 py-2.5 text-xs text-[#925500] dark:text-[#ffd18a] flex flex-wrap items-center justify-between gap-2 mt-14 lg:mt-0">
             <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
+              <Clock className="w-4 h-4 text-[#c27100] dark:text-[#ffd18a] shrink-0 animate-pulse" />
               <span>
                 <strong>Perhatian:</strong> Akun Anda (<em>{currentUser.fullName}</em>) saat ini berstatus <strong>Menunggu Persetujuan (Pending Approval)</strong> dari Manager Operasional AKK.
               </span>
@@ -967,13 +970,13 @@ export default function App() {
                 onClick={() => {
                   logisticsStore.approveUser(currentUser.id);
                 }}
-                className="px-2.5 py-1 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] shadow transition cursor-pointer"
+                className="px-3 py-1 rounded-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] shadow transition cursor-pointer"
               >
                 Simulasi: Setujui Sekarang
               </button>
               <button
                 onClick={() => setCurrentTab('users')}
-                className="underline hover:text-white text-[11px]"
+                className="underline hover:opacity-80 text-[11px] font-semibold"
               >
                 Lihat Menu Approval &rarr;
               </button>
@@ -993,28 +996,28 @@ export default function App() {
             isAdmin() || canAccess(currentUser, 'dashboard') ? (
               <ExecutiveDashboard onNavigate={(tab) => setCurrentTab(tab as NavTab)} />
             ) : (
-              <div className="max-w-2xl mx-auto mt-16 p-8 rounded-2xl bg-slate-900 border border-amber-500/30 text-center space-y-6 shadow-2xl">
-                <div className="w-16 h-16 mx-auto rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+              <div className="max-w-2xl mx-auto mt-16 p-8 rounded-[21px] bg-white dark:bg-[#192a40] border border-[#e4eaf2] dark:border-[#2b3b50] text-center space-y-6 shadow-[0_8px_24px_rgba(24,40,61,0.08)]">
+                <div className="w-16 h-16 mx-auto rounded-[18px] bg-[#fff2db] dark:bg-[#483923] border border-[#f5d08c]/60 dark:border-[#6f552d] flex items-center justify-center text-[#925500] dark:text-[#ffd18a]">
                   <Lock className="w-8 h-8" />
                 </div>
                 <div className="space-y-2">
-                  <h2 className="text-xl font-bold text-amber-300">Akses Terbatas: Dashboard Eksekutif</h2>
-                  <p className="text-sm text-slate-300">
-                    Akun Anda (<span className="text-amber-400 font-semibold">{currentUser.fullName}</span> / <span className="text-cyan-400">{currentUser.role}</span>) tidak memiliki izin untuk melihat Dashboard Eksekutif.
+                  <h2 className="text-xl font-extrabold text-[#18283d] dark:text-[#edf4ff]">Akses Terbatas: Dashboard Eksekutif</h2>
+                  <p className="text-sm text-[#5a6b80] dark:text-[#b2c1d3]">
+                    Akun Anda (<span className="text-[#925500] dark:text-[#ffd18a] font-semibold">{currentUser.fullName}</span> / <span className="text-[#1764db] dark:text-[#3079ea] font-semibold">{currentUser.role}</span>) tidak memiliki izin untuk melihat Dashboard Eksekutif.
                     Fitur ini dikhususkan untuk manajemen eksekutif dan akun dengan hak akses khusus yang dikonfigurasi melalui Manajemen Hak Akses.
                   </p>
                 </div>
-                <div className="pt-4 flex justify-center gap-3">
+                <div className="pt-4 flex flex-wrap justify-center gap-3">
                   <button
                     onClick={() => setCurrentTab(isDriver() ? 'driver_portal' : 'operational_dashboard')}
-                    className="px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs transition cursor-pointer shadow-[0_0_12px_rgba(6,182,212,0.4)]"
+                    className="px-5 py-2.5 rounded-full bg-gradient-to-r from-[#1764db] to-[#247beb] text-white font-bold text-xs transition cursor-pointer shadow-[0_4px_12px_rgba(23,100,219,0.22)]"
                   >
                     {isDriver() ? 'Ke Portal Driver Mobile \u2192' : 'Ke Dashboard Logistik & Pengiriman \u2192'}
                   </button>
                   {isAdmin() && (
                     <button
                       onClick={() => setCurrentTab('users')}
-                      className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition cursor-pointer border border-slate-700"
+                      className="px-5 py-2.5 rounded-full bg-[#e9f2ff] dark:bg-[#233a5b] hover:opacity-90 text-[#1764db] dark:text-[#7db4ff] font-bold text-xs transition cursor-pointer"
                     >
                       Buka Manajemen Hak Akses
                     </button>
@@ -1041,6 +1044,10 @@ export default function App() {
 
           {currentTab === 'portal_validation' && (canManageFleet() || canAccess(currentUser, 'portal_validation')) && (
             <SchedulePortalValidationReport />
+          )}
+
+          {currentTab === 'integrated_validation' && (canManageFleet() || canAccess(currentUser, 'integrated_validation')) && (
+            <IntegratedRouteValidation />
           )}
 
           {currentTab === 'fleets' && (canManageFleet() || canAccess(currentUser, 'fleets')) && (
@@ -1333,14 +1340,14 @@ export default function App() {
           </ReadOnlyModuleBoundary>
         </main>
 
-        {/* Enterprise AKK Footer (hidden on driver portal & sales rfid scanner to keep clean mobile bottom bar) */}
+        {/* Enterprise AKK Footer matching Portal Driver light/dark tokens */}
         {currentTab !== 'driver_portal' && currentTab !== 'sales_rfid_scanner' && (
-          <footer className="bg-slate-950 border-t border-slate-900 py-4 text-slate-500 text-xs text-center mt-auto">
+          <footer className="bg-white/85 dark:bg-[#192a40]/95 border-t border-[#e4eaf2] dark:border-[#2b3b50] py-3.5 text-[#5a6b80] dark:text-[#b2c1d3] text-xs text-center mt-auto">
             <div className="w-full max-w-none mx-0 px-3 sm:px-4 lg:px-5 flex flex-col sm:flex-row items-center justify-between gap-2">
-              <div className="text-slate-400">
+              <div>
                 <span>&copy; {new Date().getFullYear()} PT Anugrah Kemasan Kreatif &middot; Sistem Distribusi &amp; Manajemen Operasional</span>
               </div>
-              <div className="flex items-center gap-4 text-slate-500 text-[11px]">
+              <div className="flex items-center gap-4 text-[11px] font-medium">
                 <span>Banyuwangi Distribution Hub</span>
               </div>
             </div>
@@ -1350,11 +1357,11 @@ export default function App() {
 
       {/* Modal Profil Akun */}
       {isAccountProfileOpen && (
-        <div className="fixed inset-0 z-[1300] bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="px-6 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white flex items-center justify-between">
+        <div className="fixed inset-0 z-[1300] bg-[#07172a]/55 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-[24px] bg-white dark:bg-[#192a40] border border-[#e4eaf2] dark:border-[#2b3b50] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 bg-gradient-to-r from-[#1454c2] via-[#1768db] to-[#3597ef] text-white flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-[13px] bg-white/15 flex items-center justify-center">
                   <User className="w-5 h-5" />
                 </div>
                 <div>
@@ -1365,7 +1372,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setIsAccountProfileOpen(false)}
-                className="p-1.5 rounded-lg hover:bg-white/15 transition cursor-pointer"
+                className="p-2 rounded-full hover:bg-white/15 transition cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1437,14 +1444,14 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setIsAccountProfileOpen(false)}
-                  className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                  className="px-4 py-2.5 rounded-full bg-[#e9f2ff] dark:bg-[#253e64] text-xs font-bold text-[#1764db] dark:text-[#c5dbff] hover:brightness-95 transition cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
                   disabled={isSavingProfile}
-                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2 shadow-md shadow-blue-500/20 transition cursor-pointer"
+                  className="px-5 py-2.5 rounded-full bg-gradient-to-r from-[#1764db] to-[#247beb] hover:brightness-95 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2 shadow-sm shadow-[#1764db]/20 transition cursor-pointer"
                 >
                   <CheckCircle2 className="w-4 h-4" />
                   <span>{isSavingProfile ? 'Menyimpan...' : 'Simpan Profil'}</span>
@@ -1457,16 +1464,16 @@ export default function App() {
 
       {/* Modal Ganti Password */}
       {isChangePasswordOpen && (
-        <div className="fixed inset-0 z-[1300] bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="px-6 py-4 bg-gradient-to-r from-amber-500 to-orange-600 text-white flex items-center justify-between">
+        <div className="fixed inset-0 z-[1300] bg-[#07172a]/55 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-[24px] bg-white dark:bg-[#192a40] border border-[#e4eaf2] dark:border-[#2b3b50] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 bg-gradient-to-r from-[#1454c2] via-[#1768db] to-[#3597ef] text-white flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-[13px] bg-white/15 flex items-center justify-center">
                   <KeyRound className="w-5 h-5" />
                 </div>
                 <div>
                   <h3 className="text-sm font-extrabold">Ganti Password Akun</h3>
-                  <p className="text-[11px] text-amber-100">Perbarui kata sandi keamanan akun Anda</p>
+                  <p className="text-[11px] text-blue-100">Perbarui kata sandi keamanan akun Anda</p>
                 </div>
               </div>
               <button
@@ -1524,14 +1531,14 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setIsChangePasswordOpen(false)}
-                  className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                  className="px-4 py-2.5 rounded-full bg-[#e9f2ff] dark:bg-[#253e64] text-xs font-bold text-[#1764db] dark:text-[#c5dbff] hover:brightness-95 transition cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
                   disabled={isSavingPassword}
-                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 text-xs font-extrabold flex items-center gap-2 shadow-md shadow-amber-500/20 transition cursor-pointer"
+                  className="px-5 py-2.5 rounded-full bg-gradient-to-r from-[#1764db] to-[#247beb] hover:brightness-95 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-2 shadow-sm shadow-[#1764db]/20 transition cursor-pointer"
                 >
                   <CheckCircle2 className="w-4 h-4" />
                   <span>{isSavingPassword ? 'Menyimpan...' : 'Simpan Password'}</span>

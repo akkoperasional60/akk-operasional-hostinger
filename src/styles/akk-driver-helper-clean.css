@@ -647,52 +647,64 @@ body.akk-crew-portal-ui .akk-driver-mobile > main > div:first-child button.hover
   box-shadow: 0 5px 14px rgba(34,91,231,.16) !important;
 }
 
-/* V63: focused create-shipment flow in existing Jadwal Kirim / Driver menu. */
+/* V63/V73: focused create-shipment flow positioned cleanly bottom-right in Portal Driver style. */
 body.akk-clean-ui button[title="Pop-up Form Tambah Jadwal Baru (Manual)"] { display: none !important; }
 .akk-ship-create-trigger {
-  position: fixed; z-index: 1090; right: 24px; top: 78px;
+  position: fixed; z-index: 1090; right: 24px; bottom: 24px; top: auto;
   display: inline-flex; align-items: center; justify-content: center; gap: 9px;
-  padding: 12px 18px; min-height: 46px; border-radius: 14px;
+  padding: 11px 18px; min-height: 44px; border-radius: 12px;
   border: 1px solid #1d4ed8; background: #2563eb; color: #fff;
-  font: 700 14px/1.2 system-ui, sans-serif;
-  box-shadow: 0 7px 18px rgba(37, 99, 235, .17);
-  transition: transform .16s ease, background .16s ease;
+  font: 700 13.5px/1.2 'Plus Jakarta Sans', system-ui, sans-serif;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, .08);
+  transition: background-color .16s ease, border-color .16s ease;
+  cursor: pointer;
 }
-.akk-ship-create-trigger:hover { background: #1d4ed8; transform: translateY(-1px); }
-.akk-ship-qa-trigger { top: 78px; bottom: auto; right: 24px; z-index: 1080; }
-.akk-ship-backdrop { position: fixed; inset: 0; z-index: 2147483000; background: rgba(9, 18, 35, .58); display: flex; align-items: center; justify-content: center; padding: 16px; backdrop-filter: blur(4px); }
-.akk-ship-dialog { width: 100%; max-width: 580px; max-height: min(760px, 95dvh); display: flex; flex-direction: column; border-radius: 22px; overflow: hidden; background: #fff; color: #162338; box-shadow: 0 35px 110px rgba(10,22,41,.26); }
-.akk-ship-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 22px 24px 18px; border-bottom: 1px solid #edf0f5; }
-.akk-ship-dialog-head h2 { color: #101f36; font: 800 22px/1.25 system-ui,sans-serif; letter-spacing: -.02em; margin: 2px 0 0; }
-.akk-ship-kicker { margin: 0; color: #64748b; letter-spacing: .12em; font-size: 10px; font-weight: 700; }
-.akk-ship-close { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; color: #64748b; }
-.akk-ship-close:hover { background: #f1f5f9; }
+.akk-ship-create-trigger:hover { background: #1d4ed8; border-color: #1e40af; }
+.akk-ship-qa-trigger { bottom: 24px; top: auto; right: 24px; z-index: 1080; }
+.akk-ship-backdrop { position: fixed; inset: 0; z-index: 2147483000; background: rgba(7, 23, 42, .52); display: flex; align-items: center; justify-content: center; padding: 16px; backdrop-filter: blur(5px); }
+.akk-ship-dialog { width: 100%; max-width: 580px; max-height: min(760px, 95dvh); display: flex; flex-direction: column; border-radius: 24px; overflow: hidden; background: #fff; color: #18283d; border: 1px solid #e4eaf2; box-shadow: 0 32px 96px rgba(10, 22, 41, .24); }
+html.dark .akk-ship-dialog { background: #192a40; color: #edf4ff; border-color: #2b3b50; }
+.akk-ship-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 24px 16px; border-bottom: 1px solid #e4eaf2; }
+html.dark .akk-ship-dialog-head { border-bottom-color: #2b3b50; }
+.akk-ship-dialog-head h2 { color: #18283d; font: 750 21px/1.25 'Plus Jakarta Sans', system-ui, sans-serif; letter-spacing: -.03em; margin: 2px 0 0; }
+html.dark .akk-ship-dialog-head h2 { color: #edf4ff; }
+.akk-ship-kicker { margin: 0; color: #5a6b80; letter-spacing: .12em; font-size: 10px; font-weight: 700; }
+html.dark .akk-ship-kicker { color: #b2c1d3; }
+.akk-ship-close { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 999px; color: #5a6b80; background: #f3f6fb; border: 0; cursor: pointer; }
+html.dark .akk-ship-close { background: #253e64; color: #edf4ff; }
+.akk-ship-close:hover { background: #e9f2ff; color: #1764db; }
 .akk-ship-dialog-body { padding: 20px 24px; overflow-y: auto; overscroll-behavior: contain; min-height: 0; }
 .akk-ship-dialog-body select, .akk-ship-dialog-body input { color-scheme: light; }
+html.dark .akk-ship-dialog-body select, html.dark .akk-ship-dialog-body input { color-scheme: dark; }
 .akk-ship-dialog-body input:focus, .akk-ship-dialog-body select:focus { outline: none; }
-.akk-ship-crew-picker { background: #f8fafc; border: 1px solid #e8edf4; padding: 15px; border-radius: 16px; }
-.akk-ship-dialog-footer { border-top: 1px solid #edf0f5; padding: 14px 24px; display: flex; gap: 10px; align-items: center; justify-content: flex-end; }
-.akk-ship-cancel { min-height: 44px; padding: 0 16px; color: #475569; border-radius: 12px; background: #f1f5f9; font: 700 13px system-ui,sans-serif; }
-.akk-ship-cancel:hover { background: #e2e8f0; }
-.akk-ship-qa-warning { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: 11px; margin-bottom: 15px; background: #eff6ff; color: #1e40af; font-size: 12px; font-weight: 600; }
-.akk-ship-error { margin-top: 14px; padding: 11px 12px; border-radius: 10px; background: #fef2f2; color: #b91c1c; font-size: 12px; font-weight: 700; }
-.akk-ship-test-list { border-top: 1px solid #e2e8f0; margin-top: 20px; padding-top: 18px; display: grid; gap: 10px; }
-.akk-ship-test-list h3 { margin: 0 0 4px; font: 750 14px system-ui,sans-serif; }
-.akk-ship-test-card { border: 1px solid #e2e8f0; border-radius: 14px; padding: 13px; }
-.akk-ship-test-slot { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; border: 1px solid #e2e8f0; padding: 10px; border-radius: 10px; }
-.akk-ship-test-claim { color: #2563eb; font-size: 12px; font-weight: 700; }
+.akk-ship-crew-picker { background: #f3f6fb; border: 1px solid #e4eaf2; padding: 15px; border-radius: 19px; }
+html.dark .akk-ship-crew-picker { background: #111d2c; border-color: #2b3b50; }
+.akk-ship-dialog-footer { border-top: 1px solid #e4eaf2; padding: 14px 24px; display: flex; gap: 10px; align-items: center; justify-content: flex-end; }
+html.dark .akk-ship-dialog-footer { border-top-color: #2b3b50; }
+.akk-ship-cancel { min-height: 44px; padding: 0 18px; color: #1764db; border-radius: 999px; background: #e9f2ff; border: 0; font: 700 13px 'Plus Jakarta Sans', system-ui, sans-serif; cursor: pointer; }
+html.dark .akk-ship-cancel { background: #253e64; color: #c3d9ff; }
+.akk-ship-cancel:hover { filter: brightness(0.96); }
+.akk-ship-qa-warning { display: flex; align-items: flex-start; gap: 8px; padding: 11px 13px; border-radius: 14px; margin-bottom: 15px; background: #e9f2ff; color: #1764db; font-size: 12px; font-weight: 600; }
+.akk-ship-error { margin-top: 14px; padding: 11px 13px; border-radius: 14px; background: #ffedf0; color: #b42338; font-size: 12px; font-weight: 700; }
+.akk-ship-test-list { border-top: 1px solid #e4eaf2; margin-top: 20px; padding-top: 18px; display: grid; gap: 10px; }
+.akk-ship-test-list h3 { margin: 0 0 4px; font: 750 14px 'Plus Jakarta Sans', system-ui, sans-serif; }
+.akk-ship-test-card { border: 1px solid #e4eaf2; border-radius: 16px; padding: 13px; }
+.akk-ship-test-slot { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; border: 1px solid #e4eaf2; padding: 10px; border-radius: 12px; }
+.akk-ship-test-claim { color: #1764db; font-size: 12px; font-weight: 700; }
 .akk-ship-test-claim:hover { text-decoration: underline; }
-.akk-ship-notice { z-index: 1091; position: fixed; right: 24px; top: 135px; max-width: min(470px, calc(100vw - 32px)); display: flex; gap: 8px; align-items: center; background: #ecfdf5; border: 1px solid #bbf7d0; color: #065f46; padding: 12px 14px; border-radius: 12px; font: 600 12px/1.4 system-ui,sans-serif; box-shadow: 0 10px 20px rgba(15,23,42,.08); }
+.akk-ship-notice { z-index: 1091; position: fixed; right: 24px; bottom: 82px; top: auto; max-width: min(470px, calc(100vw - 32px)); display: flex; gap: 8px; align-items: center; background: #e4f7ed; border: 1px solid #9de2be; color: #08774e; padding: 12px 16px; border-radius: 12px; font: 600 12px/1.4 'Plus Jakarta Sans', system-ui, sans-serif; box-shadow: 0 6px 20px rgba(15, 23, 42, .08); }
+.akk-ship-notice.akk-ship-notice--inline { bottom: 24px; }
 .akk-ship-notice button { margin-left: auto; }
 @media (max-width: 767px) {
-  .akk-ship-create-trigger { right: 14px; top: 80px; padding: 10px 14px; min-height: 42px; border-radius: 12px; font-size: 13px; }
-  .akk-ship-qa-trigger { top: 80px; bottom: auto; right: 14px; }
+  .akk-ship-create-trigger { right: 14px; bottom: 18px; top: auto; padding: 11px 16px; min-height: 44px; border-radius: 12px; font-size: 13px; }
+  .akk-ship-qa-trigger { bottom: 18px; top: auto; right: 14px; }
   .akk-ship-backdrop { padding: 0; align-items: flex-end; }
   .akk-ship-dialog { max-height: 93dvh; border-radius: 24px 24px 0 0; }
   .akk-ship-dialog-head { padding: 19px 18px 13px; }
   .akk-ship-dialog-body { padding: 18px; }
   .akk-ship-dialog-footer { padding: 12px 18px; }
-  .akk-ship-notice { top: 132px; right: 10px; left: 10px; max-width: none; }
+  .akk-ship-notice { bottom: 74px; top: auto; right: 10px; left: 10px; max-width: none; }
+  .akk-ship-notice.akk-ship-notice--inline { bottom: 18px; }
 }
 @media (prefers-reduced-motion: reduce) { .akk-ship-create-trigger { transition: none; } }
 

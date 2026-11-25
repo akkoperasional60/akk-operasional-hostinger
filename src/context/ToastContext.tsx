@@ -352,55 +352,49 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           return (
             <div
               key={toast.id}
-              className={`pointer-events-auto w-full p-4 rounded-xl border shadow-2xl flex gap-3.5 backdrop-blur-md relative overflow-hidden group transition-all duration-200 animate-in fade-in slide-in-from-bottom-4 ${
+              className={`pointer-events-auto w-full p-4 rounded-[19px] border shadow-xl flex gap-3.5 backdrop-blur-md relative overflow-hidden group transition-all duration-200 animate-in fade-in slide-in-from-bottom-4 bg-white/95 dark:bg-[#192a40]/95 text-[#18283d] dark:text-[#edf4ff] ${
                   toast.type === 'sla_warning'
-                    ? 'bg-slate-900/95 border-amber-500/80 ring-2 ring-amber-500/30 text-amber-50 shadow-amber-500/10'
-                    : toast.type === 'tax_kir_reminder'
-                    ? 'bg-slate-900/95 border-rose-500/80 ring-2 ring-rose-500/30 text-rose-50 shadow-rose-500/10'
-                    : isUrgent 
-                    ? 'bg-rose-950/95 border-rose-600 ring-1 ring-rose-500/30 text-rose-50' 
+                    ? 'border-[#f5c26b] dark:border-[#925500] ring-2 ring-[#fff2db] dark:ring-[#483923]/60'
+                    : toast.type === 'tax_kir_reminder' || isUrgent
+                    ? 'border-[#f4a5b2] dark:border-[#b42338] ring-2 ring-[#ffedf0] dark:ring-[#472c3a]/60'
                     : toast.type === 'checker'
-                    ? 'bg-slate-900/95 border-amber-500/40 text-slate-100 ring-1 ring-amber-500/10'
+                    ? 'border-[#f5c26b] dark:border-[#925500]'
                     : toast.type === 'schedule'
-                    ? 'bg-slate-900/95 border-blue-500/40 text-slate-100'
-                    : 'bg-slate-900/95 border-emerald-500/40 text-slate-100'
+                    ? 'border-[#c5dcff] dark:border-[#3079ea]/50'
+                    : 'border-[#9de2be] dark:border-[#08774e]/60'
                 }`}
               >
                 {/* Visual Accent Pulse Bar on Left Side */}
                 <div className={`absolute top-0 left-0 w-1.5 h-full ${
                   toast.type === 'sla_warning'
-                    ? 'bg-gradient-to-b from-amber-400 to-rose-500 animate-pulse'
-                    : toast.type === 'tax_kir_reminder'
-                    ? 'bg-gradient-to-b from-rose-500 to-amber-500 animate-pulse'
-                    : isUrgent 
-                    ? 'bg-rose-500 animate-pulse' 
+                    ? 'bg-gradient-to-b from-[#d97706] to-[#b42338] animate-pulse'
+                    : toast.type === 'tax_kir_reminder' || isUrgent
+                    ? 'bg-[#b42338] animate-pulse'
                     : toast.type === 'checker'
-                    ? 'bg-amber-500'
+                    ? 'bg-[#d97706]'
                     : toast.type === 'schedule'
-                    ? 'bg-blue-500'
-                    : 'bg-emerald-500'
+                    ? 'bg-[#1764db]'
+                    : 'bg-[#08774e]'
                 }`} />
 
                 {/* Left Side Status Icon */}
-                <div className={`p-2 rounded-lg shrink-0 flex items-center justify-center ${
+                <div className={`w-10 h-10 rounded-[13px] shrink-0 flex items-center justify-center ${
                   toast.type === 'sla_warning'
-                    ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                    : toast.type === 'tax_kir_reminder'
-                    ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                    : isUrgent 
-                    ? 'bg-rose-500/20 text-rose-400' 
+                    ? 'bg-[#fff2db] dark:bg-[#483923] text-[#925500] dark:text-[#ffd18a]'
+                    : toast.type === 'tax_kir_reminder' || isUrgent
+                    ? 'bg-[#ffedf0] dark:bg-[#472c3a] text-[#b42338] dark:text-[#ffb4bf]'
                     : toast.type === 'checker'
-                    ? 'bg-amber-500/15 text-amber-400'
+                    ? 'bg-[#fff2db] dark:bg-[#483923] text-[#925500] dark:text-[#ffd18a]'
                     : toast.type === 'schedule'
-                    ? 'bg-blue-500/15 text-blue-400'
-                    : 'bg-emerald-500/15 text-emerald-400'
+                    ? 'bg-[#e9f2ff] dark:bg-[#253e64] text-[#1764db] dark:text-[#c5dbff]'
+                    : 'bg-[#e4f7ed] dark:bg-[#203e37] text-[#08774e] dark:text-[#85dfb5]'
                 }`}>
                   {toast.type === 'sla_warning' ? (
-                    <Clock className="w-5 h-5 animate-pulse text-amber-400" />
+                    <Clock className="w-5 h-5 animate-pulse" />
                   ) : toast.type === 'tax_kir_reminder' ? (
-                    <FileText className="w-5 h-5 animate-pulse text-rose-400" />
+                    <FileText className="w-5 h-5 animate-pulse" />
                   ) : isUrgent ? (
-                    <ShieldAlert className="w-5 h-5 animate-bounce" />
+                    <ShieldAlert className="w-5 h-5" />
                   ) : toast.type === 'checker' ? (
                     <AlertTriangle className="w-5 h-5" />
                   ) : toast.type === 'schedule' ? (
@@ -411,26 +405,26 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 </div>
 
                 {/* Notification Copy & Direct Navigate Action */}
-                <div className="flex-1 min-w-0 pr-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-black tracking-tight leading-none">
+                <div className="flex-1 min-w-0 pr-5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-extrabold tracking-tight leading-none text-[#18283d] dark:text-[#edf4ff]">
                       {toast.title}
                     </span>
                     {toast.type === 'sla_warning' ? (
-                      <span className="px-1.5 py-0.2 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[9px] font-black tracking-wider uppercase animate-pulse">
+                      <span className="px-2 py-0.5 rounded-full bg-[#fff2db] dark:bg-[#483923] text-[#925500] dark:text-[#ffd18a] text-[9px] font-bold tracking-wider uppercase">
                         Batas SLA
                       </span>
                     ) : toast.type === 'tax_kir_reminder' ? (
-                      <span className="px-1.5 py-0.2 rounded bg-rose-500/25 border border-rose-500/40 text-rose-300 text-[9px] font-black tracking-wider uppercase animate-pulse">
+                      <span className="px-2 py-0.5 rounded-full bg-[#ffedf0] dark:bg-[#472c3a] text-[#b42338] dark:text-[#ffb4bf] text-[9px] font-bold tracking-wider uppercase">
                         Pajak / KIR
                       </span>
                     ) : isUrgent ? (
-                      <span className="px-1.5 py-0.2 rounded bg-rose-600 text-white text-[9px] font-black tracking-wider uppercase animate-pulse">
+                      <span className="px-2 py-0.5 rounded-full bg-[#b42338] text-white text-[9px] font-bold tracking-wider uppercase">
                         Urgent
                       </span>
                     ) : null}
                   </div>
-                  <p className="text-[11px] text-slate-300 font-semibold mt-1.5 leading-relaxed break-words">
+                  <p className="text-[11px] text-[#5a6b80] dark:text-[#b2c1d3] font-medium mt-1.5 leading-relaxed break-words">
                     {toast.message}
                   </p>
                   
@@ -438,9 +432,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   <div className="mt-2 flex items-center gap-1.5">
                     <button
                       onClick={() => {
-                        // Mark as read
                         markAsRead(toast.id);
-                        // Trigger route tab navigation via app's callback
                         if (onNavigateRef.current) {
                           if (toast.type === 'sla_warning') onNavigateRef.current('schedules');
                           else if (toast.type === 'tax_kir_reminder') onNavigateRef.current('fleets');
@@ -448,18 +440,15 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                           else if (toast.type === 'schedule') onNavigateRef.current('schedules');
                           else onNavigateRef.current('operational_dashboard');
                         }
-                        // Close this toast
                         removeToast(toast.id);
                       }}
-                      className={`text-[10px] font-black flex items-center gap-0.5 hover:underline cursor-pointer ${
-                        toast.type === 'sla_warning' ? 'text-amber-400 hover:text-amber-200' : toast.type === 'tax_kir_reminder' ? 'text-amber-400 hover:text-amber-200' : isUrgent ? 'text-rose-300 hover:text-rose-100' : 'text-amber-400 hover:text-amber-200'
-                      }`}
+                      className="text-[10.5px] font-bold text-[#1764db] dark:text-[#6ea8ff] flex items-center gap-0.5 hover:underline cursor-pointer"
                     >
                       <span>{toast.type === 'tax_kir_reminder' ? 'Buka Armada & Pajak / KIR' : 'Buka Pantauan Pengiriman'}</span>
                       <ChevronRight className="w-3 h-3" />
                     </button>
-                    <span className="text-slate-600 text-[10px]">&bull;</span>
-                    <span className="text-slate-500 text-[9px] font-mono">
+                    <span className="text-[#cbd5e1] dark:text-[#34465d] text-[10px]">&bull;</span>
+                    <span className="text-[#5a6b80] dark:text-[#b2c1d3] text-[10px] font-mono tabular-nums">
                       {new Date(toast.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
@@ -468,7 +457,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 {/* Close Button */}
                 <button
                   onClick={() => removeToast(toast.id)}
-                  className="absolute top-2.5 right-2.5 p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-800/80 transition cursor-pointer"
+                  className="absolute top-2.5 right-2.5 p-1.5 rounded-full text-[#5a6b80] hover:text-[#18283d] dark:hover:text-white hover:bg-[#f3f6fb] dark:hover:bg-[#253e64] transition cursor-pointer"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -485,71 +474,71 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           {/* Backdrop Overlay */}
           <div
             onClick={() => setIsDrawerOpen(false)}
-            className="fixed inset-0 bg-black/50 z-[100] cursor-pointer transition-opacity duration-200"
+            className="fixed inset-0 bg-[#07172a]/50 backdrop-blur-xs z-[1350] cursor-pointer transition-opacity duration-200"
           />
           
           {/* Right Drawer */}
           <div
-            className="fixed right-0 top-0 bottom-0 max-w-md w-full bg-slate-900 border-l border-slate-800 z-[101] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-right duration-200"
+            className="fixed right-0 top-0 bottom-0 max-w-md w-full bg-white dark:bg-[#192a40] border-l border-[#e4eaf2] dark:border-[#2b3b50] z-[1360] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-right duration-200"
           >
               {/* Header */}
-              <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20">
+              <div className="p-4 bg-white dark:bg-[#192a40] border-b border-[#e4eaf2] dark:border-[#2b3b50] flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-[12px] bg-[#e9f2ff] dark:bg-[#253e64] text-[#1764db] dark:text-[#c5dbff] flex items-center justify-center">
                     <Bell className="w-4 h-4" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-black text-white">Pusat Notifikasi Admin</h3>
-                    <p className="text-[10px] text-slate-400">Log operasional & simulasi real-time</p>
+                    <h3 className="text-sm font-extrabold text-[#18283d] dark:text-[#edf4ff]">Pusat Notifikasi Admin</h3>
+                    <p className="text-[11px] text-[#5a6b80] dark:text-[#b2c1d3]">Log operasional & simulasi real-time</p>
                   </div>
                 </div>
                 
                 <button
                   onClick={() => setIsDrawerOpen(false)}
-                  className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-white cursor-pointer transition"
+                  className="p-2 rounded-full bg-[#f3f6fb] dark:bg-[#111d2c] hover:bg-[#e9f2ff] dark:hover:bg-[#253e64] border border-[#e4eaf2] dark:border-[#2b3b50] text-[#5a6b80] dark:text-[#b2c1d3] hover:text-[#1764db] cursor-pointer transition"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
               {/* SIMULATION & CONTROLS BOX */}
-              <div className="p-4 bg-slate-950/40 border-b border-slate-800/60 space-y-3.5">
+              <div className="p-4 bg-[#f3f6fb] dark:bg-[#111d2c] border-b border-[#e4eaf2] dark:border-[#2b3b50] space-y-3.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <Settings className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="text-xs font-bold text-[#18283d] dark:text-[#edf4ff] flex items-center gap-1.5">
+                    <Settings className="w-3.5 h-3.5 text-[#1764db] dark:text-[#6ea8ff]" />
                     Konfigurasi Notifikasi
                   </span>
                   
                   {/* Sound Toggle */}
                   <button
                     onClick={() => setSoundEnabled(!soundEnabled)}
-                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-3 py-1 rounded-full border text-[11px] font-bold transition cursor-pointer ${
                       soundEnabled 
-                        ? 'bg-amber-500/10 text-amber-400 border-amber-500/25' 
-                        : 'bg-slate-900 text-slate-500 border-slate-800'
+                        ? 'bg-[#e9f2ff] dark:bg-[#253e64] text-[#1764db] dark:text-[#c5dbff] border-[#c5dcff] dark:border-[#3079ea]/40' 
+                        : 'bg-white dark:bg-[#192a40] text-[#5a6b80] dark:text-[#b2c1d3] border-[#e4eaf2] dark:border-[#2b3b50]'
                     }`}
                     title={soundEnabled ? 'Matikan Suara Chime' : 'Aktifkan Suara Chime'}
                   >
-                    {soundEnabled ? <Volume2 className="w-3.5 h-3.5 animate-pulse" /> : <VolumeX className="w-3.5 h-3.5" />}
+                    {soundEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
                     <span>{soundEnabled ? 'Chime Aktif' : 'Mute'}</span>
                   </button>
                 </div>
 
                 {/* Simulation Feed Toggle */}
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800/80 flex items-center justify-between text-xs">
+                <div className="bg-white dark:bg-[#192a40] p-3.5 rounded-[16px] border border-[#e4eaf2] dark:border-[#2b3b50] flex items-center justify-between text-xs gap-3">
                   <div>
-                    <div className="font-bold text-slate-200">Simulasi Real-Time Otomatis</div>
-                    <p className="text-[10px] text-slate-400 mt-0.5 leading-relaxed pr-2">
+                    <div className="font-bold text-[#18283d] dark:text-[#edf4ff]">Simulasi Real-Time Otomatis</div>
+                    <p className="text-[10.5px] text-[#5a6b80] dark:text-[#b2c1d3] mt-0.5 leading-relaxed">
                       Secara acak memicu info status truk, denda, atau jadwal mendesak tiap 40 detik.
                     </p>
                   </div>
                   
                   <button
                     onClick={() => setSimulationEnabled(!simulationEnabled)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-black tracking-tight shrink-0 transition cursor-pointer ${
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-bold tracking-tight shrink-0 transition cursor-pointer ${
                       simulationEnabled 
-                        ? 'bg-emerald-500 text-slate-950 font-black' 
-                        : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                        ? 'bg-[#08774e] text-white' 
+                        : 'bg-[#f3f6fb] dark:bg-[#111d2c] text-[#5a6b80] dark:text-[#b2c1d3] border border-[#e4eaf2] dark:border-[#2b3b50]'
                     }`}
                   >
                     {simulationEnabled ? 'AKTIF' : 'OFF'}
@@ -558,37 +547,37 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
                 {/* Manual Triggers Panel */}
                 <div className="space-y-1.5">
-                  <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                  <div className="text-[10px] uppercase font-bold text-[#5a6b80] dark:text-[#b2c1d3] tracking-wider">
                     Uji Coba Kirim Notifikasi Manual:
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[10px] font-bold">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[10.5px] font-bold">
                     <button
                       onClick={() => triggerManualSimulation('delivery')}
-                      className="px-2 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 hover:border-slate-700 flex items-center justify-center gap-1 cursor-pointer"
+                      className="px-2 py-1.5 rounded-full bg-white dark:bg-[#192a40] hover:bg-[#e4f7ed] dark:hover:bg-[#203e37] text-[#18283d] dark:text-[#edf4ff] border border-[#e4eaf2] dark:border-[#2b3b50] flex items-center justify-center gap-1 cursor-pointer transition"
                     >
-                      <Truck className="w-3 h-3 text-emerald-400" />
+                      <Truck className="w-3 h-3 text-[#08774e] dark:text-[#85dfb5]" />
                       <span>BBM/Kirim</span>
                     </button>
                     <button
                       onClick={() => triggerManualSimulation('checker')}
-                      className="px-2 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 hover:border-slate-700 flex items-center justify-center gap-1 cursor-pointer"
+                      className="px-2 py-1.5 rounded-full bg-white dark:bg-[#192a40] hover:bg-[#fff2db] dark:hover:bg-[#483923] text-[#18283d] dark:text-[#edf4ff] border border-[#e4eaf2] dark:border-[#2b3b50] flex items-center justify-center gap-1 cursor-pointer transition"
                     >
-                      <AlertTriangle className="w-3 h-3 text-amber-400" />
+                      <AlertTriangle className="w-3 h-3 text-[#925500] dark:text-[#ffd18a]" />
                       <span>Denda</span>
                     </button>
                     <button
                       onClick={() => triggerManualSimulation('schedule')}
-                      className="px-2 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 hover:border-slate-700 flex items-center justify-center gap-1 cursor-pointer"
+                      className="px-2 py-1.5 rounded-full bg-white dark:bg-[#192a40] hover:bg-[#e9f2ff] dark:hover:bg-[#253e64] text-[#18283d] dark:text-[#edf4ff] border border-[#e4eaf2] dark:border-[#2b3b50] flex items-center justify-center gap-1 cursor-pointer transition"
                     >
-                      <Clock className="w-3 h-3 text-blue-400" />
+                      <Clock className="w-3 h-3 text-[#1764db] dark:text-[#c5dbff]" />
                       <span>Jadwal</span>
                     </button>
                     <button
                       onClick={() => triggerManualSimulation('sla_warning')}
-                      className="px-2 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:border-amber-500/50 flex items-center justify-center gap-1 cursor-pointer"
+                      className="px-2 py-1.5 rounded-full bg-[#fff2db] dark:bg-[#483923] hover:brightness-95 text-[#925500] dark:text-[#ffd18a] border border-[#f5c26b]/60 dark:border-[#925500]/60 flex items-center justify-center gap-1 cursor-pointer transition"
                       title="Uji coba peringatan armada mendekati batas toleransi SLA"
                     >
-                      <Clock className="w-3 h-3 text-amber-400 animate-pulse" />
+                      <Clock className="w-3 h-3" />
                       <span>Batas SLA</span>
                     </button>
                   </div>
@@ -596,21 +585,21 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               </div>
 
               {/* LIST OF LOGGED NOTIFICATIONS */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                <div className="flex items-center justify-between text-[11px] text-slate-400 font-bold border-b border-slate-800 pb-2">
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-white dark:bg-[#192a40]">
+                <div className="flex items-center justify-between text-[11px] text-[#5a6b80] dark:text-[#b2c1d3] font-bold border-b border-[#e4eaf2] dark:border-[#2b3b50] pb-2">
                   <span>HISTORI NOTIFIKASI ({notifications.length})</span>
                   {notifications.length > 0 && (
                     <div className="flex gap-3">
                       <button 
                         onClick={markAllAsRead}
-                        className="hover:text-white cursor-pointer"
+                        className="text-[#1764db] dark:text-[#6ea8ff] hover:underline cursor-pointer"
                       >
                         Tandai Semua Dibaca
                       </button>
-                      <span className="text-slate-700">&bull;</span>
+                      <span className="text-[#cbd5e1] dark:text-[#34465d]">&bull;</span>
                       <button 
                         onClick={clearAll}
-                        className="text-rose-400 hover:text-rose-300 cursor-pointer"
+                        className="text-[#b42338] dark:text-[#ffb4bf] hover:underline cursor-pointer"
                       >
                         Bersihkan
                       </button>
@@ -620,11 +609,11 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
                 {notifications.length === 0 ? (
                   <div className="py-12 flex flex-col items-center justify-center text-center space-y-2.5">
-                    <div className="p-3 bg-slate-950 rounded-full text-slate-600 border border-slate-800/50">
+                    <div className="w-14 h-14 bg-[#e9f2ff] dark:bg-[#253e64] rounded-[16px] text-[#1764db] dark:text-[#c5dbff] flex items-center justify-center">
                       <Bell className="w-6 h-6" />
                     </div>
-                    <div className="text-xs font-bold text-slate-400">Belum ada notifikasi</div>
-                    <p className="text-[10px] text-slate-500 max-w-xs leading-relaxed">
+                    <div className="text-sm font-bold text-[#18283d] dark:text-[#edf4ff]">Belum ada notifikasi</div>
+                    <p className="text-xs text-[#5a6b80] dark:text-[#b2c1d3] max-w-xs leading-relaxed">
                       Notifikasi akan muncul di sini saat ada pembaruan status truk, surat sanksi denda checker, atau perubahan jadwal muatan yang mendesak.
                     </p>
                   </div>
@@ -634,26 +623,26 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                       <div
                         key={n.id}
                         onClick={() => markAsRead(n.id)}
-                        className={`p-3 rounded-xl border text-xs flex gap-2.5 transition relative overflow-hidden group ${
+                        className={`p-3.5 rounded-[16px] border text-xs flex gap-3 transition relative overflow-hidden group cursor-pointer ${
                           !n.read 
-                            ? 'bg-slate-950/90 border-slate-700 text-white ring-1 ring-amber-500/5' 
-                            : 'bg-slate-950/40 border-slate-800/80 text-slate-300 hover:bg-slate-950/60'
+                            ? 'bg-[#f3f6fb] dark:bg-[#111d2c] border-[#c5dcff] dark:border-[#3079ea]/50 text-[#18283d] dark:text-[#edf4ff]' 
+                            : 'bg-white dark:bg-[#192a40] border-[#e4eaf2] dark:border-[#2b3b50] text-[#5a6b80] dark:text-[#b2c1d3] hover:bg-[#f3f6fb] dark:hover:bg-[#111d2c]'
                         }`}
                       >
-                        {/* Red Dot for unread */}
+                        {/* Unread Dot */}
                         {!n.read && (
-                          <span className="absolute top-3.5 right-3.5 w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                          <span className="absolute top-3.5 right-3.5 w-2 h-2 rounded-full bg-[#1764db] dark:bg-[#6ea8ff]" />
                         )}
 
                         {/* Left Icon type */}
-                        <div className={`p-1.5 rounded-lg shrink-0 w-8 h-8 flex items-center justify-center ${
+                        <div className={`w-9 h-9 rounded-[11px] shrink-0 flex items-center justify-center ${
                           n.urgent 
-                            ? 'bg-rose-500/20 text-rose-400' 
+                            ? 'bg-[#ffedf0] dark:bg-[#472c3a] text-[#b42338] dark:text-[#ffb4bf]' 
                             : n.type === 'checker'
-                            ? 'bg-amber-500/15 text-amber-400'
+                            ? 'bg-[#fff2db] dark:bg-[#483923] text-[#925500] dark:text-[#ffd18a]'
                             : n.type === 'schedule'
-                            ? 'bg-blue-500/15 text-blue-400'
-                            : 'bg-emerald-500/15 text-emerald-400'
+                            ? 'bg-[#e9f2ff] dark:bg-[#253e64] text-[#1764db] dark:text-[#c5dbff]'
+                            : 'bg-[#e4f7ed] dark:bg-[#203e37] text-[#08774e] dark:text-[#85dfb5]'
                         }`}>
                           {n.urgent ? (
                             <ShieldAlert className="w-4 h-4" />
@@ -668,15 +657,15 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
                         {/* Main Copy */}
                         <div className="flex-1 min-w-0 pr-4">
-                          <div className="font-bold text-slate-200 text-[11px] leading-tight flex items-center gap-1.5">
+                          <div className="font-bold text-[#18283d] dark:text-[#edf4ff] text-xs leading-tight flex items-center gap-1.5 flex-wrap">
                             <span>{n.title}</span>
                             {n.urgent && (
-                              <span className="px-1 bg-rose-500/15 border border-rose-500/30 text-rose-400 text-[8px] uppercase rounded">
+                              <span className="px-2 py-0.5 bg-[#ffedf0] dark:bg-[#472c3a] text-[#b42338] dark:text-[#ffb4bf] text-[9px] font-bold uppercase rounded-full">
                                 Urgent
                               </span>
                             )}
                           </div>
-                          <p className="text-[10.5px] text-slate-400 leading-relaxed mt-1">
+                          <p className="text-[11px] text-[#5a6b80] dark:text-[#b2c1d3] leading-relaxed mt-1">
                             {n.message}
                           </p>
                           <div className="mt-2 flex items-center justify-between">
@@ -691,12 +680,12 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                                 }
                                 setIsDrawerOpen(false);
                               }}
-                              className="text-[10px] text-amber-400 hover:text-amber-300 hover:underline flex items-center gap-0.5 cursor-pointer font-bold"
+                              className="text-[10.5px] text-[#1764db] dark:text-[#6ea8ff] hover:underline flex items-center gap-0.5 cursor-pointer font-bold"
                             >
                               <span>Buka Layar</span>
                               <ChevronRight className="w-3 h-3" />
                             </button>
-                            <span className="text-[9px] text-slate-500 font-mono">
+                            <span className="text-[10px] text-[#5a6b80] dark:text-[#b2c1d3] font-mono tabular-nums">
                               {new Date(n.timestamp).toLocaleString('id-ID', {
                                 month: 'short',
                                 day: 'numeric',
