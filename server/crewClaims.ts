@@ -95,19 +95,53 @@ function scheduleBranch(schedule: any): string | null {
   return null; // Never silently assume Nusantara for unknown origin.
 }
 
-function branchAllowed(actor: any, branchId: string, write = false): boolean {
+function branchAllowed(
+  actor: any,
+  branchId: string,
+  write = false,
+  branchStateUserPerms?: Record<string, any> | null
+): boolean {
   if (!branchId) return false;
   if (actor?.role === 'super_admin') return true;
   const permissions = jsonValue(actor?.permissions_json ?? actor?.permissions) || {};
-  const perBranch = permissions.branchPermissions;
-  if (!perBranch || typeof perBranch !== 'object') return false;
-  const entry = perBranch[branchId];
-  if (!entry?.enabled) return false;
-  if (entry.allAccess) return true;
-  const logistics = entry.modules?.logistics;
-  if (!logistics?.enabled) return false;
-  const levels = [logistics.subMenus?.driver_portal, logistics.subMenus?.portal_driver];
-  return levels.includes('full_access') || (!write && levels.includes('read_only'));
+  const rawPerBranch = permissions.branchPermissions;
+  const hasActorPerBranch = Boolean(rawPerBranch && typeof rawPerBranch === 'object' && Object.keys(rawPerBranch).length > 0);
+  const hasStatePerBranch = Boolean(branchStateUserPerms && typeof branchStateUserPerms === 'object' && Object.keys(branchStateUserPerms).length > 0);
+  const perBranch = hasActorPerBranch ? rawPerBranch : (hasStatePerBranch ? branchStateUserPerms : null);
+  const isCrewRole = ALLOWED_CREW_ROLES.has(String(actor?.role || ''));
+
+  if (perBranch) {
+    const entry = perBranch[branchId];
+    if (entry && typeof entry === 'object') {
+      if (!entry.enabled) return false;
+      if (entry.allAccess) return true;
+      const logistics = entry.modules?.logistics ?? permissions.modules?.logistics;
+      if (!logistics) return isCrewRole;
+      if (!logistics.enabled) return false;
+      const dp = logistics.subMenus?.driver_portal;
+      const pd = logistics.subMenus?.portal_driver;
+      const levels = [dp, pd];
+      if (levels.includes('full_access') || (!write && levels.includes('read_only'))) return true;
+      if (isCrewRole && dp !== 'none' && pd !== 'none') return true;
+      return false;
+    }
+    const anyOtherEnabled = Object.entries(perBranch).some(([k, v]: [string, any]) => k !== branchId && Boolean(v?.enabled));
+    if (anyOtherEnabled) return false;
+  }
+
+  // Fallback untuk akun Driver/Helper yang baru disetujui atau belum pernah disimpan ulang per-cabang (selaras dengan default branchStore: cab-banyuwangi)
+  if (branchId !== 'cab-banyuwangi') return false;
+  const legacyLogistics = permissions.modules?.logistics;
+  if (legacyLogistics && typeof legacyLogistics === 'object') {
+    if (!legacyLogistics.enabled) return false;
+    const dp = legacyLogistics.subMenus?.driver_portal;
+    const pd = legacyLogistics.subMenus?.portal_driver;
+    const levels = [dp, pd];
+    if (levels.includes('full_access') || (!write && levels.includes('read_only'))) return true;
+    if (isCrewRole && dp !== 'none' && pd !== 'none') return true;
+    return false;
+  }
+  return isCrewRole && String(actor?.status || '').toLowerCase() === 'approved';
 }
 
 const isFilledSlotValue = (v: unknown) =>
@@ -263,6 +297,25 @@ function validateAndNormalizeChecklist(raw: unknown) {
 }
 
 export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): void {
+  const readBranchStateUserPerms = async (userId: string): Promise<Record<string, any> | null> => {
+    if (!userId) return null;
+    try {
+      let state: any = null;
+      if (isDatabaseConfigured()) {
+        const pool = getDbPool();
+        const [rows] = await pool.execute('SELECT state_json FROM app_state WHERE state_key=? LIMIT 1', ['branch_state_payload']);
+        state = jsonValue((rows as any[])[0]?.state_json);
+      } else if (isPreviewRuntime) {
+        state = readLocalAppState('branch_state_payload');
+      }
+      const map = state?.userBranchPerms;
+      if (map && typeof map === 'object' && map[userId] && typeof map[userId] === 'object') {
+        return map[userId];
+      }
+    } catch {}
+    return null;
+  };
+
   const readSchedulesPayload = async (): Promise<any> => {
     if (isDatabaseConfigured()) {
       const pool = getDbPool();
@@ -323,12 +376,15 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
     }
     if (!isDatabaseConfigured() && !isPreviewRuntime) return res.status(503).json({ success: false, error: 'Database belum siap.' });
     try {
-      const payload = await readSchedulesPayload();
+      const [payload, actorBranchStatePerms] = await Promise.all([
+        readSchedulesPayload(),
+        readBranchStateUserPerms(clean(actor.id))
+      ]);
       const schedules = Array.isArray(payload.schedules) ? payload.schedules : [];
       const earliest = Date.now() - 95 * 86400000, latest = Date.now() + 65 * 86400000;
       const ownBranch = schedules.filter((s: any) => {
         const branch = scheduleBranch(s);
-        if (!branch || !branchAllowed(actor, branch)) return false;
+        if (!branch || !branchAllowed(actor, branch, false, actorBranchStatePerms)) return false;
         // Do not hide an unfinished assignment merely because it is outside the normal date window.
         if (ALLOWED_CREW_ROLES.has(String(actor.role)) && clean(s.status).toLowerCase() !== 'delivered' && currentCrewPosition(s, actor)) return true;
         const date = new Date(s.departureDate || s.deliveryDate || 0).getTime();
@@ -366,11 +422,12 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
     if (slot !== 'driver' && slot !== 'helper') return res.status(400).json({ success: false, error: 'Pilih Driver atau Helper.' });
     if (!isDatabaseConfigured() && !isPreviewRuntime) return res.status(503).json({ success: false, error: 'Database belum siap.' });
     try {
+      const actorBranchStatePerms = await readBranchStateUserPerms(clean(actor.id));
       const { result } = await mutateSchedulesPayload(async (payload, conn) => {
         const trip = payload.schedules.find((s: any) => clean(s?.id) === clean(req.params.id));
         if (!trip) throw Object.assign(new Error('Kiriman tidak ditemukan.'), { status: 404 });
         const branchId = scheduleBranch(trip);
-        if (!branchId || !branchAllowed(actor, branchId, true)) throw Object.assign(new Error('Cabang kiriman tidak sesuai akses akun.'), { status: 403 });
+        if (!branchId || !branchAllowed(actor, branchId, true, actorBranchStatePerms)) throw Object.assign(new Error('Cabang kiriman tidak sesuai akses akun.'), { status: 403 });
         if (String(trip.status || 'scheduled') !== 'scheduled') throw Object.assign(new Error('Kiriman sudah berangkat atau selesai.'), { status: 409 });
         if (currentCrewPosition(trip, actor)) throw Object.assign(new Error('Kamu sudah terdaftar pada kiriman ini.'), { status: 409 });
       /* AKK_CREW_LOCK_V71 */

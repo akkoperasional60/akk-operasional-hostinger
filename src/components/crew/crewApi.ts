@@ -1,5 +1,6 @@
 import type { UserProfile } from '../../types';
 import { logisticsStore } from '../../services/store';
+import { branchStore } from '../../services/branchStore';
 import {
   assertTripVisible, fetchLiveTrips, fetchQaTrips, freshGps, getAuthHeaders, isQaAccount,
   QA_EVENT, slotForUser, isCompleted, validateVehicleChecklist,
@@ -163,6 +164,9 @@ export function listenCrewChanged(listener: () => void): () => void {
 }
 
 export async function getTripsForUser(user: UserProfile): Promise<FieldTrip[]> {
+  if (!isQaAccount(user)) {
+    await branchStore.syncFromServer().catch(() => {});
+  }
   const all = isQaAccount(user) ? await fetchQaTrips() : await fetchLiveTrips();
   const today = new Date();
   const earliest = new Date(today.getTime() - 90 * 86400000);

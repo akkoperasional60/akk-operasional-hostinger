@@ -1,9 +1,9 @@
 {
-  "versionCode": 10052,
-  "versionName": "1.0.52",
-  "updatedAt": "2026-11-25T11:35:00+07:00",
-  "changelog": "Update V74: Perbaikan Stacking & Akses Kamera Cek Armada Portal Driver (4-Tier getUserMedia + Fallback Kamera HP), Perbaikan Tombol Tutup (X) Pojok Kanan Atas Modal Cek Armada agar Selalu Bisa Disentuh, serta Header Permissions-Policy Kamera & GPS.",
+  "versionCode": 10053,
+  "versionName": "1.0.53",
+  "updatedAt": "2026-11-25T13:25:00+07:00",
+  "changelog": "Update V75: Perbaikan Pilihan Area Kirim Tidak Muncul pada Akun Driver/Helper di Portal Driver (Sinkronisasi Izin Cabang branch_state_payload & Fallback Default Cabang Nusantara di server/crewClaims.ts + crewApi.ts).",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V74 (v1.0.52): Perbaikan bug modal Kamera pada Cek Armada Portal Driver yang sebelumnya tertutup di belakang dialog Cek Armada (dipindahkan ke layer tertinggi z-index 80 dengan cv66-overlay--camera); perbaikan tombol X pojok kanan atas pada dialog Cek Armada yang sebelumnya terkunci (disabled) saat tombol Ambil Foto ditekan serta penambahan area sentuh 44x44px sticky header dengan handler onTouchEnd; penambahan 4-tier fallback getUserMedia, tombol Putar Kamera, dan tombol fallback langsung \"Gunakan Kamera HP\" (capture=\"environment\") agar pengambilan foto 100% berhasil di seluruh browser/WebView Android & iOS; serta penambahan header Permissions-Policy kamera & GPS di server.ts."
+  "releaseNotes": "Update V75 (v1.0.53): Memperbaiki masalah pada akun Driver/Helper tertentu yang tidak memunculkan pilihan area kirim di tab Kiriman Portal Driver (menampilkan \"Belum ada kiriman hari ini & besok\") akibat ketiadaan objek branchPermissions eksplisit pada kolom permissions_json user di MySQL atau karena izin cabang tersimpan di branch_state_payload. Kini server/crewClaims.ts membaca userBranchPerms dari branch_state_payload sekaligus menerapkan fallback izin modul logistics & default Cabang Nusantara (cab-banyuwangi) yang selaras dengan branchStore.ts, serta memastikan crewApi.ts menunggu sinkronisasi branchStore sebelum memfilter daftar kiriman."
 }
