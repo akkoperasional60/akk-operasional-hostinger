@@ -6,6 +6,7 @@ import { branchStore } from '../services/branchStore';
 import { canEdit } from '../utils/rbac';
 import type { Crew, Schedule, UserProfile } from '../types';
 import { getAuthHeaders } from './crew/crewModel';
+import { notifyCrewChanged } from './crew/crewApi';
 
 const QA_EVENT = 'akk-qa-kiriman-updated';
 const CUSTOM_AREA_VALUE = '__manual__';
@@ -52,9 +53,9 @@ type QaTrip = {id:string;branchId:string;area:string;fleetLabel:string;date:stri
   driver:{id:string;name:string}|null;helper:{id:string;name:string}|null;createdAt:string};
 const todayJakarta = (): string => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' });
 
-const fieldClass = 'w-full rounded-[14px] border border-[#dce5ef] bg-white px-3.5 py-2.5 text-sm font-medium text-[#18283d] outline-none transition focus:border-[#1764db] focus:ring-2 focus:ring-[#1764db]/15 dark:border-[#2b3b50] dark:bg-[#132235] dark:text-[#edf4ff] dark:focus:ring-[#3079ea]/25';
-const labelClass = 'mb-1.5 block text-xs font-semibold text-[#5a6b80] dark:text-[#b2c1d3]';
-const buttonClass = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-[10px] bg-[#2563eb] px-5 text-sm font-bold text-white transition hover:bg-[#1d4ed8] disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer';
+const fieldClass = 'w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-[15px] font-medium text-slate-900 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100';
+const labelClass = 'mb-1.5 block text-[13px] font-semibold text-slate-700 dark:text-slate-300';
+const buttonClass = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-[10px] bg-blue-600 px-5 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer';
 const HOURS_24 = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
 const MINUTES_60 = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
 
@@ -64,13 +65,13 @@ const Time24Field: React.FC<{ label: string; value: string; onChange: (next: str
   const minute = MINUTES_60.includes(rawM) ? rawM : '00';
   return (
     <div className="block">
-      <span className={labelClass}>{label} <span className="font-normal text-[#5a6b80]/80 dark:text-[#b2c1d3]/80">(24 jam)</span></span>
-      <div className="flex items-center gap-1.5 rounded-[14px] border border-[#dce5ef] bg-white px-3 py-1.5 text-sm font-semibold text-[#18283d] transition focus-within:border-[#1764db] focus-within:ring-2 focus-within:ring-[#1764db]/15 dark:border-[#2b3b50] dark:bg-[#132235] dark:text-[#edf4ff] dark:focus-within:ring-[#3079ea]/25">
+      <span className={labelClass}>{label} <span className="font-normal text-slate-500 dark:text-slate-400">(24 jam)</span></span>
+      <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[15px] font-semibold text-slate-900 transition focus-within:border-blue-600 focus-within:ring-2 focus-within:ring-blue-600/15 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
         <select
           aria-label={`Jam ${label}`}
           value={hour}
           onChange={e => onChange(`${e.target.value}:${minute}`)}
-          className="flex-1 bg-transparent py-1 text-center text-sm font-bold tabular-nums text-[#18283d] outline-none dark:bg-[#132235] dark:text-[#edf4ff]"
+          className="flex-1 bg-transparent py-1 text-center text-[15px] font-bold tabular-nums text-slate-900 outline-none dark:bg-slate-900 dark:text-white"
         >
           {HOURS_24.map(h => <option key={h} value={h}>{h}</option>)}
         </select>
@@ -79,12 +80,12 @@ const Time24Field: React.FC<{ label: string; value: string; onChange: (next: str
           aria-label={`Menit ${label}`}
           value={minute}
           onChange={e => onChange(`${hour}:${e.target.value}`)}
-          className="flex-1 bg-transparent py-1 text-center text-sm font-bold tabular-nums text-slate-900 outline-none dark:bg-slate-900 dark:text-white"
+          className="flex-1 bg-transparent py-1 text-center text-[15px] font-bold tabular-nums text-slate-900 outline-none dark:bg-slate-900 dark:text-white"
         >
           {MINUTES_60.map(m => <option key={m} value={m}>{m}</option>)}
         </select>
-        <span className="text-[11px] font-semibold text-slate-400">WIB</span>
-        <Clock3 size={15} className="shrink-0 text-slate-400" />
+        <span className="text-xs font-bold text-slate-500">WIB</span>
+        <Clock3 size={16} className="shrink-0 text-slate-400" />
       </div>
     </div>
   );
@@ -349,7 +350,8 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
       if (!created?.id || created.id === 'sch-readonly-blocked') throw new Error('Tidak punya izin menyimpan jadwal.');
       branchStore.setScheduleBranchId(created.id, effectiveBranchId);
       window.dispatchEvent(new CustomEvent('akk-new-schedule-added', { detail: created }));
-      setNotice(`Kiriman ${created.trackingNumber} dibuat. ${driver ? 'Driver terisi' : 'Driver kosong'}, ${helper ? 'Helper terisi' : 'Helper kosong'}.`);
+      notifyCrewChanged();
+      setNotice(`Kiriman ${created.trackingNumber} (${fleet.plateNumber}${fleet.initialCode ? ` / ${fleet.initialCode}` : ''}) diterbitkan & tersinkron ke Laporan Check-In/Out, Riwayat Kru Pengiriman, dan Data Armada.`);
       setOpen(false);
       setAreaSelect(''); setCustomArea(''); setDriverId(''); setHelperId('');
       setDepartureDateEdited(false); setReturnDateEdited(false);
@@ -421,25 +423,97 @@ export const ShipmentScheduleWorkbench: React.FC<Props> = ({ activeTab, user }) 
                     'Armada',
                     fleetId,
                     setFleetId,
-                    fleets.map(f => ({
-                      value: f.id,
-                      label: `${f.initialCode ? `[${f.initialCode}] ` : ''}${f.plateNumber}${f.vehicleType ? ` — ${f.vehicleType}` : ''}`
-                    })),
+                    fleets.map(f => {
+                      const live = logisticsStore.getFleetLiveOperationalInfo(f, departureDate);
+                      const statusTag =
+                        live.effectiveStatus === 'maintenance'
+                          ? 'Servis'
+                          : live.statusLabel === 'Terjadwal' || live.statusLabel === 'Kirim'
+                          ? `${live.statusLabel}${live.areaName ? ` • ${live.areaName}` : ''}`
+                          : 'Ready';
+                      return {
+                        value: f.id,
+                        label: `${f.plateNumber}${f.initialCode ? ` (${f.initialCode})` : ''}${f.vehicleType ? ` — ${f.vehicleType}` : ''} [${statusTag}]`
+                      };
+                    }),
                     !testCreator
                   )}
                 </div>
                 <label><span className={labelClass}>Tanggal berangkat</span><input className={fieldClass} type="date" required value={departureDate} onChange={e => { setDepartureDateEdited(true); setDepartureDate(e.target.value); }}/></label>
-                <Time24Field label="Berangkat" value={departureTime} onChange={setDepartureTime} />
+                <Time24Field label="Target Berangkat" value={departureTime} onChange={setDepartureTime} />
                 <label><span className={labelClass}>Tanggal pulang</span><input className={fieldClass} type="date" required value={returnDate} onChange={e => { setReturnDateEdited(true); setReturnDate(e.target.value); }}/></label>
-                <Time24Field label="Pulang" value={returnTime} onChange={setReturnTime} />
+                <Time24Field label="Target Pulang" value={returnTime} onChange={setReturnTime} />
                 {!testCreator && <div className="sm:col-span-2 akk-ship-crew-picker">
-                  <strong className="flex items-center gap-2 text-sm"><Users size={18}/> Slot kru <span className="text-xs font-normal text-slate-500">(boleh kosong)</span></strong>
+                  <strong className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white"><Users size={18} className="text-blue-600"/> Slot kru <span className="text-xs font-normal text-slate-500 dark:text-slate-400">(boleh kosong)</span></strong>
                   <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    {picker('Driver', driverId, setDriverId, crews.filter(c => c.id !== helperId).map(c => ({ value: c.id, label: c.name })))}
-                    {picker('Helper', helperId, setHelperId, crews.filter(c => c.id !== driverId).map(c => ({ value: c.id, label: c.name })))}
+                    {picker(
+                      'Driver',
+                      driverId,
+                      setDriverId,
+                      [...crews]
+                        .filter(c => c.id !== helperId)
+                        .sort((a, b) => {
+                          const aDriver = !String(a.role || '').toLowerCase().includes('helper');
+                          const bDriver = !String(b.role || '').toLowerCase().includes('helper');
+                          if (aDriver !== bDriver) return aDriver ? -1 : 1;
+                          return a.name.localeCompare(b.name, 'id');
+                        })
+                        .map(c => ({
+                          value: c.id,
+                          label: `${c.name} (${String(c.role || '').toLowerCase().includes('helper') ? 'Helper' : 'Driver'})`
+                        }))
+                    )}
+                    {picker(
+                      'Helper',
+                      helperId,
+                      setHelperId,
+                      [...crews]
+                        .filter(c => c.id !== driverId)
+                        .sort((a, b) => {
+                          const aHelper = String(a.role || '').toLowerCase().includes('helper');
+                          const bHelper = String(b.role || '').toLowerCase().includes('helper');
+                          if (aHelper !== bHelper) return aHelper ? -1 : 1;
+                          return a.name.localeCompare(b.name, 'id');
+                        })
+                        .map(c => ({
+                          value: c.id,
+                          label: `${c.name} (${String(c.role || '').toLowerCase().includes('helper') ? 'Helper' : 'Driver'})`
+                        }))
+                    )}
                   </div>
-                  <p className="mt-2 text-xs text-slate-500">Boleh dikosongkan. Jika tetap diisi admin, nama kru tidak ditampilkan di Portal sehingga kru memilih Area &amp; posisi (Driver/Helper) sendiri.</p>
+                  <p className="mt-2.5 text-[13px] leading-relaxed text-slate-600 dark:text-slate-400">Boleh dikosongkan. Jadwal terbit otomatis menjadi sumber target jam berangkat/pulang &amp; nomor kendaraan di Laporan Check-In/Out serta Riwayat Kru Pengiriman.</p>
                 </div>}
+                {!testCreator && (effectiveArea || fleetId) && (() => {
+                  const selFleet = fleets.find(f => f.id === fleetId);
+                  const selDriver = crews.find(c => c.id === driverId);
+                  const selHelper = crews.find(c => c.id === helperId);
+                  return (
+                    <div className="sm:col-span-2 rounded-xl border border-blue-200 bg-blue-50/70 px-4 py-3 text-sm text-slate-800 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-slate-200">
+                      <div className="font-bold text-blue-700 dark:text-blue-300 text-xs uppercase tracking-wider mb-1">
+                        Ringkasan Target Kiriman Terintegrasi
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13.5px]">
+                        <span><strong className="text-slate-900 dark:text-white">{effectiveArea || 'Area belum dipilih'}</strong></span>
+                        <span className="text-slate-400">•</span>
+                        <span className="font-mono font-bold text-slate-900 dark:text-white">
+                          {selFleet ? `${selFleet.plateNumber}${selFleet.initialCode ? ` (${selFleet.initialCode})` : ''}` : 'Armada belum dipilih'}
+                        </span>
+                        <span className="text-slate-400">•</span>
+                        <span className="font-mono font-semibold text-blue-700 dark:text-blue-300">
+                          {departureDate} ({departureTime}–{returnTime} WIB)
+                        </span>
+                        {(selDriver || selHelper) && (
+                          <>
+                            <span className="text-slate-400">•</span>
+                            <span className="font-semibold">
+                              {[selDriver ? `Driver: ${selDriver.name}` : null, selHelper ? `Helper: ${selHelper.name}` : null].filter(Boolean).join(' · ')}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
               </form>
               {error && <p role="alert" className="akk-ship-error">{error}</p>}
               {testCreator && <div className="akk-ship-test-list">

@@ -2829,22 +2829,28 @@ class LogisticsStore {
     targetSchedules.forEach((sch) => {
       // Flexible crew lookup by ID or name
       const driverName = (sch.crew?.name || (sch as any).driver || '').trim();
-      const crew = this.crews.find(
-        c =>
-          c.id === sch.crewId ||
-          c.id === sch.crew?.id ||
-          (driverName && c.name.trim().toLowerCase() === driverName.toLowerCase())
-      ) || {
-        id: sch.crewId || `c-custom-${driverName.toLowerCase().replace(/[^a-z0-9]+/g, '-') || Math.random().toString(36).substring(2, 6)}`,
-        name: driverName || sch.crewId || 'Driver',
-        phone: '081234567890',
-        role: 'Driver' as const,
-        licenseNumber: 'SIM B1',
-        licenseType: 'SIM B1',
-        status: 'available' as const,
-        tripsCompleted: 10,
-        rating: 4.8
-      };
+      const hasAssignedDriver = Boolean(
+        (sch.crewId && sch.crewId.trim() && sch.crewId !== 'unassigned') ||
+        (driverName && driverName !== '-' && driverName.toLowerCase() !== 'belum ditentukan')
+      );
+      const crew = hasAssignedDriver
+        ? this.crews.find(
+            c =>
+              c.id === sch.crewId ||
+              c.id === sch.crew?.id ||
+              (driverName && c.name.trim().toLowerCase() === driverName.toLowerCase())
+          ) || {
+            id: sch.crewId || `c-custom-${driverName.toLowerCase().replace(/[^a-z0-9]+/g, '-') || Math.random().toString(36).substring(2, 6)}`,
+            name: driverName || sch.crewId || 'Driver',
+            phone: '081234567890',
+            role: 'Driver' as const,
+            licenseNumber: 'SIM B1',
+            licenseType: 'SIM B1',
+            status: 'available' as const,
+            tripsCompleted: 10,
+            rating: 4.8
+          }
+        : null;
 
       const helperName = (sch.crewHelper?.name || (sch as any).helper || '').trim();
       const matchedHelperInCrews = this.crews.find(
@@ -2894,8 +2900,15 @@ class LogisticsStore {
         : 'Banyuwangi';
 
       const calIso = this.getScheduleCalendarIso(sch);
+      const resolvedDepClock =
+        (sch.departureTime && /^\d{2}:\d{2}$/.test(sch.departureTime.trim()) ? sch.departureTime.trim() : '') ||
+        (sch.departureDate?.match(/T(\d{2}:\d{2})/)?.[1] || '07:30');
+      const resolvedRetClock =
+        (sch.targetReturnTime && /^\d{2}:\d{2}$/.test(sch.targetReturnTime.trim()) ? sch.targetReturnTime.trim() : '') ||
+        (sch.estimatedArrival?.match(/T(\d{2}:\d{2})/)?.[1] || '17:00');
+      const resolvedReturnDate = sch.returnDate || (sch.estimatedArrival ? sch.estimatedArrival.slice(0, 10) : calIso);
       const departureDate = calIso
-        ? `${calIso}T07:30:00+07:00`
+        ? `${calIso}T${resolvedDepClock}:00+07:00`
         : sch.departureDate || '2026-01-05T07:30:00+07:00';
       const trackingNumber = sch.trackingNumber || `PO-AKK-20260105-${fleet?.plateNumber || sch.fleetId || 'DS3'}`;
 
@@ -2904,52 +2917,60 @@ class LogisticsStore {
       const poCodeMatch = trackingNumber.match(/PO-AKK-\d+-([A-Za-z0-9]+)/i);
       const extractedCode = trkFullMatch ? trkFullMatch[1].trim() : poCodeMatch ? poCodeMatch[1] : null;
       const initialCode = fleet?.initialCode || sch.fleet?.initialCode || sch.armada || extractedCode || sch.fleetId || 'DS3';
-
-      const existingIndex = this.crewHistory.findIndex(
-        h =>
-          (h.scheduleId === sch.id || h.trackingNumber === trackingNumber) &&
-          (h.crewId === crew.id || h.crewName.trim().toLowerCase() === crew.name.trim().toLowerCase())
-      );
-
-      const areaStats = this.checkCrewAreaThreshold(crew.id, areaName);
-      const seqNum = (existingIndex !== -1 ? this.crewHistory[existingIndex].areaTripSequenceNumber : areaStats.tripCount + 1) || 1;
       const totalAreaTrips = this.crewHistory.filter(h => h.area.trim().toUpperCase() === areaName.toUpperCase()).length + 1;
-      const reqAppr = seqNum >= this.areaThreshold;
 
-      const historyItem: CrewDeliveryHistory = {
-        id:
-          existingIndex !== -1
-            ? this.crewHistory[existingIndex].id
-            : `cdh-sync-drv-${crew.id}-${sch.id || Math.random().toString(36).substring(2, 9)}`,
-        crewId: crew.id,
-        crewName: crew.name,
-        scheduleId: sch.id,
-        trackingNumber,
-        storeName: areaName,
-        area: areaName,
-        city,
-        island,
-        vehiclePlate: fleet?.plateNumber || sch.fleet?.plateNumber || sch.fleetId || 'DS3',
-        initialCode,
-        vehicleType: fleet?.vehicleType || 'Engkel STD',
-        cargoWeightTon: sch.cargoWeightTon || 3.5,
-        cargoDescription: sch.cargoDescription || `Pengiriman ritase ke ${areaName}`,
-        completionDate: departureDate,
-        status: 'delivered',
-        onTimeStatus: 'Tepat Waktu',
-        ratingReceived: 5.0,
-        areaTripSequenceNumber: seqNum,
-        totalAreaTrips,
-        requiresAreaApproval: reqAppr,
-        areaApprovalStatus: reqAppr ? 'approved' : 'not_required',
-        notes: helper ? `Kru Driver: ${crew.name} | Helper: ${helper.name}` : `Kru Driver: ${crew.name}`
-      };
+      if (crew) {
+        const existingIndex = this.crewHistory.findIndex(
+          h =>
+            (h.scheduleId === sch.id || h.trackingNumber === trackingNumber) &&
+            (h.crewId === crew.id || h.crewName.trim().toLowerCase() === crew.name.trim().toLowerCase())
+        );
 
-      if (existingIndex !== -1) {
-        this.crewHistory[existingIndex] = historyItem;
-      } else {
-        this.crewHistory.unshift(historyItem);
-        addedCount++;
+        const areaStats = this.checkCrewAreaThreshold(crew.id, areaName);
+        const seqNum = (existingIndex !== -1 ? this.crewHistory[existingIndex].areaTripSequenceNumber : areaStats.tripCount + 1) || 1;
+        const reqAppr = seqNum >= this.areaThreshold;
+
+        const historyItem: CrewDeliveryHistory = {
+          id:
+            existingIndex !== -1
+              ? this.crewHistory[existingIndex].id
+              : `cdh-sync-drv-${crew.id}-${sch.id || Math.random().toString(36).substring(2, 9)}`,
+          crewId: crew.id,
+          crewName: crew.name,
+          scheduleId: sch.id,
+          trackingNumber,
+          storeName: areaName,
+          area: areaName,
+          city,
+          island,
+          vehiclePlate: fleet?.plateNumber || sch.fleet?.plateNumber || sch.fleetId || 'DS3',
+          plateNumber: fleet?.plateNumber || sch.fleet?.plateNumber || sch.fleetId || 'DS3',
+          initialCode,
+          vehicleType: fleet?.vehicleType || 'Engkel STD',
+          crewRole: 'Driver',
+          cargoWeightTon: sch.cargoWeightTon || 3.5,
+          cargoDescription: sch.cargoDescription || `Pengiriman ritase ke ${areaName}`,
+          completionDate: departureDate,
+          deliveryDate: calIso || undefined,
+          departureTime: resolvedDepClock,
+          targetReturnTime: resolvedRetClock,
+          returnDate: resolvedReturnDate,
+          status: 'delivered',
+          onTimeStatus: 'Tepat Waktu',
+          ratingReceived: 5.0,
+          areaTripSequenceNumber: seqNum,
+          totalAreaTrips,
+          requiresAreaApproval: reqAppr,
+          areaApprovalStatus: reqAppr ? 'approved' : 'not_required',
+          notes: helper ? `Kru Driver: ${crew.name} | Helper: ${helper.name}` : `Kru Driver: ${crew.name}`
+        };
+
+        if (existingIndex !== -1) {
+          this.crewHistory[existingIndex] = historyItem;
+        } else {
+          this.crewHistory.unshift(historyItem);
+          addedCount++;
+        }
       }
 
       // Also track Helper history if assigned
@@ -2980,11 +3001,17 @@ class LogisticsStore {
           city,
           island,
           vehiclePlate: fleet?.plateNumber || sch.fleet?.plateNumber || sch.fleetId || 'DS3',
+          plateNumber: fleet?.plateNumber || sch.fleet?.plateNumber || sch.fleetId || 'DS3',
           initialCode,
           vehicleType: fleet?.vehicleType || 'Engkel STD',
+          crewRole: 'Helper',
           cargoWeightTon: sch.cargoWeightTon || 3.5,
           cargoDescription: sch.cargoDescription || `Pengiriman ritase ke ${areaName} (Sebagai Helper)`,
           completionDate: departureDate,
+          deliveryDate: calIso || undefined,
+          departureTime: resolvedDepClock,
+          targetReturnTime: resolvedRetClock,
+          returnDate: resolvedReturnDate,
           status: 'delivered',
           onTimeStatus: 'Tepat Waktu',
           ratingReceived: 5.0,
@@ -2992,7 +3019,7 @@ class LogisticsStore {
           totalAreaTrips,
           requiresAreaApproval: helperReqAppr,
           areaApprovalStatus: helperReqAppr ? 'approved' : 'not_required',
-          notes: `Tugas Helper mendampingi Driver: ${crew.name}`
+          notes: crew ? `Tugas Helper mendampingi Driver: ${crew.name}` : `Tugas Helper (${areaName})`
         };
 
         if (helperExistingIndex !== -1) {
@@ -5679,6 +5706,10 @@ class LogisticsStore {
     areaName: string | null;
     todayScheduledArea: string | null;
     tomorrowScheduledArea: string | null;
+    upcomingScheduledArea: string | null;
+    scheduledDepartureTime: string | null;
+    scheduledReturnTime: string | null;
+    scheduledDateLabel: string | null;
     driverName: string | null;
     helperName: string | null;
     canBeScheduled: boolean;
@@ -5699,15 +5730,20 @@ class LogisticsStore {
       return {
         effectiveStatus: 'available',
         statusLabel: 'Ready',
-        dotColorClass: 'bg-emerald-500 ring-4 ring-emerald-500/20',
-        badgeColorClass: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
+        dotColorClass: 'bg-emerald-500 ring-2 ring-emerald-500/20',
+        badgeColorClass:
+          'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/40',
         areaName: null,
         todayScheduledArea: null,
         tomorrowScheduledArea: null,
+        upcomingScheduledArea: null,
+        scheduledDepartureTime: null,
+        scheduledReturnTime: null,
+        scheduledDateLabel: null,
         driverName: null,
         helperName: null,
         canBeScheduled: true,
-        statusDescription: 'Siap digunakan jadwal esok harinya',
+        statusDescription: 'Siap digunakan untuk jadwal pengiriman',
         scheduleStatus: null
       };
     }
@@ -5721,65 +5757,144 @@ class LogisticsStore {
     })();
     const targetIso = (targetDateStr || todayWib).slice(0, 10);
     const isDateSpecificQuery = Boolean(targetDateStr && targetDateStr.trim() !== '');
-    const cleanPlate = (fleet.plateNumber || '').trim().toUpperCase();
 
     const matchesFleet = (sch: Schedule) => this.matchesFleetSchedule(fleet, sch);
     const isActiveAssignableStatus = (st?: Schedule['status']) =>
       st !== 'delivered' && String(st) !== 'cancelled';
 
-    // 1. Cari jadwal yang sedang aktif di jalan pada hari ini (sudah klik Gate-Out: in_transit, picked_up, delayed)
-    const activeTripSch = (this.schedules || []).find(
-      sch =>
-        (!excludeScheduleId || sch.id !== excludeScheduleId) &&
-        ['in_transit', 'picked_up', 'delayed'].includes(sch.status) &&
-        matchesFleet(sch) &&
-        (this.doesScheduleCoverDate(sch, todayWib) || (sch.actualDeparture || '').slice(0, 10) === todayWib)
-    );
+    const sortNewestFirst = (a: Schedule, b: Schedule) =>
+      String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''));
 
-    // 2. Cari jadwal aktif (belum delivered/cancelled) yang tepat pada tanggal target (hari ini atau tanggal form jadwal)
-    const targetDateSch = (this.schedules || []).find(
-      sch =>
-        (!excludeScheduleId || sch.id !== excludeScheduleId) &&
-        isActiveAssignableStatus(sch.status) &&
-        matchesFleet(sch) &&
-        this.doesScheduleCoverDate(sch, targetIso)
-    );
+    // 1. Jadwal yang sedang aktif di jalan pada hari ini (Gate-Out aktif)
+    const activeTripSch = (this.schedules || [])
+      .filter(
+        sch =>
+          (!excludeScheduleId || sch.id !== excludeScheduleId) &&
+          ['in_transit', 'picked_up', 'delayed'].includes(sch.status) &&
+          matchesFleet(sch) &&
+          (this.doesScheduleCoverDate(sch, todayWib) || (sch.actualDeparture || '').slice(0, 10) === todayWib)
+      )
+      .sort(sortNewestFirst)[0];
 
-    // 3. Cek juga jadwal aktif untuk esok hari (WIB) agar Data Armada Terpadu konsisten
+    // 2. Jadwal aktif pada tanggal target
+    const targetDateSch = (this.schedules || [])
+      .filter(
+        sch =>
+          (!excludeScheduleId || sch.id !== excludeScheduleId) &&
+          isActiveAssignableStatus(sch.status) &&
+          matchesFleet(sch) &&
+          this.doesScheduleCoverDate(sch, targetIso)
+      )
+      .sort(sortNewestFirst)[0];
+
+    // 3. Jadwal aktif untuk esok hari (WIB)
     const tomorrowDateSch = tomorrowWib
-      ? (this.schedules || []).find(
-          sch =>
-            (!excludeScheduleId || sch.id !== excludeScheduleId) &&
-            isActiveAssignableStatus(sch.status) &&
-            matchesFleet(sch) &&
-            this.doesScheduleCoverDate(sch, tomorrowWib)
-        )
+      ? (this.schedules || [])
+          .filter(
+            sch =>
+              (!excludeScheduleId || sch.id !== excludeScheduleId) &&
+              isActiveAssignableStatus(sch.status) &&
+              matchesFleet(sch) &&
+              this.doesScheduleCoverDate(sch, tomorrowWib)
+          )
+          .sort(sortNewestFirst)[0]
       : undefined;
 
-    // Jadwal aktif untuk tampilan Live Armada (hari ini) vs Form Jadwal (tanggal spesifik)
+    // 4. Jadwal aktif terdekat (>= hari ini WIB) termasuk tanggal lusa / mendatang dari modal "Buat Kiriman"
+    const upcomingScheduledSch = (this.schedules || [])
+      .filter(sch => {
+        if (excludeScheduleId && sch.id === excludeScheduleId) return false;
+        if (!isActiveAssignableStatus(sch.status) || !matchesFleet(sch)) return false;
+        const calIso = this.getScheduleCalendarIso(sch) || (sch.deliveryDate || sch.departureDate || '').slice(0, 10);
+        return Boolean(calIso && calIso >= todayWib);
+      })
+      .sort((a, b) => {
+        const aIso = this.getScheduleCalendarIso(a) || (a.deliveryDate || a.departureDate || '').slice(0, 10);
+        const bIso = this.getScheduleCalendarIso(b) || (b.deliveryDate || b.departureDate || '').slice(0, 10);
+        if (aIso !== bIso) return aIso.localeCompare(bIso);
+        return sortNewestFirst(a, b);
+      })[0];
+
+    // Jadwal efektif untuk tampilan Live Armada vs query tanggal spesifik
     const effectiveSch = isDateSpecificQuery
       ? targetDateSch
       : (activeTripSch || targetDateSch);
 
-    let resolvedArea: string | null = null;
-    let resolvedDriver: string | null = null;
-    let resolvedHelper: string | null = null;
+    // Jadwal referensi untuk menampilkan informasi area/kru/jam target di Data Armada Terpadu
+    const referenceSch = effectiveSch || tomorrowDateSch || upcomingScheduledSch;
 
-    if (effectiveSch) {
-      resolvedArea =
-        effectiveSch.areaName ||
-        effectiveSch.store?.storeName ||
-        null;
-      resolvedDriver =
-        effectiveSch.crew?.name ||
-        this.crews.find(c => c.id === effectiveSch.crewId)?.name ||
-        null;
-      resolvedHelper =
-        effectiveSch.crewHelper?.name ||
-        (effectiveSch.crewHelperId
-          ? this.crews.find(c => c.id === effectiveSch.crewHelperId)?.name || null
-          : null);
-    }
+    const extractClockWib = (explicitClock?: string, isoTimestamp?: string): string | null => {
+      const cleanExplicit = (explicitClock || '').trim();
+      const clockMatch = cleanExplicit.match(/^(\d{1,2})[:.](\d{2})$/);
+      if (clockMatch) {
+        return `${clockMatch[1].padStart(2, '0')}:${clockMatch[2]}`;
+      }
+      if (!isoTimestamp) return null;
+      const d = new Date(isoTimestamp);
+      if (Number.isNaN(d.getTime())) return null;
+      try {
+        return new Intl.DateTimeFormat('en-GB', {
+          timeZone: 'Asia/Jakarta',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        }).format(d);
+      } catch {
+        return null;
+      }
+    };
+
+    const formatShortDateIndo = (iso?: string): string | null => {
+      if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return null;
+      const d = new Date(`${iso.slice(0, 10)}T00:00:00+07:00`);
+      if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+      return d.toLocaleDateString('id-ID', {
+        timeZone: 'Asia/Jakarta',
+        day: '2-digit',
+        month: 'short'
+      });
+    };
+
+    const fleetPairedDriver = this.crews.find(
+      c => c.currentFleetId === fleet.id || (fleet.driverId && c.id === fleet.driverId)
+    );
+
+    const resolveDriverFromSch = (sch?: Schedule): string | null => {
+      if (!sch) return null;
+      return (
+        sch.crew?.name ||
+        (sch.crewId ? this.crews.find(c => c.id === sch.crewId)?.name : undefined) ||
+        null
+      );
+    };
+
+    const resolveHelperFromSch = (sch?: Schedule): string | null => {
+      if (!sch) return null;
+      return (
+        sch.crewHelper?.name ||
+        (sch.crewHelperId ? this.crews.find(c => c.id === sch.crewHelperId)?.name : undefined) ||
+        null
+      );
+    };
+
+    const resolvedArea: string | null = effectiveSch
+      ? effectiveSch.areaName || effectiveSch.store?.storeName || null
+      : null;
+
+    const resolvedDriver: string | null =
+      resolveDriverFromSch(referenceSch) || fleetPairedDriver?.name || null;
+    const resolvedHelper: string | null = resolveHelperFromSch(referenceSch) || null;
+
+    const scheduledDepartureTime = referenceSch
+      ? extractClockWib(referenceSch.departureTime, referenceSch.departureDate)
+      : null;
+    const scheduledReturnTime = referenceSch
+      ? extractClockWib(referenceSch.targetReturnTime, referenceSch.estimatedArrival)
+      : null;
+    const referenceDateIso = referenceSch
+      ? (referenceSch.deliveryDate || this.getScheduleCalendarIso(referenceSch) || '').slice(0, 10)
+      : '';
+    const scheduledDateLabel = referenceDateIso ? formatShortDateIndo(referenceDateIso) : null;
 
     const todayScheduledArea =
       !activeTripSch && targetDateSch && targetDateSch.status === 'scheduled'
@@ -5791,6 +5906,11 @@ class LogisticsStore {
         ? (tomorrowDateSch.areaName || tomorrowDateSch.store?.storeName || null)
         : null;
 
+    const upcomingScheduledArea =
+      !todayScheduledArea && !tomorrowScheduledArea && upcomingScheduledSch
+        ? (upcomingScheduledSch.areaName || upcomingScheduledSch.store?.storeName || null)
+        : null;
+
     // Bersihkan cache shift lama dari localStorage bila masih tersisa
     if (typeof localStorage !== 'undefined') {
       try {
@@ -5798,12 +5918,6 @@ class LogisticsStore {
       } catch {}
     }
 
-    // Penentuan Status Kondisi Armada:
-    // - Jika sedang ditanya untuk tanggal penjadwalan tertentu (`isDateSpecificQuery`):
-    //   armada yang SUDAH punya jadwal aktif (belum delivered/cancelled) pada `targetIso` tidak boleh dipilih ulang (canBeScheduled: false)
-    // - Untuk status Live Operasional hari ini:
-    //   'Kirim' hanya aktif apabila benar-benar memiliki trip aktif hari ini (`activeTripSch`),
-    //   sehingga armada tanpa trip hari ini tidak pernah stuck di status 'Kirim' area kemarin.
     let effectiveStatus: 'available' | 'on-duty' | 'maintenance' = 'available';
     if (fleet.status === 'maintenance') {
       effectiveStatus = 'maintenance';
@@ -5819,11 +5933,16 @@ class LogisticsStore {
       return {
         effectiveStatus: 'maintenance',
         statusLabel: 'Servis',
-        dotColorClass: 'bg-rose-500 ring-4 ring-rose-500/25',
-        badgeColorClass: 'bg-rose-500/15 text-rose-300 border-rose-500/40',
+        dotColorClass: 'bg-rose-500 ring-2 ring-rose-500/20',
+        badgeColorClass:
+          'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/40',
         areaName: resolvedArea,
         todayScheduledArea: null,
         tomorrowScheduledArea: null,
+        upcomingScheduledArea: null,
+        scheduledDepartureTime: null,
+        scheduledReturnTime: null,
+        scheduledDateLabel: null,
         driverName: resolvedDriver,
         helperName: resolvedHelper,
         canBeScheduled: false,
@@ -5835,47 +5954,67 @@ class LogisticsStore {
     if (effectiveStatus === 'on-duty') {
       const isPendingScheduleOnly = isDateSpecificQuery && targetDateSch?.status === 'scheduled';
       const canScheduleFlag = !targetDateSch;
+      const hoursNote =
+        scheduledDepartureTime && scheduledReturnTime
+          ? ` • ${scheduledDepartureTime}–${scheduledReturnTime} WIB`
+          : '';
       return {
         effectiveStatus: 'on-duty',
         statusLabel: isPendingScheduleOnly ? 'Terjadwal' : 'Kirim',
         dotColorClass: isPendingScheduleOnly
-          ? 'bg-amber-500 ring-4 ring-amber-500/25'
-          : 'bg-blue-500 ring-4 ring-blue-500/25',
+          ? 'bg-amber-500 ring-2 ring-amber-500/20'
+          : 'bg-blue-600 ring-2 ring-blue-500/20',
         badgeColorClass: isPendingScheduleOnly
-          ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
-          : 'bg-blue-500/15 text-blue-300 border-blue-500/40',
+          ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/40'
+          : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/40',
         areaName: resolvedArea,
         todayScheduledArea: isPendingScheduleOnly ? resolvedArea : null,
         tomorrowScheduledArea,
+        upcomingScheduledArea,
+        scheduledDepartureTime,
+        scheduledReturnTime,
+        scheduledDateLabel,
         driverName: resolvedDriver,
         helperName: resolvedHelper,
         canBeScheduled: canScheduleFlag,
         statusDescription: isPendingScheduleOnly
-          ? `Terjadwal (${targetIso}): ${resolvedArea || 'Kirim'}`
+          ? `Terjadwal (${scheduledDateLabel || targetIso}): ${resolvedArea || 'Kirim'}${hoursNote}`
           : resolvedArea
-          ? `Sedang Kirim • Area: ${resolvedArea}`
+          ? `Sedang Kirim • Area: ${resolvedArea}${hoursNote}`
           : 'Sedang dipakai kirim tim pengiriman (Gate-Out)',
         scheduleStatus: effectiveSch?.status || 'in_transit'
       };
     }
 
+    const timeWindowSuffix =
+      scheduledDepartureTime && scheduledReturnTime
+        ? ` (${scheduledDepartureTime}–${scheduledReturnTime} WIB)`
+        : '';
+
     return {
       effectiveStatus: 'available',
       statusLabel: 'Ready',
-      dotColorClass: 'bg-emerald-500 ring-4 ring-emerald-500/25',
-      badgeColorClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
+      dotColorClass: 'bg-emerald-500 ring-2 ring-emerald-500/20',
+      badgeColorClass:
+        'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/40',
       areaName: null,
       todayScheduledArea,
       tomorrowScheduledArea,
+      upcomingScheduledArea,
+      scheduledDepartureTime,
+      scheduledReturnTime,
+      scheduledDateLabel,
       driverName: resolvedDriver,
       helperName: resolvedHelper,
       canBeScheduled: true,
       statusDescription: todayScheduledArea
-        ? `Terjadwal hari ini: ${todayScheduledArea}`
+        ? `Terjadwal Hari Ini: ${todayScheduledArea}${timeWindowSuffix}`
         : tomorrowScheduledArea
-        ? `Terjadwal esok: ${tomorrowScheduledArea}`
-        : 'Siap jadwal esok',
-      scheduleStatus: effectiveSch?.status || null
+        ? `Terjadwal Esok: ${tomorrowScheduledArea}${timeWindowSuffix}`
+        : upcomingScheduledArea
+        ? `Terjadwal (${scheduledDateLabel || 'Mendatang'}): ${upcomingScheduledArea}${timeWindowSuffix}`
+        : 'Siap jadwal pengiriman',
+      scheduleStatus: referenceSch?.status || null
     };
   }
 

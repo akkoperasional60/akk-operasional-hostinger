@@ -620,178 +620,96 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
 
   return (
     <div className="space-y-4 animate-in fade-in duration-200">
-      {/* Top Header Banner */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div className="flex items-start sm:items-center gap-3.5">
-          <div className="w-11 h-11 rounded-2xl bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
-            <Store className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
-                Laporan Absen Tim Kiriman per Area Jadwal
-              </h2>
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-600/15 text-blue-600 dark:text-blue-300 border border-blue-500/30">
-                Terstruktur per Nama Area Kirim
-              </span>
-            </div>
-            <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-              Rekapitulasi absen tim pengiriman (Driver &amp; Helper) yang dikelompokkan secara terstruktur per <strong>Nama Area Kirim sesuai Jadwal Pengiriman</strong> beserta daftar toko pelanggan dan bukti foto.
-            </p>
-          </div>
+      {/* Compact Header */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
+            Laporan Absen Tim Kiriman per Area Jadwal
+          </h2>
+          <p className="text-sm text-slate-600 dark:text-slate-400 mt-0.5">
+            Rekap absen toko pelanggan &amp; foto bukti kru dikelompokkan per area kirim.
+          </p>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={loadAttendanceReports}
-            className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 border border-slate-200 dark:border-slate-700 cursor-pointer transition"
+            className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-sm font-semibold flex items-center gap-1.5 border border-slate-200 dark:border-slate-700 cursor-pointer transition"
           >
-            <RefreshCw className="w-3.5 h-3.5" />
+            <RefreshCw className="w-4 h-4" />
             <span>Segarkan</span>
           </button>
 
           <button
             type="button"
             onClick={handleExportCsv}
-            className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-bold flex items-center gap-1.5 border border-slate-700 cursor-pointer transition"
+            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold flex items-center gap-1.5 cursor-pointer transition"
           >
-            <FileSpreadsheet className="w-3.5 h-3.5 text-blue-400" />
+            <FileSpreadsheet className="w-4 h-4" />
             <span>Ekspor Excel</span>
           </button>
         </div>
       </div>
 
-      {/* 2 Unified Summary Cards: (1) Toko Kiriman Dalam 1 Bulan & (2) Ringkasan Absen, Foto Bukti & Verifikasi Pelanggan Dijadikan Satu */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5">
-        {/* Card 1: Rekap Toko Kiriman Dalam Satu Bulan */}
-        <div className="lg:col-span-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col justify-between gap-3">
+      {/* 4 Flat KPI Cards (Tanpa Kartu Bersarang & Angka Besar Jelas) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex flex-col justify-between gap-2">
           <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <div className="w-9 h-9 rounded-xl bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
-                <Store className="w-4 h-4" />
-              </div>
-              <div>
-                <span className="text-xs font-black text-slate-900 dark:text-white block">
-                  Total Toko Kiriman Dalam 1 Bulan
-                </span>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Periode {monthlyStoreStats.monthLabel}
-                </span>
-              </div>
-            </div>
-
+            <span className="text-sm font-semibold text-slate-600 dark:text-slate-400">
+              Toko Kiriman (Bulan)
+            </span>
             <input
               type="month"
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
-              className="px-2.5 py-1 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[11px] font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer"
+              className="px-2 py-1 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-600 cursor-pointer"
               title="Pilih Bulan Rekap Toko Kiriman"
             />
           </div>
-
-          <div className="grid grid-cols-2 gap-2.5 pt-1 border-t border-slate-100 dark:border-slate-800/80">
-            <div className="bg-slate-50 dark:bg-slate-950/70 border border-slate-200/70 dark:border-slate-800 rounded-xl px-3 py-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                Toko Kiriman (1 Bulan)
-              </span>
-              <div className="text-xl font-black text-blue-600 dark:text-blue-400 font-mono mt-0.5">
-                {monthlyStoreStats.uniqueStoreCount}
-                <span className="text-xs font-sans font-bold text-slate-500 dark:text-slate-400 ml-1">
-                  Toko
-                </span>
-              </div>
-            </div>
-
-            <div className="bg-slate-50 dark:bg-slate-950/70 border border-slate-200/70 dark:border-slate-800 rounded-xl px-3 py-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                Area Kirim Terjadwal
-              </span>
-              <div className="text-xl font-black text-slate-900 dark:text-white font-mono mt-0.5">
-                {groupedByAreaSchedule.length}
-                <span className="text-xs font-sans font-bold text-slate-500 dark:text-slate-400 ml-1">
-                  Area Kirim
-                </span>
-              </div>
-            </div>
+          <div className="text-3xl font-bold text-blue-600 dark:text-blue-400 font-mono tabular-nums">
+            {monthlyStoreStats.uniqueStoreCount}{' '}
+            <span className="text-sm font-sans font-semibold text-slate-500">Toko</span>
           </div>
         </div>
 
-        {/* Card 2: Total Absen di Pelanggan, Foto Bukti Pelanggan, & Absen Pelanggan Terverifikasi Dijadikan Satu */}
-        <div className="lg:col-span-7 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col justify-between gap-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
-                <ShieldCheck className="w-4 h-4" />
-              </div>
-              <div>
-                <span className="text-xs font-black text-slate-900 dark:text-white block">
-                  Rekap Terpadu Absen, Foto Bukti &amp; Verifikasi Pelanggan
-                </span>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Ringkasan total absen di pelanggan, kelengkapan foto bukti &amp; status verifikasi
-                </span>
-              </div>
-            </div>
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30">
-              Terintegrasi
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex flex-col justify-between gap-2">
+          <span className="text-sm font-semibold text-slate-600 dark:text-slate-400">
+            Area Kirim Terjadwal
+          </span>
+          <div className="text-3xl font-bold text-slate-900 dark:text-white font-mono tabular-nums">
+            {groupedByAreaSchedule.length}{' '}
+            <span className="text-sm font-sans font-semibold text-slate-500">Area</span>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex flex-col justify-between gap-2">
+          <span className="text-sm font-semibold text-slate-600 dark:text-slate-400">
+            Absen &amp; Foto Bukti
+          </span>
+          <div className="text-3xl font-bold text-slate-900 dark:text-white font-mono tabular-nums">
+            {filteredAttendance.length}{' '}
+            <span className="text-sm font-sans font-semibold text-slate-500">
+              · {withPhotoCount} Foto
             </span>
           </div>
+        </div>
 
-          <div className="grid grid-cols-3 gap-2.5 pt-1 border-t border-slate-100 dark:border-slate-800/80">
-            <div className="bg-slate-50 dark:bg-slate-950/70 border border-slate-200/70 dark:border-slate-800 rounded-xl px-3 py-2 flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block">
-                  Total Absen di Pelanggan
-                </span>
-                <div className="text-lg sm:text-xl font-black text-slate-900 dark:text-white font-mono mt-0.5">
-                  {filteredAttendance.length}
-                  <span className="text-[11px] text-slate-400 font-sans font-semibold ml-1">
-                    ({uniqueCustomerCount} toko)
-                  </span>
-                </div>
-              </div>
-              <Store className="w-4 h-4 text-blue-500 shrink-0 hidden sm:block" />
-            </div>
-
-            <div className="bg-slate-50 dark:bg-slate-950/70 border border-slate-200/70 dark:border-slate-800 rounded-xl px-3 py-2 flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block">
-                  Foto Bukti Pelanggan
-                </span>
-                <div className="text-lg sm:text-xl font-black text-slate-900 dark:text-white font-mono mt-0.5">
-                  {withPhotoCount}
-                  <span className="text-[11px] text-slate-400 font-sans font-semibold ml-1">
-                    Foto
-                  </span>
-                </div>
-              </div>
-              <Camera className="w-4 h-4 text-slate-500 shrink-0 hidden sm:block" />
-            </div>
-
-            <div className="bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/25 rounded-xl px-3 py-2 flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 block">
-                  Absen Terverifikasi
-                </span>
-                <div className="text-lg sm:text-xl font-black text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">
-                  {verifiedAttendanceCount}
-                  <span className="text-[11px] text-emerald-600/80 dark:text-emerald-400/80 font-sans font-semibold ml-1">
-                    Sah
-                  </span>
-                </div>
-              </div>
-              <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0 hidden sm:block" />
-            </div>
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex flex-col justify-between gap-2">
+          <span className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+            Absen Terverifikasi
+          </span>
+          <div className="text-3xl font-bold text-emerald-600 dark:text-emerald-400 font-mono tabular-nums">
+            {verifiedAttendanceCount}{' '}
+            <span className="text-sm font-sans font-semibold text-emerald-600/80">Sah</span>
           </div>
         </div>
       </div>
 
-      {/* Minimalist Filter & Search Bar (Satu Baris Ringkas Tanpa Tumpukan Tombol Area) */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 shadow-xs">
-        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-2.5">
-          {/* Status Filter Tabs (Minimalist) */}
-          <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200/80 dark:border-slate-800 shrink-0">
+      {/* Compact Single-Row Filter & Search Bar */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800 shrink-0">
             {[
               { key: 'all', label: `Semua (${allCustomerAttendanceReports.length})` },
               { key: 'verified', label: `Terverifikasi (${verifiedAttendanceCount})` },
@@ -801,9 +719,9 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                 key={tab.key}
                 type="button"
                 onClick={() => setStatusFilter(tab.key as any)}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition cursor-pointer ${
                   statusFilter === tab.key
-                    ? 'bg-blue-600 text-white shadow-2xs'
+                    ? 'bg-blue-600 text-white'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
@@ -812,15 +730,14 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
             ))}
           </div>
 
-          {/* Search Input (Inline Minimalist) */}
           <div className="relative flex-1 min-w-[200px]">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Cari toko pelanggan, area kirim, supir, helper, atau plat armada..."
-              className="w-full pl-9 pr-7 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-600"
+              placeholder="Cari toko, area, supir, helper, atau plat..."
+              className="w-full h-10 pl-9 pr-7 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-600"
             />
             {searchQuery && (
               <button
@@ -828,69 +745,60 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                 onClick={() => setSearchQuery('')}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-4 h-4" />
               </button>
             )}
           </div>
 
-          {/* Area Dropdown & Date Controls */}
-          <div className="flex items-center gap-1.5 flex-wrap shrink-0">
-            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-2.5 py-1.5">
-              <MapPin className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-              <select
-                value={selectedAreaFilter}
-                onChange={(e) => setSelectedAreaFilter(e.target.value)}
-                className="bg-transparent text-xs font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer max-w-[190px] truncate"
-              >
-                <option value="all" className="bg-white dark:bg-slate-900">Semua Area ({availableScheduledAreas.length})</option>
-                {availableScheduledAreas.map(area => (
-                  <option key={area} value={area} className="bg-white dark:bg-slate-900">
-                    {area}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <select
+            value={selectedAreaFilter}
+            onChange={(e) => setSelectedAreaFilter(e.target.value)}
+            className="h-10 px-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer max-w-[180px] truncate"
+          >
+            <option value="all">Semua Area ({availableScheduledAreas.length})</option>
+            {availableScheduledAreas.map(area => (
+              <option key={area} value={area}>
+                {area}
+              </option>
+            ))}
+          </select>
 
-            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-2.5 py-1">
-              <Calendar className="w-3.5 h-3.5 text-blue-500" />
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => {
-                  setSelectedDate(e.target.value);
-                  setDateFilterMode('single_date');
-                }}
-                className="bg-transparent text-xs font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
-              />
-            </div>
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={(e) => {
+              setSelectedDate(e.target.value);
+              setDateFilterMode('single_date');
+            }}
+            className="h-10 px-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer"
+          />
 
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedDate(getLocalDateStr());
-                setDateFilterMode('single_date');
-              }}
-              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer border ${
-                dateFilterMode === 'single_date' && selectedDate === getLocalDateStr()
-                  ? 'bg-blue-600 text-white border-blue-600'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
-              }`}
-            >
-              Hari Ini
-            </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedDate(getLocalDateStr());
+              setDateFilterMode('single_date');
+            }}
+            className={`h-10 px-3 rounded-xl text-xs sm:text-sm font-semibold transition cursor-pointer border ${
+              dateFilterMode === 'single_date' && selectedDate === getLocalDateStr()
+                ? 'bg-blue-600 text-white border-blue-600'
+                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+            }`}
+          >
+            Hari Ini
+          </button>
 
-            <button
-              type="button"
-              onClick={() => setDateFilterMode('all')}
-              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer border ${
-                dateFilterMode === 'all'
-                  ? 'bg-blue-600 text-white border-blue-600'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
-              }`}
-            >
-              Semua Tanggal
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setDateFilterMode('all')}
+            className={`h-10 px-3 rounded-xl text-xs sm:text-sm font-semibold transition cursor-pointer border ${
+              dateFilterMode === 'all'
+                ? 'bg-blue-600 text-white border-blue-600'
+                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+            }`}
+          >
+            Semua Tanggal
+          </button>
         </div>
       </div>
 
@@ -1022,53 +930,44 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
             return (
               <div
                 key={group.groupKey}
-                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs"
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden"
               >
                 {/* Header Nama Area Kirim & Rincian Jadwal Rute */}
-                <div className="p-3 sm:p-3.5 bg-slate-50/90 dark:bg-slate-950/90 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
-                  <div className="flex items-start sm:items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-blue-600 text-white font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
+                <div className="p-4 bg-slate-50 dark:bg-slate-950/90 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-blue-600 text-white font-bold text-sm flex items-center justify-center shrink-0 tabular-nums">
                       #{globalGroupIdx + 1}
                     </div>
                     <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="px-2 py-0.5 rounded-md bg-blue-600/15 text-blue-600 dark:text-blue-400 border border-blue-500/30 text-[10px] font-black uppercase tracking-wider">
-                          Area Jadwal Kirim
-                        </span>
-                        <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white tracking-tight">
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white tracking-tight">
                           {group.areaName}
                         </h3>
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-[11px] font-bold font-mono">
-                          <Calendar className="w-3 h-3 text-blue-500" />
-                          {formattedScheduleDate}
+                        <span className="text-sm font-mono font-semibold text-slate-600 dark:text-slate-300">
+                          · {formattedScheduleDate}
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-2.5 flex-wrap text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
-                        <span className="inline-flex items-center gap-1 font-semibold">
-                          <User className="w-3.5 h-3.5 text-blue-500" />
+                      <div className="flex items-center gap-2 flex-wrap text-sm text-slate-600 dark:text-slate-400 mt-0.5">
+                        <span>
                           Driver: <strong className="text-slate-900 dark:text-white">{group.driverName}</strong>
                         </span>
-                        <span>•</span>
+                        <span aria-hidden="true">·</span>
                         <span>
                           Helper: <strong className="text-slate-900 dark:text-white">{group.helperName || '-'}</strong>
                         </span>
-                        <span>•</span>
-                        <span className="inline-flex items-center gap-1 font-mono font-bold text-slate-800 dark:text-slate-200">
-                          <Truck className="w-3.5 h-3.5 text-blue-500" />
-                          {group.plateNumber}
-                          {group.fleetInitial ? ` (${group.fleetInitial})` : ''}
+                        <span aria-hidden="true">·</span>
+                        <span className="font-mono font-bold text-slate-900 dark:text-slate-100">
+                          {group.plateNumber}{group.fleetInitial ? ` (${group.fleetInitial})` : ''}
                         </span>
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-1.5 flex-wrap shrink-0">
-                    <span className="px-2.5 py-1 rounded-xl bg-blue-600/10 text-blue-600 dark:text-blue-300 border border-blue-500/25 text-[11px] font-black">
-                      {group.items.length} Titik Pelanggan Dikunjungi
-                    </span>
-                    <span className="px-2.5 py-1 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-300 border border-emerald-500/25 text-[11px] font-bold">
-                      {verifiedInGroup}/{group.items.length} Terverifikasi
+                  <div className="flex items-center gap-2 flex-wrap shrink-0">
+                    <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                      {group.items.length} Toko ·{' '}
+                      <strong className="text-emerald-700 dark:text-emerald-400">{verifiedInGroup}/{group.items.length} Terverifikasi</strong>
                     </span>
                     {isSuperAdmin && (
                       <button
@@ -1083,7 +982,7 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                             items: group.items
                           })
                         }
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-rose-500/15 hover:bg-rose-600 text-rose-600 dark:text-rose-400 hover:text-white border border-rose-500/35 hover:border-rose-500 text-[11px] font-bold transition active:scale-95 cursor-pointer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-600 text-rose-700 dark:text-rose-400 hover:text-white border border-rose-200 dark:border-rose-500/35 text-xs font-semibold transition cursor-pointer"
                         title="Hapus Seluruh Verifikasi Jadwal Kirim Area Ini (Khusus Super Admin)"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -1093,19 +992,19 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                   </div>
                 </div>
 
-                {/* Tabel Pelanggan dalam Area Kirim Ini (Compact & Tanpa Scrollbar Horizontal Berlebih) */}
+                {/* Tabel Pelanggan dalam Area Kirim Ini (Typography Besar & Ringkas) */}
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead className="bg-slate-100/70 dark:bg-slate-900 text-slate-500 dark:text-slate-400 uppercase tracking-wider text-[10px] font-bold border-b border-slate-200 dark:border-slate-800">
+                  <table className="w-full text-left text-sm border-collapse">
+                    <thead className="bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 uppercase tracking-wider text-xs font-bold border-b border-slate-200 dark:border-slate-800">
                       <tr>
-                        <th className="py-2 px-2.5 w-9 text-center">No</th>
-                        <th className="py-2 px-2.5 whitespace-nowrap">Jam Absen</th>
-                        <th className="py-2 px-2.5">Nama Pelanggan / Toko Tujuan</th>
-                        <th className="py-2 px-2.5">Kru &amp; Armada</th>
-                        <th className="py-2 px-2.5">Titik Lokasi GPS</th>
-                        <th className="py-2 px-2.5 text-center whitespace-nowrap">Foto Bukti</th>
-                        <th className="py-2 px-2.5">Keterangan Kiriman</th>
-                        <th className="py-2 px-2.5 text-center whitespace-nowrap">Status &amp; Verifikasi</th>
+                        <th className="py-3 px-3 w-10 text-center">#</th>
+                        <th className="py-3 px-3 whitespace-nowrap">Jam Absen</th>
+                        <th className="py-3 px-3">Toko Tujuan</th>
+                        <th className="py-3 px-3">Kru &amp; Armada</th>
+                        <th className="py-3 px-3">Titik Lokasi GPS</th>
+                        <th className="py-3 px-3 text-center whitespace-nowrap">Foto</th>
+                        <th className="py-3 px-3">Keterangan</th>
+                        <th className="py-3 px-3 text-center whitespace-nowrap">Status</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800/70 text-slate-700 dark:text-slate-300">
@@ -1140,26 +1039,25 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
 
                         return (
                           <tr key={item.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
-                            <td className="py-2 px-2.5 align-middle text-center font-mono font-bold text-slate-400">
+                            <td className="py-3 px-3 align-middle text-center font-mono font-bold text-slate-500 tabular-nums">
                               {idx + 1}
                             </td>
 
                             {/* Jam Absen */}
-                            <td className="py-2 px-2.5 align-middle whitespace-nowrap">
-                              <div className="text-[11px] font-bold font-mono text-slate-900 dark:text-white">
+                            <td className="py-3 px-3 align-middle whitespace-nowrap">
+                              <span className="text-sm font-bold font-mono tabular-nums text-slate-900 dark:text-white">
                                 {new Date(item.timestamp).toLocaleTimeString('id-ID', {
                                   hour: '2-digit',
                                   minute: '2-digit'
                                 })}{' '}
                                 WIB
-                              </div>
+                              </span>
                             </td>
 
                             {/* Nama Pelanggan / Toko Tujuan */}
-                            <td className="py-2 px-2.5 align-middle max-w-[190px]">
-                              <div className="inline-flex items-start gap-1.5 px-2 py-1 rounded-lg text-[11px] font-bold bg-blue-600/10 text-blue-700 dark:text-blue-300 border border-blue-500/25">
-                                <Store className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
-                                <span className="line-clamp-2 leading-tight">{customerName}</span>
+                            <td className="py-3 px-3 align-middle max-w-[210px]">
+                              <div className="text-[15px] font-bold text-slate-900 dark:text-white leading-snug">
+                                {customerName}
                               </div>
                             </td>
 
@@ -1175,22 +1073,20 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                                   ? itemCrew.helperName
                                   : '';
                               return (
-                                <td className="py-2 px-2.5 align-middle">
-                                  <div className="font-bold text-slate-900 dark:text-white text-[11px] leading-snug flex flex-wrap items-center gap-1">
-                                    <span>
-                                      {itemCrew.driverName !== '-'
-                                        ? `${itemCrew.driverName}${distinctHelper ? ` • Helper: ${distinctHelper}` : ''}`
-                                        : distinctHelper
-                                        ? `Helper: ${distinctHelper}`
-                                        : item.driverName}
-                                    </span>
+                                <td className="py-3 px-3 align-middle">
+                                  <div className="font-bold text-slate-900 dark:text-white text-sm leading-snug">
+                                    {itemCrew.driverName !== '-'
+                                      ? `${itemCrew.driverName}${distinctHelper ? ` · Helper: ${distinctHelper}` : ''}`
+                                      : distinctHelper
+                                      ? `Helper: ${distinctHelper}`
+                                      : item.driverName}
                                     {isHelperSub && (
-                                      <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30">
-                                        Input Helper
+                                      <span className="ml-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400">
+                                        (Helper)
                                       </span>
                                     )}
                                   </div>
-                                  <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                                  <div className="text-xs font-mono font-semibold text-slate-600 dark:text-slate-400 mt-0.5">
                                     {item.plateNumber}
                                     {itemFleetObj?.initialCode ? ` (${itemFleetObj.initialCode})` : ''}
                                   </div>
@@ -1198,36 +1094,31 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                               );
                             })()}
 
-                            {/* Titik Lokasi GPS Presisi per Toko Pelanggan */}
-                            <td className="py-2 px-2.5 align-middle">
-                              <div className="text-[11px] font-bold text-slate-900 dark:text-white flex items-center gap-1">
-                                <MapPin className="w-3 h-3 text-blue-500 shrink-0" />
-                                <span className="truncate max-w-[180px]" title={preciseGps.subAreaLabel}>
-                                  {preciseGps.subAreaLabel}
-                                </span>
+                            {/* Titik Lokasi GPS */}
+                            <td className="py-3 px-3 align-middle">
+                              <div className="text-sm font-semibold text-slate-900 dark:text-white truncate max-w-[190px]" title={preciseGps.subAreaLabel}>
+                                {preciseGps.subAreaLabel}
                               </div>
-                              <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                                <span className="text-[10px] font-mono font-semibold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/80 px-1.5 py-0.2 rounded border border-slate-200 dark:border-slate-700/80">
+                              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                <span className="text-xs font-mono text-slate-500 dark:text-slate-400 tabular-nums">
                                   {preciseGps.coordsFormatted}
                                 </span>
                                 <a
                                   href={preciseGps.gmapsUrl}
                                   target="_blank"
                                   rel="noreferrer"
-                                  className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap"
-                                  title={`Buka titik lokasi presisi ${customerName} (${preciseGps.coordsFormatted}) di Google Maps`}
+                                  className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap"
                                 >
-                                  <Navigation className="w-2.5 h-2.5" />
-                                  <span>Buka GPS Maps</span>
-                                  <ExternalLink className="w-2.5 h-2.5" />
+                                  <span>Maps</span>
+                                  <ExternalLink className="w-3 h-3" />
                                 </a>
                               </div>
                             </td>
 
                             {/* Foto Bukti Absen */}
-                            <td className="py-2 px-2.5 align-middle text-center">
+                            <td className="py-3 px-3 align-middle text-center">
                               {item.photoUrl ? (
-                                <div className="relative group w-10 h-10 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 bg-slate-950 mx-auto shadow-2xs">
+                                <div className="relative group w-11 h-11 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 mx-auto">
                                   <img
                                     src={item.photoUrl}
                                     alt={customerName}
@@ -1237,41 +1128,39 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                                   <button
                                     type="button"
                                     onClick={() => setSelectedPhotoModal(item)}
-                                    className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white cursor-pointer"
+                                    className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white cursor-pointer"
                                     title="Perbesar Foto Absen Pelanggan"
                                   >
-                                    <Eye className="w-3.5 h-3.5" />
+                                    <Eye className="w-4 h-4" />
                                   </button>
                                 </div>
                               ) : (
-                                <span className="inline-block px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-800 text-slate-400 text-[10px]">
-                                  Tanpa Foto
-                                </span>
+                                <span className="text-slate-400 text-xs">-</span>
                               )}
                             </td>
 
                             {/* Keterangan Kiriman */}
-                            <td className="py-2 px-2.5 align-middle max-w-[180px]">
-                              <p className="text-slate-700 dark:text-slate-300 text-[11px] leading-snug line-clamp-2">
-                                {cleanNotes || 'Kiriman telah tiba dan diserahkan ke pelanggan.'}
+                            <td className="py-3 px-3 align-middle max-w-[200px]">
+                              <p className="text-slate-700 dark:text-slate-300 text-sm leading-snug line-clamp-2">
+                                {cleanNotes || 'Kiriman telah tiba di pelanggan.'}
                               </p>
                             </td>
 
-                            {/* Status & Verifikasi + Hapus (Super Admin) */}
-                            <td className="py-2 px-2.5 align-middle text-center whitespace-nowrap">
-                              <div className="flex items-center justify-center gap-1">
+                            {/* Status & Verifikasi */}
+                            <td className="py-3 px-3 align-middle text-center whitespace-nowrap">
+                              <div className="flex items-center justify-center gap-1.5">
                                 {isVerified ? (
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30">
-                                    <CheckCircle2 className="w-3 h-3 shrink-0" />
+                                  <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30">
+                                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
                                     <span>Terverifikasi</span>
                                   </span>
                                 ) : (
                                   <button
                                     type="button"
                                     onClick={() => handleVerifyAttendance(item.id)}
-                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold transition cursor-pointer"
+                                    className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition cursor-pointer"
                                   >
-                                    <Check className="w-3 h-3" />
+                                    <Check className="w-3.5 h-3.5" />
                                     <span>Verifikasi</span>
                                   </button>
                                 )}
@@ -1279,10 +1168,10 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
                                   <button
                                     type="button"
                                     onClick={() => setDeleteConfirmReport(item)}
-                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-600 text-rose-600 dark:text-rose-400 hover:text-white border border-rose-500/35 hover:border-rose-500 text-[10px] font-bold transition active:scale-95 cursor-pointer"
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-600 text-rose-700 dark:text-rose-400 hover:text-white border border-rose-200 dark:border-rose-500/35 text-xs font-semibold transition cursor-pointer"
                                     title="Hapus Absen Pelanggan (Khusus Super Admin)"
                                   >
-                                    <Trash2 className="w-3 h-3" />
+                                    <Trash2 className="w-3.5 h-3.5" />
                                     <span>Hapus</span>
                                   </button>
                                 )}

@@ -67,6 +67,7 @@ import {
   syncFleetsAndCrewsWithSupabase
 } from '../services/supabaseService';
 import { resolveCanonicalFleetMeta, sortFleetsByCanonicalOrder } from '../data/mockData';
+import { listenCrewChanged } from './crew/crewApi';
 
 // Helper for default box cubic capacity (m3 / CBM) and dimensions
 export const getDefaultBoxCapacityM3 = (vehicleType: VehicleType | string, brand?: string): number => {
@@ -275,13 +276,13 @@ const FleetFormDropdown: React.FC<{
   const SelectedIcon = selected?.Icon;
   const openRingClass =
     accent === 'emerald'
-      ? 'border-emerald-500 ring-2 ring-emerald-500/20 shadow-sm shadow-emerald-500/10'
-      : 'border-blue-500 ring-2 ring-blue-500/20 shadow-sm shadow-blue-500/10';
+      ? 'border-emerald-600 ring-2 ring-emerald-500/15'
+      : 'border-blue-600 ring-2 ring-blue-600/15';
   const activeOptionClass =
     accent === 'emerald'
-      ? 'bg-emerald-500/15 border border-emerald-500/40 text-emerald-400'
-      : 'bg-blue-500/15 border border-blue-500/40 text-blue-400';
-  const checkTone = accent === 'emerald' ? 'text-emerald-400' : 'text-blue-400';
+      ? 'bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/40 text-emerald-700 dark:text-emerald-400'
+      : 'bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/40 text-blue-700 dark:text-blue-400';
+  const checkTone = accent === 'emerald' ? 'text-emerald-600 dark:text-emerald-400' : 'text-blue-600 dark:text-blue-400';
 
   return (
     <>
@@ -289,34 +290,34 @@ const FleetFormDropdown: React.FC<{
         ref={triggerRef}
         type="button"
         onClick={() => setIsOpen(prev => !prev)}
-        className={`w-full px-3 py-2 rounded-xl bg-slate-950 border text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+        className={`w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border text-left flex items-center justify-between gap-2 transition cursor-pointer ${
           hasError
             ? 'border-rose-500 ring-1 ring-rose-500'
             : isOpen
             ? openRingClass
-            : 'border-slate-800 hover:border-slate-600'
+            : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-600'
         }`}
       >
         <div className="flex items-center gap-2 min-w-0">
           {selected?.dotClass && (
-            <span className={`w-2 h-2 rounded-full shrink-0 ${selected.dotClass}`} />
+            <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${selected.dotClass}`} />
           )}
           {SelectedIcon && (
             <span
               className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${
-                selected?.iconTone || 'bg-slate-800 text-slate-300 border-slate-700'
+                selected?.iconTone || 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
               }`}
             >
-              <SelectedIcon className="w-3 h-3" />
+              <SelectedIcon className="w-3.5 h-3.5" />
             </span>
           )}
           <span
-            className={`text-xs truncate ${
+            className={`text-sm truncate ${
               selected
                 ? accent === 'emerald'
-                  ? 'text-emerald-400 font-bold'
-                  : 'text-white font-semibold'
-                : 'text-slate-500 font-normal'
+                  ? 'text-emerald-700 dark:text-emerald-400 font-bold'
+                  : 'text-slate-900 dark:text-white font-semibold'
+                : 'text-slate-400 font-normal'
             }`}
           >
             {selected ? selected.label : placeholder}
@@ -325,7 +326,7 @@ const FleetFormDropdown: React.FC<{
         <ChevronDown
           className={`w-4 h-4 shrink-0 transition-transform duration-150 ${
             isOpen
-              ? `rotate-180 ${accent === 'emerald' ? 'text-emerald-400' : 'text-blue-400'}`
+              ? `rotate-180 ${accent === 'emerald' ? 'text-emerald-600 dark:text-emerald-400' : 'text-blue-600 dark:text-blue-400'}`
               : 'text-slate-400'
           }`}
         />
@@ -345,19 +346,19 @@ const FleetFormDropdown: React.FC<{
               width: menuPos.width,
               zIndex: 9999
             }}
-            className="rounded-2xl bg-slate-900 border border-slate-700/90 shadow-2xl shadow-black/60 overflow-hidden animate-in fade-in duration-150"
+            className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-lg overflow-hidden animate-in fade-in duration-150"
           >
             {searchable && (
-              <div className="p-2 border-b border-slate-800 bg-slate-950/80">
+              <div className="p-2 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/80">
                 <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     ref={searchRef}
                     type="text"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder={searchPlaceholder}
-                    className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                    className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-600"
                   />
                 </div>
               </div>
@@ -368,7 +369,7 @@ const FleetFormDropdown: React.FC<{
               className="overflow-y-auto p-1.5 space-y-0.5 overscroll-contain"
             >
               {filtered.length === 0 ? (
-                <div className="py-5 px-3 text-center text-xs text-slate-400">{emptyText}</div>
+                <div className="py-5 px-3 text-center text-sm text-slate-500 dark:text-slate-400">{emptyText}</div>
               ) : (
                 filtered.map(opt => {
                   const OptIcon = opt.Icon;
@@ -381,20 +382,20 @@ const FleetFormDropdown: React.FC<{
                         onChange(opt.value);
                         setIsOpen(false);
                       }}
-                      className={`w-full px-2.5 py-2 rounded-xl flex items-center justify-between gap-2 text-left transition cursor-pointer ${
+                      className={`w-full px-3 py-2 rounded-lg flex items-center justify-between gap-2 text-left transition cursor-pointer ${
                         active
                           ? activeOptionClass
-                          : 'border border-transparent hover:bg-slate-800/80 text-slate-200'
+                          : 'border border-transparent hover:bg-slate-100 dark:hover:bg-slate-800/80 text-slate-800 dark:text-slate-200'
                       }`}
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         {opt.dotClass && (
-                          <span className={`w-2 h-2 rounded-full shrink-0 ${opt.dotClass}`} />
+                          <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${opt.dotClass}`} />
                         )}
                         {OptIcon && (
                           <span
                             className={`w-6 h-6 rounded-lg border flex items-center justify-center shrink-0 ${
-                              opt.iconTone || 'bg-slate-800 text-slate-300 border-slate-700'
+                              opt.iconTone || 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
                             }`}
                           >
                             <OptIcon className="w-3.5 h-3.5" />
@@ -402,32 +403,32 @@ const FleetFormDropdown: React.FC<{
                         )}
                         <div className="min-w-0">
                           <div
-                            className={`text-xs truncate ${
+                            className={`text-sm truncate ${
                               active
                                 ? accent === 'emerald'
-                                  ? 'text-emerald-400 font-bold'
-                                  : 'text-blue-400 font-bold'
-                                : 'text-white font-semibold'
+                                  ? 'text-emerald-700 dark:text-emerald-400 font-bold'
+                                  : 'text-blue-700 dark:text-blue-400 font-bold'
+                                : 'text-slate-900 dark:text-white font-semibold'
                             }`}
                           >
                             {opt.label}
                           </div>
                           {opt.sublabel && (
-                            <div className="text-[10px] text-slate-400 truncate mt-0.5">{opt.sublabel}</div>
+                            <div className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">{opt.sublabel}</div>
                           )}
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
                         {opt.badge && (
                           <span
-                            className={`px-1.5 py-0.5 rounded-md text-[10px] font-semibold border ${
-                              opt.badgeTone || 'bg-slate-800 text-slate-300 border-slate-700'
+                            className={`px-1.5 py-0.5 rounded-md text-xs font-semibold border ${
+                              opt.badgeTone || 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
                             }`}
                           >
                             {opt.badge}
                           </span>
                         )}
-                        {active && <Check className={`w-3.5 h-3.5 shrink-0 ${checkTone}`} />}
+                        {active && <Check className={`w-4 h-4 shrink-0 ${checkTone}`} />}
                       </div>
                     </button>
                   );
@@ -740,43 +741,43 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     return d.toISOString().substring(0, 10);
   };
 
-  // Status helper for Tax, STNK/Plat & KIR
+  // Status helper for Tax, STNK/Plat & KIR (Flat Clean Design Light & Dark)
   const getExpiryStatus = (dateStr?: string, defaultDaysWarn = 30) => {
-    if (!dateStr) return { label: 'Belum diisi', color: 'text-slate-400 bg-slate-800/60 border-slate-700', isExpired: false, isNear: false, diffDays: 0 };
+    if (!dateStr) return { label: 'Belum diisi', color: 'text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700', isExpired: false, isNear: false, diffDays: 0 };
     const target = new Date(dateStr).getTime();
-    if (isNaN(target)) return { label: 'Format Salah', color: 'text-slate-400 bg-slate-800/60 border-slate-700', isExpired: false, isNear: false, diffDays: 0 };
+    if (isNaN(target)) return { label: 'Format Salah', color: 'text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700', isExpired: false, isNear: false, diffDays: 0 };
     const now = new Date().getTime();
     const diffDays = Math.ceil((target - now) / (1000 * 60 * 60 * 24));
     if (diffDays < 0) {
-      return { 
-        label: `Jatuh Tempo (${Math.abs(diffDays)}h lalu)`, 
-        color: 'text-rose-400 bg-rose-500/15 border-rose-500/30',
+      return {
+        label: `Jatuh Tempo (${Math.abs(diffDays)}h lalu)`,
+        color: 'text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/15 border-rose-200 dark:border-rose-500/30',
         isExpired: true,
         isNear: true,
         diffDays
       };
     }
     if (diffDays === 0) {
-      return { 
-        label: 'Sisa 0 hari', 
-        color: 'text-rose-400 bg-rose-500/15 border-rose-500/30',
+      return {
+        label: 'Sisa 0 hari',
+        color: 'text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/15 border-rose-200 dark:border-rose-500/30',
         isExpired: true,
         isNear: true,
         diffDays: 0
       };
     }
     if (diffDays <= defaultDaysWarn) {
-      return { 
-        label: `Sisa ${diffDays} hari`, 
-        color: 'text-amber-300 bg-amber-500/20 border-amber-500/40 animate-pulse',
+      return {
+        label: `Sisa ${diffDays} hari`,
+        color: 'text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/20 border-amber-200 dark:border-amber-500/40',
         isExpired: false,
         isNear: true,
         diffDays
       };
     }
-    return { 
-      label: `Aktif (${diffDays}h)`, 
-      color: 'text-emerald-400 bg-emerald-500/15 border-emerald-500/30',
+    return {
+      label: `Aktif (${diffDays}h)`,
+      color: 'text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30',
       isExpired: false,
       isNear: false,
       diffDays
@@ -812,11 +813,23 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     status: 'available' as CrewStatus
   });
 
+  const [scheduleTick, setScheduleTick] = useState(0);
   useEffect(() => {
-    return logisticsStore.subscribe(() => {
+    const syncFromStore = () => {
       setFleets(logisticsStore.getFleets());
       setCrews(logisticsStore.getCrews());
-    });
+      setScheduleTick(v => v + 1);
+    };
+    const unsubStore = logisticsStore.subscribe(syncFromStore);
+    const unsubCrew = listenCrewChanged(syncFromStore);
+    window.addEventListener('akk-new-schedule-added', syncFromStore);
+    window.addEventListener('driver-shift-updated', syncFromStore);
+    return () => {
+      unsubStore();
+      unsubCrew();
+      window.removeEventListener('akk-new-schedule-added', syncFromStore);
+      window.removeEventListener('driver-shift-updated', syncFromStore);
+    };
   }, []);
 
   const handleManualSupabaseSync = async () => {
@@ -1379,6 +1392,11 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
       (f.initialCode && f.initialCode.toLowerCase().includes(q)) ||
       (f.brand && f.brand.toLowerCase().includes(q)) ||
       (liveInfo.areaName && liveInfo.areaName.toLowerCase().includes(q)) ||
+      (liveInfo.todayScheduledArea && liveInfo.todayScheduledArea.toLowerCase().includes(q)) ||
+      (liveInfo.tomorrowScheduledArea && liveInfo.tomorrowScheduledArea.toLowerCase().includes(q)) ||
+      (liveInfo.upcomingScheduledArea && liveInfo.upcomingScheduledArea.toLowerCase().includes(q)) ||
+      (liveInfo.driverName && liveInfo.driverName.toLowerCase().includes(q)) ||
+      (liveInfo.helperName && liveInfo.helperName.toLowerCase().includes(q)) ||
       liveInfo.statusLabel.toLowerCase().includes(q);
     return matchesBranch && matchesStatus && matchesType && matchesQuery;
   });
@@ -1499,50 +1517,44 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   };
 
   return (
-    <div className="space-y-3">
-      {/* Compact Header & Sub-Tabs Toolbar */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-xs">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2.5">
+    <div className="akk-flat-fleets w-full bg-slate-50 dark:bg-slate-950/40 rounded-xl p-2 sm:p-3 space-y-3.5" data-schedule-sync={scheduleTick}>
+      {/* Header & Compact Single-Bar Filter Toolbar */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           <div className="min-w-0">
-            {isCrewsMode && (
-              <div className="text-[10px] text-slate-400 flex items-center gap-1.5">
-                <span>Manajemen Personel &amp; Rotasi Kru</span>
-              </div>
-            )}
-            <h2 className="text-sm sm:text-base font-bold text-white tracking-tight truncate">
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight truncate">
               {!isCrewsMode
                 ? 'Data Armada Terpadu'
-                : 'Kru Pengiriman & Audit Rotasi Wilayah'}
+                : 'Riwayat Kru Pengiriman'}
             </h2>
           </div>
 
-          {/* Sub-Tabs & Primary CTA */}
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             {isCrewsMode && (
-              <div className="flex flex-wrap items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('crews')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
-                    activeTab === 'crews'
-                      ? 'bg-emerald-600 text-white'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <Users className="w-3.5 h-3.5" />
-                  <span>Daftar Kru ({filteredCrews.length})</span>
-                </button>
+              <div className="flex flex-wrap items-center gap-1 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
                 <button
                   type="button"
                   onClick={() => setActiveTab('history')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold transition cursor-pointer ${
                     activeTab === 'history'
                       ? 'bg-blue-600 text-white'
-                      : 'text-slate-400 hover:text-white'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
-                  <History className="w-3.5 h-3.5" />
-                  <span>History Kirim &amp; SLA</span>
+                  <History className="w-4 h-4" />
+                  <span>Riwayat &amp; Rotasi</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('crews')}
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold transition cursor-pointer ${
+                    activeTab === 'crews'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Users className="w-4 h-4" />
+                  <span>Daftar Kru ({filteredCrews.length})</span>
                 </button>
               </div>
             )}
@@ -1550,218 +1562,210 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
             {!isCrewsMode && (
               <button
                 onClick={openAddFleetModal}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition cursor-pointer"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition cursor-pointer"
               >
-                <Plus className="w-3.5 h-3.5" />
+                <Plus className="w-4 h-4" />
                 <span>Tambah Armada</span>
               </button>
             )}
           </div>
         </div>
 
-        {/* Filter, Search & View Switcher (Only shown on fleets or crews list tab — aligned strictly on a single horizontal plane) */}
+        {/* Compact Filter, Search & View Switcher */}
         {(activeTab === 'fleets' || activeTab === 'crews') && (
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 mt-3 pt-3 border-t border-slate-800/80">
-            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-              <div className="relative flex-1 sm:w-56">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  type="text"
-                  placeholder={activeTab === 'fleets' ? 'Cari plat, inisial, tipe, merk...' : 'Cari nama kru, peran, SIM...'}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full h-9 pl-8 pr-7 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-blue-500"
-                />
-                {searchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchQuery('')}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs cursor-pointer"
-                  >
-                    &times;
-                  </button>
-                )}
-              </div>
-
-              {activeTab === 'fleets' ? (
-                <>
-                  {/* Cabang Armada Custom Dropdown (Lurus Sejajar) */}
-                  <div className="w-52">
-                    <FleetFormDropdown
-                      accent="emerald"
-                      value={selectedBranchId === 'ALL' ? 'cab-banyuwangi' : selectedBranchId}
-                      onChange={(val) => branchStore.setSelectedOriginBranchId(val)}
-                      options={branches.map((b) => {
-                        const count = fleets.filter(
-                          fl => branchStore.getFleetBranch(fl.id, fl.plateNumber, fl.initialCode, fl.branchId).id === b.id
-                        ).length;
-                        return {
-                          value: b.id,
-                          label: `Cabang ${b.name.replace(/^Cabang\s+/i, '')} (${count} Unit)`,
-                          Icon: Building2,
-                          iconTone: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                        };
-                      })}
-                    />
-                  </div>
-
-                  {/* Status Armada Custom Dropdown */}
-                  <div className="w-48">
-                    <FleetFormDropdown
-                      value={fleetFilter}
-                      onChange={setFleetFilter}
-                      options={[
-                        { value: 'all', label: 'Semua Status Kondisi' },
-                        { value: 'available', label: 'Ready (Siap Jadwal Esok)', dotClass: 'bg-emerald-400' },
-                        { value: 'on-duty', label: 'Kirim (Sedang Dipakai)', dotClass: 'bg-blue-400' },
-                        { value: 'maintenance', label: 'Servis (Dalam Perbaikan)', dotClass: 'bg-rose-400' }
-                      ]}
-                    />
-                  </div>
-
-                  {/* Tipe Kendaraan Custom Dropdown */}
-                  <div className="w-48">
-                    <FleetFormDropdown
-                      value={vehicleTypeFilter}
-                      onChange={setVehicleTypeFilter}
-                      options={[
-                        { value: 'all', label: 'Semua Tipe Kendaraan' },
-                        { value: 'Pick Up Box', label: 'Pick Up Box' },
-                        { value: 'Engkel STD', label: 'Engkel STD' },
-                        { value: 'Engkel Long', label: 'Engkel Long' },
-                        { value: 'Double STD', label: 'Double STD' }
-                      ]}
-                    />
-                  </div>
-                </>
-              ) : (
-                <>
-                  {/* Cabang Kru Custom Dropdown (Lurus Sejajar tanpa label bertumpuk di atas) */}
-                  <div className="w-52">
-                    <FleetFormDropdown
-                      accent="emerald"
-                      value={selectedBranchId === 'ALL' ? 'cab-banyuwangi' : selectedBranchId}
-                      onChange={(val) => branchStore.setSelectedOriginBranchId(val)}
-                      options={branches.map((b) => {
-                        const allUsers = logisticsStore.getUsers();
-                        const count = visibleCrewsForRole.filter(cr => {
-                          const matchedUser = allUsers.find(
-                            u => `crw-${u.id}` === cr.id || logisticsStore.isSameCrewPersonName(u.fullName, cr.name)
-                          );
-                          return matchedUser
-                            ? logisticsStore.isActiveDeliveryCrewUser(matchedUser, b.id)
-                            : branchStore.getCrewBranch(cr.id, cr.name).id === b.id;
-                        }).length;
-                        return {
-                          value: b.id,
-                          label: `Cabang ${b.name.replace(/^Cabang\s+/i, '')} (${count} Kru)`,
-                          Icon: Building2,
-                          iconTone: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                        };
-                      })}
-                    />
-                  </div>
-
-                  {/* Status Operasional Kru Custom Dropdown */}
-                  <div className="w-52">
-                    <FleetFormDropdown
-                      value={crewFilter}
-                      onChange={setCrewFilter}
-                      options={[
-                        { value: 'all', label: 'Semua Status Operasional' },
-                        { value: 'aktif', label: 'Aktif (User Manajemen)', dotClass: 'bg-emerald-400' },
-                        ...(isCurrentSuperAdmin
-                          ? [{ value: 'nonaktif', label: 'Nonaktif (User Manajemen)', dotClass: 'bg-rose-400' }]
-                          : [])
-                      ]}
-                    />
-                  </div>
-
-                  {/* Peran Kru Custom Dropdown (Driver & Helper) */}
-                  <div className="w-40">
-                    <FleetFormDropdown
-                      value={crewRoleFilter}
-                      onChange={setCrewRoleFilter}
-                      options={[
-                        { value: 'all', label: 'Semua Peran Kru' },
-                        { value: 'Driver', label: 'Driver' },
-                        { value: 'Helper', label: 'Helper' }
-                      ]}
-                    />
-                  </div>
-                </>
-              )}
-
-              {/* Reset Filter Button */}
-              {((activeTab === 'fleets' && (fleetFilter !== 'all' || vehicleTypeFilter !== 'all' || searchQuery)) ||
-                (activeTab === 'crews' && (crewFilter !== 'all' || crewRoleFilter !== 'all' || searchQuery))) && (
+          <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+            <div className="relative flex-1 min-w-[200px] sm:max-w-xs">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                placeholder={activeTab === 'fleets' ? 'Cari plat, inisial, area, sopir...' : 'Cari nama kru, peran, SIM...'}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full h-10 pl-9 pr-8 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-600"
+              />
+              {searchQuery && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setSearchQuery('');
-                    setFleetFilter('all');
-                    setVehicleTypeFilter('all');
-                    setCrewFilter('all');
-                    setCrewRoleFilter('all');
-                  }}
-                  className="h-9 px-3 rounded-xl text-xs font-bold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 border border-rose-500/30 transition cursor-pointer"
-                  title="Reset Semua Filter"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-white text-sm cursor-pointer"
                 >
-                  Reset
+                  &times;
                 </button>
               )}
+            </div>
 
-              {/* View Switcher: Table View vs Cards Grid vs 3D Showcase */}
-              <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setViewMode('table')}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold transition cursor-pointer ${
-                    viewMode === 'table' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                  title="Tampilan Tabel (Data Table)"
-                >
-                  <Table className="w-3.5 h-3.5" />
-                  <span className="hidden md:inline">Tabel</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode('cards')}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold transition cursor-pointer ${
-                    viewMode === 'cards' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                  title="Tampilan Kartu (Grid View)"
-                >
-                  <LayoutGrid className="w-3.5 h-3.5" />
-                  <span className="hidden md:inline">Kartu</span>
-                </button>
-                {activeTab === 'fleets' && (
-                  <button
-                    type="button"
-                    onClick={() => setViewMode('3d')}
-                    className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold transition cursor-pointer ${
-                      viewMode === '3d' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                    title="Tampilan Desain 3D Interaktif Armada"
-                  >
-                    <Box className="w-3.5 h-3.5" />
-                    <span>3D</span>
-                  </button>
-                )}
-              </div>
+            {activeTab === 'fleets' ? (
+              <>
+                <div className="w-52">
+                  <FleetFormDropdown
+                    accent="emerald"
+                    value={selectedBranchId === 'ALL' ? 'cab-banyuwangi' : selectedBranchId}
+                    onChange={(val) => branchStore.setSelectedOriginBranchId(val)}
+                    options={branches.map((b) => {
+                      const count = fleets.filter(
+                        fl => branchStore.getFleetBranch(fl.id, fl.plateNumber, fl.initialCode, fl.branchId).id === b.id
+                      ).length;
+                      return {
+                        value: b.id,
+                        label: `${b.name.replace(/^Cabang\s+/i, '')} (${count} Unit)`,
+                        Icon: Building2,
+                        iconTone: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/30'
+                      };
+                    })}
+                  />
+                </div>
 
-              {/* Refresh Data Button */}
+                <div className="w-44">
+                  <FleetFormDropdown
+                    value={fleetFilter}
+                    onChange={setFleetFilter}
+                    options={[
+                      { value: 'all', label: 'Semua Status' },
+                      { value: 'available', label: 'Ready', dotClass: 'bg-emerald-500' },
+                      { value: 'on-duty', label: 'Sedang Kirim', dotClass: 'bg-blue-600' },
+                      { value: 'maintenance', label: 'Servis', dotClass: 'bg-rose-500' }
+                    ]}
+                  />
+                </div>
+
+                <div className="w-44">
+                  <FleetFormDropdown
+                    value={vehicleTypeFilter}
+                    onChange={setVehicleTypeFilter}
+                    options={[
+                      { value: 'all', label: 'Semua Tipe' },
+                      { value: 'Pick Up Box', label: 'Pick Up Box' },
+                      { value: 'Engkel STD', label: 'Engkel STD' },
+                      { value: 'Engkel Long', label: 'Engkel Long' },
+                      { value: 'Double STD', label: 'Double STD' }
+                    ]}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="w-52">
+                  <FleetFormDropdown
+                    accent="emerald"
+                    value={selectedBranchId === 'ALL' ? 'cab-banyuwangi' : selectedBranchId}
+                    onChange={(val) => branchStore.setSelectedOriginBranchId(val)}
+                    options={branches.map((b) => {
+                      const allUsers = logisticsStore.getUsers();
+                      const count = visibleCrewsForRole.filter(cr => {
+                        const matchedUser = allUsers.find(
+                          u => `crw-${u.id}` === cr.id || logisticsStore.isSameCrewPersonName(u.fullName, cr.name)
+                        );
+                        return matchedUser
+                          ? logisticsStore.isActiveDeliveryCrewUser(matchedUser, b.id)
+                          : branchStore.getCrewBranch(cr.id, cr.name).id === b.id;
+                      }).length;
+                      return {
+                        value: b.id,
+                        label: `${b.name.replace(/^Cabang\s+/i, '')} (${count} Kru)`,
+                        Icon: Building2,
+                        iconTone: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/30'
+                      };
+                    })}
+                  />
+                </div>
+
+                <div className="w-44">
+                  <FleetFormDropdown
+                    value={crewFilter}
+                    onChange={setCrewFilter}
+                    options={[
+                      { value: 'all', label: 'Semua Status' },
+                      { value: 'aktif', label: 'Aktif', dotClass: 'bg-emerald-500' },
+                      ...(isCurrentSuperAdmin
+                        ? [{ value: 'nonaktif', label: 'Nonaktif', dotClass: 'bg-rose-500' }]
+                        : [])
+                    ]}
+                  />
+                </div>
+
+                <div className="w-40">
+                  <FleetFormDropdown
+                    value={crewRoleFilter}
+                    onChange={setCrewRoleFilter}
+                    options={[
+                      { value: 'all', label: 'Semua Peran' },
+                      { value: 'Driver', label: 'Driver' },
+                      { value: 'Helper', label: 'Helper' }
+                    ]}
+                  />
+                </div>
+              </>
+            )}
+
+            {((activeTab === 'fleets' && (fleetFilter !== 'all' || vehicleTypeFilter !== 'all' || searchQuery)) ||
+              (activeTab === 'crews' && (crewFilter !== 'all' || crewRoleFilter !== 'all' || searchQuery))) && (
               <button
                 type="button"
-                disabled={isSyncingSupabase}
-                onClick={handleManualSupabaseSync}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 text-xs font-semibold transition cursor-pointer disabled:opacity-50"
-                title="Segarkan data armada dan kru"
+                onClick={() => {
+                  setSearchQuery('');
+                  setFleetFilter('all');
+                  setVehicleTypeFilter('all');
+                  setCrewFilter('all');
+                  setCrewRoleFilter('all');
+                }}
+                className="h-10 px-3 rounded-xl text-sm font-semibold text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 transition cursor-pointer"
+                title="Reset Filter"
               >
-                <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSupabase ? 'animate-spin text-emerald-400' : 'text-emerald-400'}`} />
-                <span className="hidden sm:inline">{isSyncingSupabase ? 'Memuat...' : 'Segarkan'}</span>
+                Reset
               </button>
+            )}
+
+            <div className="flex items-center bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800 ml-auto">
+              <button
+                type="button"
+                onClick={() => setViewMode('table')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition cursor-pointer ${
+                  viewMode === 'table'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                <Table className="w-4 h-4" />
+                <span className="hidden md:inline">Tabel</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('cards')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition cursor-pointer ${
+                  viewMode === 'cards'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                <LayoutGrid className="w-4 h-4" />
+                <span className="hidden md:inline">Kartu</span>
+              </button>
+              {activeTab === 'fleets' && (
+                <button
+                  type="button"
+                  onClick={() => setViewMode('3d')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition cursor-pointer ${
+                    viewMode === '3d'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <Box className="w-4 h-4" />
+                  <span>3D</span>
+                </button>
+              )}
             </div>
+
+            <button
+              type="button"
+              disabled={isSyncingSupabase}
+              onClick={handleManualSupabaseSync}
+              className="inline-flex items-center gap-2 h-10 px-3.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-sm font-semibold transition cursor-pointer disabled:opacity-50"
+              title="Segarkan data armada dan kru"
+            >
+              <RefreshCw className={`w-4 h-4 ${isSyncingSupabase ? 'animate-spin text-blue-600' : 'text-slate-600 dark:text-slate-300'}`} />
+              <span className="hidden sm:inline">{isSyncingSupabase ? 'Memuat...' : 'Segarkan'}</span>
+            </button>
           </div>
         )}
       </div>
@@ -1889,7 +1893,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         </div>
       )}
 
-      {/* 3 Indikator Status Kondisi Armada Terintegrasi (Filtered by Selected Branch) */}
+      {/* 3 Indikator Status Kondisi Armada Terintegrasi (Flat Clean Design + Angka Besar) */}
       {activeTab === 'fleets' && (() => {
         const branchFilteredFleets = selectedBranchId === 'ALL'
           ? fleets
@@ -1900,28 +1904,25 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         const servisCount = liveInfos.filter(i => i.effectiveStatus === 'maintenance').length;
 
         return (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
             <button
               type="button"
               onClick={() => setFleetFilter(fleetFilter === 'available' ? 'all' : 'available')}
-              className={`p-2.5 sm:p-3 rounded-xl border text-left transition flex items-center justify-between gap-2.5 cursor-pointer ${
+              className={`p-4 rounded-xl border text-left transition flex items-center justify-between gap-3 cursor-pointer ${
                 fleetFilter === 'available'
-                  ? 'bg-emerald-950/40 border-emerald-500/60 shadow-xs'
-                  : 'bg-slate-900 border-slate-800 hover:border-emerald-500/40'
+                  ? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-500'
+                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300'
               }`}
             >
-              <div className="space-y-0.5 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-emerald-500/20 shrink-0" />
-                  <span className="font-black text-emerald-400 text-xs uppercase tracking-wide">
-                    Status Ready
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-400 truncate">
-                  Siap digunakan untuk jadwal pengiriman esok hari
+              <div className="min-w-0">
+                <span className="font-bold text-emerald-700 dark:text-emerald-400 text-sm block">
+                  Armada Ready
+                </span>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                  Siap dijadwalkan kirim
                 </p>
               </div>
-              <span className="text-lg font-black font-mono text-emerald-400 shrink-0">
+              <span className="text-3xl font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400 shrink-0">
                 {readyCount}
               </span>
             </button>
@@ -1929,24 +1930,21 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
             <button
               type="button"
               onClick={() => setFleetFilter(fleetFilter === 'on-duty' ? 'all' : 'on-duty')}
-              className={`p-2.5 sm:p-3 rounded-xl border text-left transition flex items-center justify-between gap-2.5 cursor-pointer ${
+              className={`p-4 rounded-xl border text-left transition flex items-center justify-between gap-3 cursor-pointer ${
                 fleetFilter === 'on-duty'
-                  ? 'bg-blue-950/40 border-blue-500/60 shadow-xs'
-                  : 'bg-slate-900 border-slate-800 hover:border-blue-500/40'
+                  ? 'bg-blue-50/70 dark:bg-blue-950/40 border-blue-600'
+                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300'
               }`}
             >
-              <div className="space-y-0.5 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500 ring-2 ring-blue-500/20 shrink-0" />
-                  <span className="font-black text-blue-400 text-xs uppercase tracking-wide">
-                    Status Kirim
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-400 truncate">
-                  Sedang dipakai kirim oleh tim pengiriman (Gate-Out aktif)
+              <div className="min-w-0">
+                <span className="font-bold text-blue-700 dark:text-blue-400 text-sm block">
+                  Sedang Kirim
+                </span>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                  Dalam rute pengiriman aktif
                 </p>
               </div>
-              <span className="text-lg font-black font-mono text-blue-400 shrink-0">
+              <span className="text-3xl font-bold font-mono tabular-nums text-blue-600 dark:text-blue-400 shrink-0">
                 {kirimCount}
               </span>
             </button>
@@ -1954,24 +1952,21 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
             <button
               type="button"
               onClick={() => setFleetFilter(fleetFilter === 'maintenance' ? 'all' : 'maintenance')}
-              className={`p-2.5 sm:p-3 rounded-xl border text-left transition flex items-center justify-between gap-2.5 cursor-pointer ${
+              className={`p-4 rounded-xl border text-left transition flex items-center justify-between gap-3 cursor-pointer ${
                 fleetFilter === 'maintenance'
-                  ? 'bg-rose-950/40 border-rose-500/60 shadow-xs'
-                  : 'bg-slate-900 border-slate-800 hover:border-rose-500/40'
+                  ? 'bg-rose-50/70 dark:bg-rose-950/40 border-rose-500'
+                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300'
               }`}
             >
-              <div className="space-y-0.5 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-rose-500/20 shrink-0" />
-                  <span className="font-black text-rose-400 text-xs uppercase tracking-wide">
-                    Status Servis
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-400 truncate">
-                  Dalam perbaikan dan terkunci dari jadwal pengiriman
+              <div className="min-w-0">
+                <span className="font-bold text-rose-700 dark:text-rose-400 text-sm block">
+                  Dalam Servis
+                </span>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                  Perawatan &amp; terkunci dari jadwal
                 </p>
               </div>
-              <span className="text-lg font-black font-mono text-rose-400 shrink-0">
+              <span className="text-3xl font-bold font-mono tabular-nums text-rose-600 dark:text-rose-400 shrink-0">
                 {servisCount}
               </span>
             </button>
@@ -1979,34 +1974,36 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         );
       })()}
 
-      {/* Fleets Content: Table View (Compact & Rapat) */}
+      {/* Fleets Content: Table View (Flat Clean Design + Typography Besar) */}
       {activeTab === 'fleets' && viewMode === 'table' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
+            <table className="w-full text-left border-collapse text-sm">
               <thead>
-                <tr className="bg-slate-950/80 border-b border-slate-800 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  <th className="py-2.5 px-2.5 w-10 text-center">#</th>
-                  <th className="py-2.5 px-3 whitespace-nowrap">Armada &amp; Inisial</th>
-                  <th className="py-2.5 px-3 whitespace-nowrap">Tipe &amp; Kubikasi Box</th>
-                  <th className="py-2.5 px-3 text-center whitespace-nowrap">Status Kondisi &amp; Area Kirim</th>
-                  <th className="py-2.5 px-3 whitespace-nowrap">Sopir / PIC</th>
-                  <th className="py-2.5 px-3 whitespace-nowrap">Pajak / STNK / KIR</th>
-                  <th className="py-2.5 px-3 text-center w-24 whitespace-nowrap">Aksi</th>
+                <tr className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
+                  <th className="py-3 px-3.5 w-12 text-center">#</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Armada &amp; Inisial</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Tipe &amp; Kubikasi</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Status &amp; Jadwal Area</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Sopir / PIC</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Pajak · STNK · KIR</th>
+                  <th className="py-3 px-4 text-center w-28 whitespace-nowrap">Aksi</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/60">
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                 {filteredFleets.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-10 text-center text-slate-400">
-                      <Truck className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-60" />
-                      <p className="font-semibold text-slate-300">Tidak ada armada ditemukan</p>
-                      <p className="text-[11px] text-slate-500 mt-1">Coba sesuaikan kata kunci pencarian atau filter status armada.</p>
+                    <td colSpan={7} className="py-12 text-center text-slate-500">
+                      <Truck className="w-9 h-9 text-slate-400 mx-auto mb-2 opacity-60" />
+                      <p className="font-semibold text-base text-slate-700 dark:text-slate-300">Tidak ada armada ditemukan</p>
+                      <p className="text-sm text-slate-500 mt-1">Coba sesuaikan kata kunci pencarian atau filter status armada.</p>
                     </td>
                   </tr>
                 ) : (
                   filteredFleets.map((fleet, index) => {
                     const assignedCrew = crews.find(c => c.currentFleetId === fleet.id || (fleet.driverId && c.id === fleet.driverId));
+                    const liveInfo = logisticsStore.getFleetLiveOperationalInfo(fleet);
+                    const effectiveDriverName = liveInfo.driverName || assignedCrew?.name || null;
                     const boxM3 = fleet.boxCapacityM3 !== undefined ? fleet.boxCapacityM3 : getFleetBoxCapacity(fleet);
                     const kirDateVal = fleet.lastMaintenance || fleet.kirExpiryDate;
                     const kirStatus = getExpiryStatus(kirDateVal);
@@ -2014,27 +2011,36 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     const stnkDateVal = fleet.stnkExpiryDate;
                     const stnkStatus = getExpiryStatus(stnkDateVal);
 
+                    const renderExpiryTextTone = (st: ReturnType<typeof getExpiryStatus>) =>
+                      st.isExpired
+                        ? 'text-rose-600 dark:text-rose-400 font-bold'
+                        : st.isNear
+                        ? 'text-amber-600 dark:text-amber-400 font-bold'
+                        : st.label === 'Belum diisi'
+                        ? 'text-slate-400'
+                        : 'text-emerald-700 dark:text-emerald-400 font-semibold';
+
                     return (
-                      <tr key={fleet.id} className="hover:bg-slate-850/50 transition">
-                        <td className="py-2.5 px-2.5 text-center font-mono text-slate-500 font-bold">{index + 1}</td>
-                        <td className="py-2.5 px-3 whitespace-nowrap">
-                          <div className="flex items-center gap-1.5 flex-wrap">
+                      <tr key={fleet.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition">
+                        <td className="py-3.5 px-3.5 text-center font-mono text-slate-500 font-bold tabular-nums">{index + 1}</td>
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <div className="flex items-center gap-2.5">
+                            <span className="font-bold text-slate-900 dark:text-white font-mono text-base tracking-wide">
+                              {fleet.plateNumber}
+                            </span>
                             {fleet.initialCode && (
-                              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 whitespace-nowrap shrink-0">
+                              <span className="px-2 py-0.5 rounded-md text-xs font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
                                 {fleet.initialCode}
                               </span>
                             )}
-                            <span className="font-bold text-white font-mono text-xs tracking-wide whitespace-nowrap">
-                              {fleet.plateNumber}
-                            </span>
                             {redundantFleetIdSet.has(fleet.id) && (
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40 whitespace-nowrap">
-                                Data Double
+                              <span className="text-xs font-bold text-amber-700 dark:text-amber-400">
+                                · Double
                               </span>
                             )}
                           </div>
                           {selectedBranchId === 'ALL' && (
-                            <div className="mt-1 flex items-center gap-1">
+                            <div className="mt-1.5">
                               <select
                                 value={branchStore.getFleetBranch(fleet.id, fleet.plateNumber, fleet.initialCode, fleet.branchId).id}
                                 onChange={(e) => {
@@ -2042,7 +2048,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                                   logisticsStore.updateFleet(fleet.id, { branchId: e.target.value });
                                   setBranches(branchStore.getActiveBranches());
                                 }}
-                                className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800 text-[9px] font-bold text-emerald-400 cursor-pointer focus:outline-none"
+                                className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer focus:outline-none"
                               >
                                 {branches.map((b) => (
                                   <option key={b.id} value={b.id}>
@@ -2053,155 +2059,150 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                             </div>
                           )}
                         </td>
-                        <td className="py-2.5 px-3 whitespace-nowrap">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-bold text-slate-200 text-xs">{fleet.vehicleType}</span>
-                            <span className="px-1.5 py-0.5 rounded-md text-[10px] font-mono font-black bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
-                              {boxM3} m³
-                            </span>
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <div className="font-bold text-slate-900 dark:text-slate-100 text-[15px]">
+                            {fleet.vehicleType} <span className="text-slate-400 font-normal">·</span>{' '}
+                            <span className="font-mono text-blue-600 dark:text-blue-400 tabular-nums">{boxM3} m³</span>
                           </div>
-                          <div className="text-[10px] text-slate-400 mt-0.5">
-                            {fleet.brand || '-'} ({fleet.year || '-'})
+                          <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                            {fleet.brand || '-'} · {fleet.year || '-'}
                           </div>
                         </td>
-                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
-                          {(() => {
-                            const liveInfo = logisticsStore.getFleetLiveOperationalInfo(fleet);
-                            return (
-                              <div className="flex flex-col items-center gap-0.5">
-                                <button
-                                  type="button"
-                                  onClick={() => toggleFleetStatus(fleet)}
-                                  className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold border transition cursor-pointer ${liveInfo.badgeColorClass}`}
-                                  title="Klik untuk ubah status kondisi armada (Ready -> Kirim -> Servis)"
-                                >
-                                  <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${liveInfo.dotColorClass}`} />
-                                  <span>{liveInfo.statusLabel}</span>
-                                </button>
-                                <div className="text-[10px] text-slate-400 font-medium max-w-[165px] truncate" title={liveInfo.statusDescription}>
-                                  {liveInfo.effectiveStatus === 'on-duty' ? (
-                                    <span className="text-blue-300 font-semibold">
-                                      Area: {liveInfo.areaName || 'Sedang Kirim'}
-                                    </span>
-                                  ) : liveInfo.effectiveStatus === 'maintenance' ? (
-                                    <span className="text-rose-400 font-semibold">
-                                      Tidak bisa diatur kirim
-                                    </span>
-                                  ) : liveInfo.todayScheduledArea ? (
-                                    <span className="text-amber-300 font-semibold">
-                                      Terjadwal Hari Ini: {liveInfo.todayScheduledArea}
-                                    </span>
-                                  ) : liveInfo.tomorrowScheduledArea ? (
-                                    <span className="text-amber-300 font-semibold">
-                                      Terjadwal Esok: {liveInfo.tomorrowScheduledArea}
-                                    </span>
-                                  ) : (
-                                    <span>Siap jadwal esok</span>
-                                  )}
-                                </div>
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <div className="flex flex-col items-start gap-1">
+                            <button
+                              type="button"
+                              onClick={() => toggleFleetStatus(fleet)}
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border transition cursor-pointer ${liveInfo.badgeColorClass}`}
+                              title="Klik untuk ubah status kondisi armada (Ready -> Kirim -> Servis)"
+                            >
+                              <span>{liveInfo.statusLabel}</span>
+                            </button>
+                            <div className="text-[13px] font-semibold max-w-[240px] truncate" title={liveInfo.statusDescription}>
+                              {liveInfo.effectiveStatus === 'on-duty' ? (
+                                <span className="text-blue-700 dark:text-blue-300">
+                                  {liveInfo.areaName || 'Sedang Kirim'}
+                                  {liveInfo.scheduledDepartureTime && liveInfo.scheduledReturnTime
+                                    ? ` · ${liveInfo.scheduledDepartureTime}–${liveInfo.scheduledReturnTime}`
+                                    : ''}
+                                </span>
+                              ) : liveInfo.effectiveStatus === 'maintenance' ? (
+                                <span className="text-rose-600 dark:text-rose-400">
+                                  Terkunci dari jadwal
+                                </span>
+                              ) : liveInfo.todayScheduledArea ? (
+                                <span className="text-amber-700 dark:text-amber-300">
+                                  Hari Ini: {liveInfo.todayScheduledArea}
+                                  {liveInfo.scheduledDepartureTime && liveInfo.scheduledReturnTime
+                                    ? ` · ${liveInfo.scheduledDepartureTime}–${liveInfo.scheduledReturnTime}`
+                                    : ''}
+                                </span>
+                              ) : liveInfo.tomorrowScheduledArea ? (
+                                <span className="text-amber-700 dark:text-amber-300">
+                                  Esok: {liveInfo.tomorrowScheduledArea}
+                                  {liveInfo.scheduledDepartureTime && liveInfo.scheduledReturnTime
+                                    ? ` · ${liveInfo.scheduledDepartureTime}–${liveInfo.scheduledReturnTime}`
+                                    : ''}
+                                </span>
+                              ) : liveInfo.upcomingScheduledArea ? (
+                                <span className="text-blue-700 dark:text-blue-300">
+                                  {liveInfo.scheduledDateLabel || 'Jadwal'}: {liveInfo.upcomingScheduledArea}
+                                  {liveInfo.scheduledDepartureTime && liveInfo.scheduledReturnTime
+                                    ? ` · ${liveInfo.scheduledDepartureTime}–${liveInfo.scheduledReturnTime}`
+                                    : ''}
+                                </span>
+                              ) : (
+                                <span className="text-slate-500 dark:text-slate-400 font-normal">Siap dijadwalkan</span>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          {effectiveDriverName ? (
+                            <div>
+                              <div className="font-bold text-slate-900 dark:text-slate-100 text-[15px]">
+                                {effectiveDriverName}
                               </div>
-                            );
-                          })()}
-                        </td>
-                        <td className="py-2.5 px-3 whitespace-nowrap">
-                          {assignedCrew ? (
-                            <div className="font-bold text-slate-200 flex items-center gap-1.5 text-xs">
-                              <UserCheck className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                              <span>{assignedCrew.name}</span>
+                              {liveInfo.helperName && liveInfo.helperName !== effectiveDriverName && (
+                                <div className="text-[13px] text-slate-600 dark:text-slate-300 font-medium mt-0.5">
+                                  Helper: {liveInfo.helperName}
+                                </div>
+                              )}
+                            </div>
+                          ) : liveInfo.helperName ? (
+                            <div className="font-semibold text-slate-800 dark:text-slate-200 text-sm">
+                              Helper: {liveInfo.helperName}
                             </div>
                           ) : (
-                            <span className="text-[11px] text-slate-500 italic">Belum Dipasangkan</span>
+                            <span className="text-sm text-slate-400">Belum Dipasangkan</span>
                           )}
                         </td>
 
-                        {/* Pajak, STNK & KIR: Menampilkan tanggal jatuh tempo dan status untuk Pajak (Tahunan), STNK (5 Tahunan), dan KIR secara terstruktur */}
-                        <td className="py-2 px-3 whitespace-nowrap">
-                          <div className="flex flex-col gap-1.5 min-w-[225px]">
-                            {/* Baris 1: PAJAK */}
-                            <div className="flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-slate-950/70 border border-slate-800/80">
-                              <div className="flex items-center gap-1.5">
-                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 min-w-[40px] text-center">
-                                  PAJAK
-                                </span>
-                                <span className="text-[11px] font-bold text-slate-100 font-mono tracking-tight">
-                                  {fleet.taxDueDate ? formatIndoDate(fleet.taxDueDate) : '-'}
-                                </span>
-                              </div>
-                              <span className={`px-1.5 py-0.5 rounded text-[9px] border font-semibold leading-tight ${taxStatus.color}`}>
-                                {taxStatus.label}
+                        {/* Pajak, STNK & KIR — Clean Unboxed Inline Rows */}
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <div className="space-y-1 text-[13px] font-mono tabular-nums min-w-[235px]">
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-slate-600 dark:text-slate-300">
+                                <span className="font-sans font-bold text-slate-500 dark:text-slate-400 inline-block w-11">Pajak</span>
+                                <span className="font-semibold text-slate-900 dark:text-slate-100">{fleet.taxDueDate ? formatIndoDate(fleet.taxDueDate) : '-'}</span>
                               </span>
+                              <span className={`font-sans text-xs ${renderExpiryTextTone(taxStatus)}`}>{taxStatus.label}</span>
                             </div>
-
-                            {/* Baris 2: STNK */}
-                            <div className="flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-slate-950/70 border border-slate-800/80">
-                              <div className="flex items-center gap-1.5">
-                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-amber-500/15 text-amber-300 border border-amber-500/30 min-w-[40px] text-center">
-                                  STNK
-                                </span>
-                                <span className="text-[11px] font-bold text-slate-100 font-mono tracking-tight">
-                                  {stnkDateVal ? formatIndoDate(stnkDateVal) : '-'}
-                                </span>
-                              </div>
-                              <span className={`px-1.5 py-0.5 rounded text-[9px] border font-semibold leading-tight ${stnkStatus.color}`}>
-                                {stnkStatus.label}
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-slate-600 dark:text-slate-300">
+                                <span className="font-sans font-bold text-slate-500 dark:text-slate-400 inline-block w-11">STNK</span>
+                                <span className="font-semibold text-slate-900 dark:text-slate-100">{stnkDateVal ? formatIndoDate(stnkDateVal) : '-'}</span>
                               </span>
+                              <span className={`font-sans text-xs ${renderExpiryTextTone(stnkStatus)}`}>{stnkStatus.label}</span>
                             </div>
-
-                            {/* Baris 3: KIR */}
-                            <div className="flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-slate-950/70 border border-slate-800/80">
-                              <div className="flex items-center gap-1.5">
-                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-teal-500/15 text-teal-300 border border-teal-500/30 min-w-[40px] text-center">
-                                  KIR
-                                </span>
-                                <span className="text-[11px] font-bold text-slate-100 font-mono tracking-tight">
-                                  {kirDateVal ? formatIndoDate(kirDateVal) : '-'}
-                                </span>
-                              </div>
-                              <span className={`px-1.5 py-0.5 rounded text-[9px] border font-semibold leading-tight ${kirStatus.color}`}>
-                                {kirStatus.label}
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-slate-600 dark:text-slate-300">
+                                <span className="font-sans font-bold text-slate-500 dark:text-slate-400 inline-block w-11">KIR</span>
+                                <span className="font-semibold text-slate-900 dark:text-slate-100">{kirDateVal ? formatIndoDate(kirDateVal) : '-'}</span>
                               </span>
+                              <span className={`font-sans text-xs ${renderExpiryTextTone(kirStatus)}`}>{kirStatus.label}</span>
                             </div>
                           </div>
                         </td>
 
                         {/* Aksi */}
-                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
-                          <div className="flex items-center justify-center gap-1">
+                        <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                          <div className="flex items-center justify-center gap-1.5">
                             <button
                               type="button"
                               onClick={() => {
                                 setSelected3DFleetId(fleet.id);
                                 setViewMode('3d');
                               }}
-                              className="p-1.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 hover:text-cyan-300 border border-cyan-500/30 transition cursor-pointer"
+                              className="p-2 rounded-lg bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition cursor-pointer"
                               title="Lihat Desain 3D Armada"
                             >
-                              <Box className="w-3.5 h-3.5" />
+                              <Box className="w-4 h-4" />
                             </button>
                             <button
                               type="button"
                               onClick={() => handleEditFleetClick(fleet)}
-                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition cursor-pointer"
+                              className="p-2 rounded-lg bg-blue-50 dark:bg-slate-800 hover:bg-blue-100 dark:hover:bg-slate-700 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-slate-700 transition cursor-pointer"
                               title="Edit Data Armada"
                             >
-                              <Edit3 className="w-3.5 h-3.5 text-blue-400" />
+                              <Edit3 className="w-4 h-4" />
                             </button>
                             <button
                               type="button"
                               onClick={() => handleDeleteFleetClick(fleet)}
-                              className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 border border-rose-500/30 transition cursor-pointer"
+                              className="p-2 rounded-lg bg-rose-50 dark:bg-rose-500/10 hover:bg-rose-100 dark:hover:bg-rose-500/20 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-500/30 transition cursor-pointer"
                               title="Hapus Armada"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 className="w-4 h-4" />
                             </button>
                             {fleet.kirDocUrl && (
                               <button
                                 type="button"
                                 onClick={() => setSelectedKirDocFleet(fleet)}
-                                className="p-1.5 rounded-lg bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 hover:text-teal-300 border border-teal-500/30 transition cursor-pointer"
+                                className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30 transition cursor-pointer"
                                 title="Lihat Dokumen KIR Dishub"
                               >
-                                <FileText className="w-3.5 h-3.5" />
+                                <FileText className="w-4 h-4" />
                               </button>
                             )}
                           </div>
@@ -2216,151 +2217,146 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         </div>
       )}
 
-      {/* Fleets Content: Cards Grid View */}
+      {/* Fleets Content: Cards Grid View (Flat Clean Design) */}
       {activeTab === 'fleets' && viewMode === 'cards' && (
         filteredFleets.length === 0 ? (
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center text-slate-400">
-            <Truck className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-60" />
-            <p className="font-semibold text-slate-300">Tidak ada armada ditemukan</p>
-            <p className="text-[11px] text-slate-500 mt-1">Coba sesuaikan kata kunci pencarian atau filter status dan tipe kendaraan.</p>
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-12 text-center text-slate-500">
+            <Truck className="w-9 h-9 text-slate-400 mx-auto mb-2 opacity-60" />
+            <p className="font-semibold text-base text-slate-700 dark:text-slate-300">Tidak ada armada ditemukan</p>
+            <p className="text-sm text-slate-500 mt-1">Coba sesuaikan kata kunci pencarian atau filter status dan tipe kendaraan.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredFleets.map(fleet => {
             const assignedCrew = crews.find(c => c.currentFleetId === fleet.id || (fleet.driverId && c.id === fleet.driverId));
+            const liveInfo = logisticsStore.getFleetLiveOperationalInfo(fleet);
+            const effectiveDriverName = liveInfo.driverName || assignedCrew?.name || null;
             const boxM3 = fleet.boxCapacityM3 !== undefined ? fleet.boxCapacityM3 : getFleetBoxCapacity(fleet);
             const boxDim = fleet.boxDimensions || getDefaultBoxDimensions(fleet.vehicleType, fleet.brand);
             const boxMultiplier = fleet.boxInnerMultiplierPercent !== undefined ? fleet.boxInnerMultiplierPercent : 90;
             const innerBoxM3 = fleet.boxInnerCapacityM3 !== undefined ? fleet.boxInnerCapacityM3 : Number((boxM3 * (boxMultiplier / 100)).toFixed(2));
 
             return (
-              <div key={fleet.id} className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-4 hover:border-slate-700 transition">
-                <div className="flex items-center justify-between">
+              <div key={fleet.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4 hover:border-slate-300 dark:hover:border-slate-700 transition">
+                <div className="flex items-start justify-between gap-2">
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">PLAT NOMOR</span>
+                      <span className="text-[11px] uppercase font-bold text-slate-500 dark:text-slate-400 tracking-wider">PLAT NOMOR</span>
                       {fleet.initialCode && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+                        <span className="px-2 py-0.5 rounded-md text-xs font-mono font-bold bg-indigo-50 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/40">
                           {fleet.initialCode}
                         </span>
                       )}
                       {redundantFleetIdSet.has(fleet.id) && (
-                        <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-50 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-500/40">
                           Data Double
                         </span>
                       )}
                     </div>
-                    <h3 className="text-lg font-black text-white font-mono tracking-wider">
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white font-mono tracking-wide mt-0.5">
                       {fleet.plateNumber} {fleet.initialCode ? `(${fleet.initialCode})` : ''}
                     </h3>
                   </div>
 
-                  {(() => {
-                    const liveInfo = logisticsStore.getFleetLiveOperationalInfo(fleet);
-                    return (
-                      <div className="flex flex-col items-end gap-1">
-                        <button
-                          onClick={() => toggleFleetStatus(fleet)}
-                          className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold cursor-pointer border transition ${liveInfo.badgeColorClass}`}
-                          title="Klik untuk ubah status kondisi armada (Ready -> Kirim -> Servis)"
-                        >
-                          <span className={`w-3.5 h-3.5 rounded-full shrink-0 ${liveInfo.dotColorClass}`} />
-                          <span>{liveInfo.statusLabel}</span>
-                        </button>
-                        <span className="text-[10px] text-slate-400 font-medium max-w-[180px] truncate text-right" title={liveInfo.statusDescription}>
-                          {liveInfo.effectiveStatus === 'on-duty'
-                            ? `Area: ${liveInfo.areaName || 'Sedang Kirim'}`
-                            : liveInfo.effectiveStatus === 'maintenance'
-                            ? 'Dalam perbaikan (Tidak bisa kirim)'
-                            : liveInfo.todayScheduledArea
-                            ? `Terjadwal Hari Ini: ${liveInfo.todayScheduledArea}`
-                            : liveInfo.tomorrowScheduledArea
-                            ? `Terjadwal Esok: ${liveInfo.tomorrowScheduledArea}`
-                            : 'Siap jadwal esok'}
-                        </span>
-                      </div>
-                    );
-                  })()}
+                  <div className="flex flex-col items-end gap-1">
+                    <button
+                      onClick={() => toggleFleetStatus(fleet)}
+                      className={`inline-flex items-center gap-2 px-3 py-1 rounded-lg text-xs font-bold cursor-pointer border transition ${liveInfo.badgeColorClass}`}
+                      title="Klik untuk ubah status kondisi armada (Ready -> Kirim -> Servis)"
+                    >
+                      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${liveInfo.dotColorClass}`} />
+                      <span>{liveInfo.statusLabel}</span>
+                    </button>
+                    <span className="text-xs text-slate-600 dark:text-slate-400 font-medium max-w-[205px] truncate text-right" title={liveInfo.statusDescription}>
+                      {liveInfo.effectiveStatus === 'on-duty'
+                        ? `Area: ${liveInfo.areaName || 'Sedang Kirim'}`
+                        : liveInfo.effectiveStatus === 'maintenance'
+                        ? 'Dalam perbaikan (Terkunci)'
+                        : liveInfo.todayScheduledArea
+                        ? `Hari Ini: ${liveInfo.todayScheduledArea}`
+                        : liveInfo.tomorrowScheduledArea
+                        ? `Esok: ${liveInfo.tomorrowScheduledArea}`
+                        : liveInfo.upcomingScheduledArea
+                        ? `${liveInfo.scheduledDateLabel || 'Jadwal'}: ${liveInfo.upcomingScheduledArea}`
+                        : 'Siap jadwal pengiriman'}
+                    </span>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
-                    <span className="text-slate-400 text-[11px]">Tipe Armada:</span>
-                    <div className="font-semibold text-white mt-0.5 flex items-center justify-between gap-1">
+                <div className="grid grid-cols-2 gap-2.5 text-sm">
+                  <div className="bg-slate-50 dark:bg-slate-950/60 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                    <span className="text-slate-500 dark:text-slate-400 text-xs block">Tipe Armada:</span>
+                    <div className="font-bold text-slate-900 dark:text-white mt-0.5 flex items-center justify-between gap-1">
                       <span className="truncate">{fleet.vehicleType}</span>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 whitespace-nowrap" title={`Kubikasi Box: ${boxM3} m³`}>
+                      <span className="px-1.5 py-0.5 rounded text-xs font-mono font-bold bg-cyan-50 dark:bg-cyan-500/15 text-cyan-800 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-500/30 whitespace-nowrap" title={`Kubikasi Box: ${boxM3} m³`}>
                         {boxM3} m³
                       </span>
                     </div>
                   </div>
-                  <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
-                    <span className="text-slate-400 text-[11px]">Inisial Mobil:</span>
-                    <div className="font-semibold text-emerald-400 font-mono mt-0.5 flex items-center gap-1.5">
-                      <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs">
-                        {fleet.initialCode || (fleet.vehicleType.includes('Wingbox') ? 'WB' : 'ARM') + '-' + fleet.plateNumber.slice(-3)}
-                      </span>
+                  <div className="bg-slate-50 dark:bg-slate-950/60 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                    <span className="text-slate-500 dark:text-slate-400 text-xs block">Target Jam Kirim:</span>
+                    <div className="font-semibold text-blue-700 dark:text-blue-300 font-mono mt-0.5 text-xs">
+                      {liveInfo.scheduledDepartureTime && liveInfo.scheduledReturnTime
+                        ? `${liveInfo.scheduledDepartureTime}–${liveInfo.scheduledReturnTime} WIB`
+                        : '-'}
                     </div>
                   </div>
                 </div>
 
                 {/* Spesifikasi Kendaraan */}
                 <div className="grid grid-cols-3 gap-2 text-xs">
-                  <div className="bg-slate-950/40 p-2 rounded-lg border border-slate-800/60 text-center">
-                    <span className="text-slate-400 text-[10px] block">Merk Mobil</span>
-                    <div className="font-semibold text-white truncate mt-0.5" title={fleet.brand || 'Mitsubishi L300'}>
+                  <div className="bg-slate-50 dark:bg-slate-950/40 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800/60 text-center">
+                    <span className="text-slate-500 dark:text-slate-400 text-[11px] block">Merk Mobil</span>
+                    <div className="font-bold text-slate-900 dark:text-white truncate mt-0.5" title={fleet.brand || 'Mitsubishi L300'}>
                       {fleet.brand || 'Mitsubishi L300'}
                     </div>
                   </div>
-                  <div className="bg-slate-950/40 p-2 rounded-lg border border-slate-800/60 text-center">
-                    <span className="text-slate-400 text-[10px] block">Tahun Produksi</span>
-                    <div className="font-semibold text-white mt-0.5">{fleet.year || '2023'}</div>
+                  <div className="bg-slate-50 dark:bg-slate-950/40 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800/60 text-center">
+                    <span className="text-slate-500 dark:text-slate-400 text-[11px] block">Tahun</span>
+                    <div className="font-bold text-slate-900 dark:text-white mt-0.5">{fleet.year || '2023'}</div>
                   </div>
-                  <div className="bg-slate-950/40 p-2 rounded-lg border border-slate-800/60 text-center">
-                    <span className="text-slate-400 text-[10px] block">Kapasitas (CC)</span>
-                    <div className="font-semibold text-white mt-0.5">{fleet.engineCc || '2500 CC'}</div>
+                  <div className="bg-slate-50 dark:bg-slate-950/40 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800/60 text-center">
+                    <span className="text-slate-500 dark:text-slate-400 text-[11px] block">Kapasitas</span>
+                    <div className="font-bold text-slate-900 dark:text-white mt-0.5">{fleet.engineCc || '2500 CC'}</div>
                   </div>
                 </div>
 
-                {/* 📦 DIMENSI BOX: Ukuran Luar vs Pengali Dimensi Dalam Box (...%) */}
-                <div className="bg-slate-950/80 p-3 rounded-xl border border-cyan-500/30 space-y-2 shadow-inner">
+                {/* Dimensi Box */}
+                <div className="bg-slate-50 dark:bg-slate-950/80 p-3.5 rounded-xl border border-slate-200 dark:border-cyan-500/30 space-y-2">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="font-bold text-cyan-300 flex items-center gap-1.5">
-                      <Box className="w-3.5 h-3.5 text-cyan-400" />
+                    <span className="font-bold text-slate-800 dark:text-cyan-300 flex items-center gap-1.5">
+                      <Box className="w-4 h-4 text-blue-600 dark:text-cyan-400" />
                       <span>Kapasitas Kubikasi Box Truk</span>
                     </span>
-                    <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
-                      Pengali Dinding: {boxMultiplier}%
+                    <span className="px-2 py-0.5 rounded text-xs font-mono font-bold bg-cyan-50 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-500/40">
+                      Pengali: {boxMultiplier}%
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 text-[11px]">
-                    <div className="bg-slate-900/90 p-2 rounded-lg border border-slate-800">
-                      <span className="text-[10px] text-slate-400 block">Ukuran Box Luar:</span>
-                      <div className="font-mono font-bold text-white text-xs mt-0.5">{boxM3} m³</div>
-                      <div className="text-[10px] text-slate-400 font-mono truncate" title={boxDim}>{boxDim}</div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="bg-white dark:bg-slate-900/90 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400 block">Box Luar:</span>
+                      <div className="font-mono font-bold text-slate-900 dark:text-white text-sm mt-0.5">{boxM3} m³</div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono truncate" title={boxDim}>{boxDim}</div>
                     </div>
 
-                    <div className="bg-cyan-950/40 p-2 rounded-lg border border-cyan-500/40">
-                      <span className="text-[10px] text-cyan-400 font-bold block">
-                        Hasil Netto Dalam ({boxMultiplier}%):
+                    <div className="bg-blue-50/70 dark:bg-cyan-950/40 p-2.5 rounded-lg border border-blue-200 dark:border-cyan-500/40">
+                      <span className="text-[11px] text-blue-700 dark:text-cyan-400 font-bold block">
+                        Netto ({boxMultiplier}%):
                       </span>
-                      <div className="font-mono font-black text-cyan-300 text-xs mt-0.5">{innerBoxM3} m³</div>
-                      <div className="text-[10px] text-cyan-400/80 font-mono">Efektif Muatan Barang</div>
+                      <div className="font-mono font-bold text-blue-700 dark:text-cyan-300 text-sm mt-0.5">{innerBoxM3} m³</div>
+                      <div className="text-[11px] text-blue-600/80 dark:text-cyan-400/80 font-mono">Efektif Muatan</div>
                     </div>
-                  </div>
-                  <div className="text-[9px] text-slate-400 italic">
-                    *Ukuran luar &amp; dalam berbeda ketebalan dinding boks (dikalikan {boxMultiplier}%)
                   </div>
                 </div>
 
-                {/* Operational Details (Tanpa GPS Tracksolid, Tanpa Frekuensi Pengiriman, Tanpa Efisiensi BBM, Tanpa Rute Aktif GPS) */}
-                <div className="space-y-2 text-xs">
-                  {/* Status Dokumen & Masa Berlaku Legalitas Armada (KIR, Pajak, STNK) */}
-                  <div className="bg-slate-950/75 p-3 rounded-xl border border-slate-800/90 shadow-inner space-y-2.5">
-                    <div className="flex items-center justify-between pb-1.5 border-b border-slate-800/60">
-                      <div className="flex items-center gap-1.5 text-xs font-bold text-slate-200">
-                        <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                        <span>Masa Berlaku Dokumen Kendaraan</span>
+                {/* Legalitas Dokumen & Komponen Rutin */}
+                <div className="space-y-2.5 text-xs">
+                  <div className="bg-slate-50 dark:bg-slate-950/75 p-3 rounded-xl border border-slate-200 dark:border-slate-800/90 space-y-2">
+                    <div className="flex items-center justify-between pb-1.5 border-b border-slate-200 dark:border-slate-800/60">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200">
+                        <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                        <span>Dokumen Kendaraan</span>
                       </div>
                       {(() => {
                         const kirStat = getExpiryStatus(fleet.lastMaintenance || fleet.kirExpiryDate);
@@ -2371,281 +2367,86 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
 
                         if (hasExpired) {
                           return (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30 flex items-center gap-1">
-                              <AlertTriangle className="w-3 h-3 text-rose-400" />
+                            <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-500/30 flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3" />
                               Perlu Perpanjangan
                             </span>
                           );
                         }
                         if (hasNear) {
                           return (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center gap-1">
-                              <Clock className="w-3 h-3 text-amber-400" />
+                            <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-50 dark:bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-500/30 flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
                               Mendekati Tempo
                             </span>
                           );
                         }
                         return (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                          <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" />
                             Dokumen Valid
                           </span>
                         );
                       })()}
                     </div>
 
-                    <div className="space-y-2">
-                      {/* 1. Uji Berkala KIR / Servis + Bukti File KIR Dishub */}
+                    <div className="grid grid-cols-3 gap-1.5 text-center">
                       {(() => {
-                        const kirDate = fleet.lastMaintenance || fleet.kirExpiryDate || '2026-12-23';
+                        const taxDate = fleet.taxDueDate;
+                        const stnkDate = fleet.stnkExpiryDate;
+                        const kirDate = fleet.lastMaintenance || fleet.kirExpiryDate;
+                        const taxStatus = getExpiryStatus(taxDate);
+                        const stnkStatus = getExpiryStatus(stnkDate);
                         const kirStatus = getExpiryStatus(kirDate);
                         return (
-                          <div className="bg-slate-900/90 p-2.5 rounded-lg border border-slate-800/90 space-y-2 hover:border-teal-500/30 transition">
-                            <div className="flex items-center justify-between gap-2.5">
-                              <div className="flex items-center gap-2.5 min-w-0">
-                                <div className="w-8 h-8 rounded-lg bg-teal-500/15 border border-teal-500/30 flex items-center justify-center shrink-0">
-                                  <Wrench className="w-4 h-4 text-teal-400" />
-                                </div>
-                                <div className="min-w-0">
-                                  <div className="text-xs font-bold text-slate-200 truncate flex items-center gap-1">
-                                    <span>Uji KIR &amp; Servis</span>
-                                  </div>
-                                  <div className="text-[10px] text-slate-400">
-                                    Uji Berkala Dishub (6 Bln)
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="text-right shrink-0">
-                                <div className="text-sm sm:text-base font-black text-white font-mono tracking-tight">
-                                  {kirDate}
-                                </div>
-                                <div className="flex items-center justify-end gap-1.5 mt-0.5">
-                                  <span className="text-[10px] text-teal-300/90 font-medium">
-                                    {formatIndoDate(kirDate)}
-                                  </span>
-                                  <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${kirStatus.color}`}>
-                                    {kirStatus.label}
-                                  </span>
-                                </div>
-                              </div>
+                          <>
+                            <div className="bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-800">
+                              <div className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300">PAJAK</div>
+                              <div className="text-xs font-mono font-bold text-slate-900 dark:text-white mt-0.5">{taxDate ? formatIndoDate(taxDate) : '-'}</div>
+                              <span className={`inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] border font-semibold ${taxStatus.color}`}>{taxStatus.label}</span>
                             </div>
-
-                            {/* Bukti File KIR Dishub */}
-                            <div className="pt-2 border-t border-slate-800/70 flex items-center justify-between text-[11px]">
-                              {fleet.kirDocUrl ? (
-                                <div className="flex items-center justify-between w-full">
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                                    <span>Bukti KIR Ada</span>
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => setSelectedKirDocFleet(fleet)}
-                                    className="text-[10px] text-cyan-400 hover:text-cyan-300 font-bold underline flex items-center gap-1 cursor-pointer"
-                                  >
-                                    <Eye className="w-3 h-3" />
-                                    <span>Lihat File KIR</span>
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="flex items-center justify-between w-full text-[10px]">
-                                  <span className="text-slate-500 flex items-center gap-1">
-                                    <AlertCircle className="w-3 h-3 text-amber-400" />
-                                    <span>Belum ada file KIR</span>
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleEditFleetClick(fleet)}
-                                    className="text-blue-400 hover:text-blue-300 underline font-semibold cursor-pointer"
-                                  >
-                                    Unggah File KIR &rarr;
-                                  </button>
-                                </div>
-                              )}
+                            <div className="bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-800">
+                              <div className="text-[11px] font-bold text-amber-700 dark:text-amber-300">STNK</div>
+                              <div className="text-xs font-mono font-bold text-slate-900 dark:text-white mt-0.5">{stnkDate ? formatIndoDate(stnkDate) : '-'}</div>
+                              <span className={`inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] border font-semibold ${stnkStatus.color}`}>{stnkStatus.label}</span>
                             </div>
-                          </div>
-                        );
-                      })()}
-
-                      {/* 2. Pajak Tahunan (PKB) */}
-                      {(() => {
-                        const taxDate = fleet.taxDueDate || '2027-06-25';
-                        const taxStatus = getExpiryStatus(taxDate);
-                        return (
-                          <div className="bg-slate-900/90 p-2.5 rounded-lg border border-slate-800/90 flex items-center justify-between gap-2.5 hover:border-blue-500/30 transition">
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <div className="w-8 h-8 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center shrink-0">
-                                <FileText className="w-4 h-4 text-blue-400" />
-                              </div>
-                              <div className="min-w-0">
-                                <div className="text-xs font-bold text-slate-200 truncate flex items-center gap-1">
-                                  <span>Pajak Tahunan</span>
-                                </div>
-                                <div className="text-[10px] text-slate-400">
-                                  Samsat PKB (1 Tahun)
-                                </div>
-                              </div>
+                            <div className="bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-800">
+                              <div className="text-[11px] font-bold text-teal-700 dark:text-teal-300">KIR</div>
+                              <div className="text-xs font-mono font-bold text-slate-900 dark:text-white mt-0.5">{kirDate ? formatIndoDate(kirDate) : '-'}</div>
+                              <span className={`inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] border font-semibold ${kirStatus.color}`}>{kirStatus.label}</span>
                             </div>
-
-                            <div className="text-right shrink-0">
-                              <div className="text-sm sm:text-base font-black text-white font-mono tracking-tight">
-                                {taxDate}
-                              </div>
-                              <div className="flex items-center justify-end gap-1.5 mt-0.5">
-                                <span className="text-[10px] text-blue-300/90 font-medium">
-                                  {formatIndoDate(taxDate)}
-                                </span>
-                                <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${taxStatus.color}`}>
-                                  {taxStatus.label}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })()}
-
-                      {/* 3. STNK / Plat 5 Tahunan */}
-                      {(() => {
-                        const stnkDate = fleet.stnkExpiryDate || '2029-06-25';
-                        const stnkStatus = getExpiryStatus(stnkDate);
-                        return (
-                          <div className="bg-slate-900/90 p-2.5 rounded-lg border border-slate-800/90 flex items-center justify-between gap-2.5 hover:border-amber-500/30 transition">
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <div className="w-8 h-8 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
-                                <CreditCard className="w-4 h-4 text-amber-400" />
-                              </div>
-                              <div className="min-w-0">
-                                <div className="text-xs font-bold text-slate-200 truncate flex items-center gap-1">
-                                  <span>STNK & Plat Nomor</span>
-                                </div>
-                                <div className="text-[10px] text-slate-400">
-                                  Masa Berlaku Plat (5 Thn)
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="text-right shrink-0">
-                              <div className="text-sm sm:text-base font-black text-white font-mono tracking-tight">
-                                {stnkDate}
-                              </div>
-                              <div className="flex items-center justify-end gap-1.5 mt-0.5">
-                                <span className="text-[10px] text-amber-300/90 font-medium">
-                                  {formatIndoDate(stnkDate)}
-                                </span>
-                                <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${stnkStatus.color}`}>
-                                  {stnkStatus.label}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
+                          </>
                         );
                       })()}
                     </div>
                   </div>
-
-                  {/* Status Komponen Rutin (Oli, Ban, Aki) */}
-                  {(() => {
-                    const routineStatus = logisticsStore.getFleetRoutineComponentsStatus(fleet.id);
-                    return (
-                      <div className="bg-slate-950/50 p-2.5 rounded-lg border border-slate-800/80 space-y-1.5">
-                        <div className="flex items-center justify-between text-[11px]">
-                          <span className="font-bold text-slate-300 flex items-center gap-1.5">
-                            <Wrench className="w-3.5 h-3.5 text-amber-400" />
-                            <span>Komponen Rutin Armada:</span>
-                          </span>
-                          {onNavigateToSpareParts && (
-                            <button
-                              onClick={onNavigateToSpareParts}
-                              className="text-[10px] text-amber-400 hover:underline font-semibold cursor-pointer"
-                            >
-                              Kelola Stok & Servis &rarr;
-                            </button>
-                          )}
-                        </div>
-                        <div className="grid grid-cols-3 gap-1.5 pt-0.5">
-                          <div className="bg-slate-900/80 p-1.5 rounded border border-slate-800 text-center">
-                            <div className="flex items-center justify-center gap-1 text-[10px] text-slate-400 mb-0.5">
-                              <Droplets className="w-3 h-3 text-amber-400" />
-                              <span>Oli</span>
-                            </div>
-                            <span className={`text-[9px] font-bold px-1 py-0.2 rounded border block truncate ${
-                              routineStatus.oil.status === 'urgent'
-                                ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                                : routineStatus.oil.status === 'warning'
-                                ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                                : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                            }`}>
-                              {routineStatus.oil.label}
-                            </span>
-                          </div>
-
-                          <div
-                            onClick={() => setActiveTab('spareparts')}
-                            className="bg-slate-900/80 p-1.5 rounded border border-slate-800 text-center cursor-pointer hover:border-amber-500/50 hover:bg-slate-850 transition group"
-                            title="Klik untuk membuka Manajemen Spare Part & Servis"
-                          >
-                            <div className="flex items-center justify-center gap-1 text-[10px] text-slate-400 group-hover:text-amber-400 mb-0.5">
-                              <Disc className="w-3 h-3 text-emerald-400 group-hover:text-amber-400" />
-                              <span>Ban</span>
-                            </div>
-                            <span className={`text-[9px] font-bold px-1 py-0.2 rounded border block truncate ${
-                              routineStatus.tire.status === 'urgent'
-                                ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                                : routineStatus.tire.status === 'warning'
-                                ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                                : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                            }`}>
-                              {routineStatus.tire.label}
-                            </span>
-                          </div>
-
-                          <div className="bg-slate-900/80 p-1.5 rounded border border-slate-800 text-center">
-                            <div className="flex items-center justify-center gap-1 text-[10px] text-slate-400 mb-0.5">
-                              <BatteryCharging className="w-3 h-3 text-cyan-400" />
-                              <span>Aki</span>
-                            </div>
-                            <span className={`text-[9px] font-bold px-1 py-0.2 rounded border block truncate ${
-                              routineStatus.battery.status === 'urgent'
-                                ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                                : routineStatus.battery.status === 'warning'
-                                ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                                : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                            }`}>
-                              {routineStatus.battery.label}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
                 </div>
 
-                {/* Assigned Crew Bar */}
-                <div className="pt-3 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
-                  <span className="text-[11px] font-medium">Kru Ditugaskan:</span>
-                  <div className="flex items-center gap-1.5">
-                    <UserCheck className="w-3.5 h-3.5 text-blue-400" />
-                    <span className="font-bold text-white">
-                      {assignedCrew ? assignedCrew.name : 'Standby / Pool Banyuwangi'}
+                {/* Assigned Crew / Scheduled PIC Bar */}
+                <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-sm text-slate-600 dark:text-slate-400">
+                  <span className="text-xs font-semibold">Sopir / PIC:</span>
+                  <div className="flex items-center gap-2 flex-wrap justify-end">
+                    <UserCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                    <span className="font-bold text-slate-900 dark:text-white">
+                      {effectiveDriverName || 'Belum Dipasangkan'}
                     </span>
-                    {assignedCrew && (
-                      <span className="text-[10px] font-semibold text-blue-300 bg-blue-500/15 border border-blue-500/30 px-1.5 py-0.2 rounded">
-                        {assignedCrew.role.includes('Helper') ? 'Helper' : 'Driver'}
+                    {liveInfo.helperName && liveInfo.helperName !== effectiveDriverName && (
+                      <span className="text-xs font-semibold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30 px-2 py-0.5 rounded">
+                        Helper: {liveInfo.helperName}
                       </span>
                     )}
                   </div>
                 </div>
 
                 {/* 3D, Edit & Hapus Buttons */}
-                <div className="pt-2.5 border-t border-slate-800/80 flex items-center justify-end gap-2 text-xs">
+                <div className="pt-2.5 border-t border-slate-200 dark:border-slate-800/80 flex items-center justify-end gap-2 text-xs">
                   <button
                     type="button"
                     onClick={() => {
                       setSelected3DFleetId(fleet.id);
                       setViewMode('3d');
                     }}
-                    className="px-3 py-1 rounded bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-medium flex items-center gap-1 transition cursor-pointer"
+                    className="px-3 py-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-500/10 hover:bg-cyan-100 dark:hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-500/30 font-semibold flex items-center gap-1 transition cursor-pointer"
                   >
                     <Box className="w-3.5 h-3.5" />
                     <span>3D</span>

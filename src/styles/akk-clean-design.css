@@ -564,6 +564,33 @@ body.akk-clean-ui .akk-flat-docs :where(input:not([type='checkbox']):not([type='
   box-shadow: none !important;
 }
 
+/* Flat / Modern Clean Design scope for Data Armada Terpadu */
+body.akk-clean-ui #root main .akk-flat-fleets :where(.rounded-2xl, .rounded-xl, .rounded-3xl),
+body.akk-clean-ui .akk-flat-fleets :where(.rounded-2xl, .rounded-xl, .rounded-3xl) {
+  box-shadow: none !important;
+}
+body.akk-clean-ui #root main .akk-flat-fleets :where(
+  button[class*='px-2.5'],
+  button[class*='px-3'],
+  button[class*='px-3.5'],
+  button[class*='px-4'],
+  button[class*='px-5']
+):not([class*='rounded-full']) {
+  border-radius: 10px !important;
+}
+body.akk-clean-ui #root main .akk-flat-fleets :where(button[class*='bg-blue-600']) {
+  background-image: none !important;
+  background-color: #2563eb !important;
+  border-color: #1d4ed8 !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+body.akk-clean-ui #root main .akk-flat-fleets :where(button[class*='bg-blue-600']):not(:disabled):hover {
+  background-color: #1d4ed8 !important;
+  filter: none !important;
+}
+
 body.akk-clean-ui #root main :where(label) { letter-spacing: -.005em; }
 body.akk-clean-ui #root main :where(.truncate) { min-width: 0; }
 body.akk-clean-ui #root header.sticky h1 {

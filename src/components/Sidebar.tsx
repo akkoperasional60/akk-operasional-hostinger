@@ -92,7 +92,7 @@ const SECTIONS: MenuSection[] = [
     { tab: 'driver_reports', label: 'Laporan Driver' },
     { tab: 'fleet_forms', label: 'Form Armada' },
     { tab: 'fleets', label: 'Armada' },
-    { tab: 'crew_history', label: 'Kru & Riwayat' },
+    { tab: 'crew_history', label: 'Riwayat Kru Pengiriman', keywords: 'kru riwayat rotasi' },
     { tab: 'spareparts', label: 'Bengkel & Sparepart' },
     { tab: 'maintenance_costs', label: 'Biaya Servis' },
     { tab: 'fuel_efficiency', label: 'BBM' },

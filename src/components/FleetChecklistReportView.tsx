@@ -219,50 +219,40 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
   };
 
   return (
-    <div className="space-y-5 animate-in fade-in duration-200">
-      
-      {/* Top Banner & Title */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 rounded-2xl shadow-xs">
-        <div className="flex items-center gap-3.5">
-          <div className="w-11 h-11 rounded-xl bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
-            <ShieldCheck className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
-                Laporan Checklist Pemeriksaan Per Armada
-              </h2>
-              <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30 font-bold">
-                Ringkas Per Armada
-              </span>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Klik pada kartu armada di bawah untuk membuka rincian 9 poin pemeriksaan kendaraan.
-            </p>
-          </div>
+    <div className="space-y-4 animate-in fade-in duration-200">
+      {/* Header Halaman */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-5 py-4 rounded-xl">
+        <div>
+          <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
+            Laporan Checklist Pemeriksaan Per Armada
+          </h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+            Klik armada untuk melihat riwayat inspeksi 9 poin &amp; panduan perbaikan.
+          </p>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
           <button
             onClick={() => setShowCatalogModal(true)}
-            className="px-3.5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm active:scale-95"
+            className="h-9 px-3.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition cursor-pointer"
             title="Buka panduan standar interval servis & tindakan darurat"
           >
-            <BookOpen className="w-4 h-4 text-white" />
-            <span>Katalog &amp; Aturan Servis</span>
+            <BookOpen className="w-4 h-4" />
+            <span>Katalog Servis</span>
           </button>
 
           <button
             onClick={loadChecklists}
-            className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition cursor-pointer border border-slate-200 dark:border-slate-700"
+            className="h-9 px-3 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition cursor-pointer"
             title="Muat Ulang Data"
           >
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className="w-4 h-4 text-slate-500" />
+            <span>Segarkan</span>
           </button>
 
           <button
             onClick={handleExportCsv}
-            className="px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm active:scale-95"
+            className="h-9 px-3.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition cursor-pointer"
             title="Unduh laporan checklist ke CSV / Excel"
           >
             <FileSpreadsheet className="w-4 h-4" />
@@ -271,57 +261,54 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
         </div>
       </div>
 
-      {/* KPI Stats Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-600 dark:text-slate-400">Total Inspeksi Selesai</span>
-            <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 flex items-center justify-center text-blue-600 dark:text-blue-400">
-              <FileText className="w-4 h-4" />
-            </div>
+      {/* KPI Stats Cards (Flat & Minimal) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+          <span className="text-sm font-semibold text-slate-600 dark:text-slate-300 block">Total Inspeksi</span>
+          <div className="flex items-baseline justify-between gap-2 mt-1.5">
+            <span className="text-3xl font-bold text-slate-900 dark:text-white font-mono tabular-nums leading-none">
+              {totalCount}
+            </span>
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+              {uniqueFleets.length} Armada
+            </span>
           </div>
-          <div className="text-2xl font-black text-slate-900 dark:text-white mt-2 font-mono">{totalCount}</div>
-          <div className="text-[11px] text-slate-500 mt-1">Pemeriksaan pre/post trip ({uniqueFleets.length} Armada)</div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300">Siap Jalan (Aman)</span>
-            <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
-              <CheckCircle2 className="w-4 h-4" />
-            </div>
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+          <span className="text-sm font-semibold text-emerald-700 dark:text-emerald-400 block">Siap Jalan (Aman)</span>
+          <div className="flex items-baseline justify-between gap-2 mt-1.5">
+            <span className="text-3xl font-bold text-emerald-600 dark:text-emerald-400 font-mono tabular-nums leading-none">
+              {passedCount}
+            </span>
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">9 poin OK</span>
           </div>
-          <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-2 font-mono">{passedCount}</div>
-          <div className="text-[11px] text-slate-500 mt-1">Seluruh 9 poin memenuhi syarat</div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-amber-700 dark:text-amber-300">Perlu Servis / Waspada</span>
-            <div className="w-8 h-8 rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 flex items-center justify-center text-amber-600 dark:text-amber-400">
-              <AlertTriangle className="w-4 h-4" />
-            </div>
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+          <span className="text-sm font-semibold text-amber-700 dark:text-amber-400 block">Perlu Servis / Waspada</span>
+          <div className="flex items-baseline justify-between gap-2 mt-1.5">
+            <span className="text-3xl font-bold text-amber-600 dark:text-amber-400 font-mono tabular-nums leading-none">
+              {warningCount}
+            </span>
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">1-2 kendala</span>
           </div>
-          <div className="text-2xl font-black text-amber-600 dark:text-amber-400 mt-2 font-mono">{warningCount}</div>
-          <div className="text-[11px] text-slate-500 mt-1">1-2 kendala ringan terdeteksi</div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-rose-700 dark:text-rose-300">Kritis (Dilarang Jalan)</span>
-            <div className="w-8 h-8 rounded-lg bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 flex items-center justify-center text-rose-600 dark:text-rose-400">
-              <AlertOctagon className="w-4 h-4" />
-            </div>
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+          <span className="text-sm font-semibold text-rose-700 dark:text-rose-400 block">Kritis (Dilarang Jalan)</span>
+          <div className="flex items-baseline justify-between gap-2 mt-1.5">
+            <span className="text-3xl font-bold text-rose-600 dark:text-rose-400 font-mono tabular-nums leading-none">
+              {failedCount}
+            </span>
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Vital gagal</span>
           </div>
-          <div className="text-2xl font-black text-rose-600 dark:text-rose-400 mt-2 font-mono">{failedCount}</div>
-          <div className="text-[11px] text-slate-500 mt-1">&gt;2 kendala / komponen vital gagal</div>
         </div>
       </div>
 
-      {/* Filter and Simple Fleet Selector Bar */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs space-y-3">
+      {/* Filter & Fleet Selector Bar */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 space-y-2.5">
         <div className="flex flex-col sm:flex-row gap-2.5">
-          {/* Search Input */}
           <div className="flex-1 relative">
             <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
@@ -329,61 +316,59 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Cari nomor polisi, inisial armada, nama driver, atau catatan..."
-              className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+              className="w-full h-10 pl-10 pr-8 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
             />
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery('')}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-4 h-4" />
               </button>
             )}
           </div>
 
-          {/* Date Filter */}
-          <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
-            <Calendar className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+          <div className="flex items-center gap-1.5 h-10 bg-slate-50 dark:bg-slate-950 px-3 rounded-lg border border-slate-200 dark:border-slate-800 text-sm shrink-0">
+            <Calendar className="w-4 h-4 text-slate-500 shrink-0" />
             <input
               type="date"
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
-              className="bg-transparent text-slate-900 dark:text-white focus:outline-none font-mono text-xs cursor-pointer"
+              className="bg-transparent text-slate-900 dark:text-white focus:outline-none font-mono text-sm cursor-pointer"
             />
             {selectedDate && (
               <button
                 onClick={() => setSelectedDate('')}
-                className="text-[10px] text-rose-600 dark:text-rose-400 hover:underline font-bold ml-1 cursor-pointer"
+                className="text-xs text-rose-600 dark:text-rose-400 hover:underline font-semibold ml-1 cursor-pointer"
               >
                 Reset
               </button>
             )}
           </div>
 
-          {/* Status Filter */}
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as any)}
-            className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 text-xs font-medium rounded-xl px-3 py-2 focus:outline-none focus:border-blue-500 cursor-pointer"
+            className="h-10 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 text-sm font-semibold rounded-lg px-3 focus:outline-none focus:border-blue-500 cursor-pointer shrink-0"
           >
             <option value="all">Semua Status</option>
-            <option value="passed">✓ Siap Jalan (Aman)</option>
-            <option value="warning">⚠️ Perlu Servis</option>
-            <option value="failed">⛔ Kritis</option>
+            <option value="passed">Siap Jalan (Aman)</option>
+            <option value="warning">Perlu Servis</option>
+            <option value="failed">Kritis</option>
           </select>
         </div>
 
-        {/* Pilihan Armada yang Simpel */}
+        {/* Pilihan Armada */}
         <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center gap-1.5 flex-wrap">
-          <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 mr-1">
+          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 mr-1">
             Armada:
           </span>
           <button
             type="button"
             onClick={() => setFleetFilter('all')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+            className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition cursor-pointer ${
               fleetFilter === 'all'
-                ? 'bg-blue-600 text-white shadow-xs'
+                ? 'bg-blue-600 text-white'
                 : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
             }`}
           >
@@ -397,15 +382,15 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
                 key={f.plate}
                 type="button"
                 onClick={() => setFleetFilter(isSelected ? 'all' : f.plate)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition cursor-pointer flex items-center gap-1.5 ${
                   isSelected
-                    ? 'bg-blue-600 text-white shadow-xs'
+                    ? 'bg-blue-600 text-white'
                     : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
                 }`}
               >
                 <span className="font-mono font-bold">{f.plate}</span>
                 {f.initialCode && (
-                  <span className={`text-[10px] font-mono ${isSelected ? 'text-blue-100' : 'text-slate-500 dark:text-slate-400'}`}>
+                  <span className={`text-xs font-mono ${isSelected ? 'text-blue-100' : 'text-slate-500 dark:text-slate-400'}`}>
                     ({f.initialCode})
                   </span>
                 )}
@@ -415,15 +400,15 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
         </div>
       </div>
 
-      {/* Checklist List Section Grouped Per Nama Armada (Otomatis Ringkas / Collapsed by Default) */}
+      {/* Checklist List Section Grouped Per Armada */}
       <div className="space-y-3">
         {groupedChecklistsByFleet.length === 0 ? (
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-10 text-center space-y-2">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-10 text-center space-y-2">
             <div className="w-11 h-11 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 mx-auto">
               <ShieldCheck className="w-5 h-5" />
             </div>
-            <div className="text-sm font-bold text-slate-900 dark:text-white">Tidak Ada Data Checklist Ditemukan</div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto">
+            <div className="text-base font-bold text-slate-900 dark:text-white">Tidak Ada Data Checklist Ditemukan</div>
+            <p className="text-sm text-slate-500 dark:text-slate-400 max-w-sm mx-auto">
               {searchQuery || statusFilter !== 'all' || selectedDate || fleetFilter !== 'all'
                 ? 'Tidak ada laporan checklist yang cocok dengan kriteria filter saat ini.'
                 : 'Belum ada data checklist pemeriksaan yang diunggah oleh kru supir.'}
@@ -436,9 +421,9 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
             return (
               <div
                 key={fleetGroup.plateNumber}
-                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-400 dark:hover:border-blue-500/50 rounded-2xl overflow-hidden shadow-xs transition"
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-400 dark:hover:border-blue-500/50 rounded-xl overflow-hidden transition"
               >
-                {/* Header Container Ringkas Per Nama Armada (Warna Bersih & Kontras Tinggi) */}
+                {/* Header Armada */}
                 <div
                   onClick={() =>
                     setExpandedFleetGroups(prev => ({
@@ -446,53 +431,56 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
                       [fleetGroup.plateNumber]: !prev[fleetGroup.plateNumber]
                     }))
                   }
-                  className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer select-none hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition"
+                  className="px-4 py-3.5 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer select-none hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition"
                 >
-                  <div className="flex items-center gap-3.5">
-                    <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
                       <Truck className="w-5 h-5" />
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white font-mono tracking-tight">
+                        <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white font-mono tracking-tight tabular-nums">
                           {fleetGroup.plateNumber}
                         </h3>
                         {fleetGroup.initialCode && (
-                          <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-500/30">
+                          <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
                             {fleetGroup.initialCode}
                           </span>
                         )}
-                        <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 rounded-md border border-slate-200 dark:border-slate-700">
-                          {fleetGroup.vehicleType}
+                        <span className="text-sm font-medium text-slate-500 dark:text-slate-400">
+                          · {fleetGroup.vehicleType}
                         </span>
                       </div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-2 flex-wrap">
-                        <span>
-                          Riwayat: <strong className="text-slate-800 dark:text-slate-200">{fleetGroup.items.length} Laporan</strong>
+                      <div className="text-sm text-slate-600 dark:text-slate-300 mt-0.5 flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-slate-800 dark:text-slate-200 tabular-nums">
+                          {fleetGroup.items.length} Laporan
                         </span>
-                        <span>•</span>
+                        <span className="text-slate-300 dark:text-slate-600">·</span>
                         <span>
-                          Driver Terakhir: <strong className="text-blue-600 dark:text-blue-400">{fleetGroup.latestCheck.driverName}</strong> ({fleetGroup.latestCheck.date} {fleetGroup.latestCheck.time} WIB)
+                          Driver Terakhir: <strong className="font-bold text-slate-900 dark:text-white">{fleetGroup.latestCheck.driverName}</strong>{' '}
+                          <span className="font-mono tabular-nums text-slate-500 dark:text-slate-400">
+                            ({fleetGroup.latestCheck.date} {fleetGroup.latestCheck.time} WIB)
+                          </span>
                         </span>
                       </div>
                     </div>
                   </div>
 
-                  {/* Ringkasan Status Per Armada & Tombol Expand/Collapse */}
-                  <div className="flex items-center gap-2 self-end sm:self-center">
+                  {/* Ringkasan Status Per Armada */}
+                  <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
                     {fleetGroup.passedCount > 0 && (
-                      <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30">
-                        ✓ {fleetGroup.passedCount} Aman
+                      <span className="px-2.5 py-1 rounded-lg text-xs sm:text-sm font-bold bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30 tabular-nums">
+                        {fleetGroup.passedCount} Aman
                       </span>
                     )}
                     {fleetGroup.warningCount > 0 && (
-                      <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-500/30">
-                        ⚠️ {fleetGroup.warningCount} Waspada
+                      <span className="px-2.5 py-1 rounded-lg text-xs sm:text-sm font-bold bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-500/30 tabular-nums">
+                        {fleetGroup.warningCount} Waspada
                       </span>
                     )}
                     {fleetGroup.failedCount > 0 && (
-                      <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-500/30">
-                        ⛔ {fleetGroup.failedCount} Kritis
+                      <span className="px-2.5 py-1 rounded-lg text-xs sm:text-sm font-bold bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-500/30 tabular-nums">
+                        {fleetGroup.failedCount} Kritis
                       </span>
                     )}
                     <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
@@ -501,9 +489,9 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
                   </div>
                 </div>
 
-                {/* Daftar Checklist Di Dalam Armada Ini (Muncul Saat Diklik) */}
+                {/* Daftar Checklist Di Dalam Armada Ini */}
                 {isExpanded && (
-                  <div className="p-4 bg-slate-50/60 dark:bg-slate-950/50 border-t border-slate-200 dark:border-slate-800 space-y-4 divide-y divide-slate-200 dark:divide-slate-800">
+                  <div className="p-4 bg-slate-50/70 dark:bg-slate-950/50 border-t border-slate-200 dark:border-slate-800 divide-y divide-slate-200 dark:divide-slate-800 space-y-4">
                     {fleetGroup.items.map((checklist, idx) => {
                       const issueItems = checklist.items.filter(i => i.status === 'issue');
 
@@ -512,69 +500,65 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
                           key={checklist.id}
                           className={`${idx > 0 ? 'pt-4' : ''} space-y-3`}
                         >
-                          {/* Header Row */}
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                             <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0 font-mono text-xs font-black">
+                              <div className="w-8 h-8 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0 font-mono text-xs font-bold">
                                 #{idx + 1}
                               </div>
                               <div>
                                 <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="font-mono font-bold text-slate-900 dark:text-white text-xs">
-                                    ID: {checklist.id}
+                                  <span className="font-mono font-bold text-slate-900 dark:text-white text-sm">
+                                    {checklist.id}
                                   </span>
-                                  <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold">
-                                    {checklist.inspectionType === 'pre_trip' ? 'Pre-Trip (Sebelum Berangkat)' : 'Post-Trip (Setelah Pulang)'}
+                                  <span className="text-xs px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-semibold">
+                                    {checklist.inspectionType === 'pre_trip' ? 'Pre-Trip' : 'Post-Trip'}
                                   </span>
                                 </div>
-                                <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
-                                  <span>Driver: <strong className="text-slate-800 dark:text-slate-200">{checklist.driverName}</strong></span>
-                                  <span>•</span>
-                                  <span className="font-mono">{checklist.date} {checklist.time} WIB</span>
-                                  <span>•</span>
-                                  <span className="font-mono">Odometer: <strong className="text-slate-800 dark:text-slate-200">{checklist.odometerKm.toLocaleString()} KM</strong></span>
+                                <div className="text-sm text-slate-600 dark:text-slate-300 mt-0.5 flex items-center gap-2 flex-wrap">
+                                  <span>Driver: <strong className="text-slate-900 dark:text-white">{checklist.driverName}</strong></span>
+                                  <span className="text-slate-300 dark:text-slate-600">·</span>
+                                  <span className="font-mono tabular-nums">{checklist.date} {checklist.time} WIB</span>
+                                  <span className="text-slate-300 dark:text-slate-600">·</span>
+                                  <span className="font-mono tabular-nums">Odometer: <strong className="text-slate-900 dark:text-white">{checklist.odometerKm.toLocaleString()} KM</strong></span>
                                 </div>
                               </div>
                             </div>
 
-                            {/* Status Badge & Actions */}
                             <div className="flex items-center gap-2">
                               <button
                                 onClick={() => setSelectedChecklistModal(checklist)}
-                                className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                                className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition cursor-pointer"
                                 title="Lihat seluruh poin pemeriksaan"
                               >
-                                <Eye className="w-3.5 h-3.5" />
+                                <Eye className="w-4 h-4" />
                                 <span>Rincian ({checklist.passedCount}/{checklist.items.length} OK)</span>
                               </button>
                               {isSuperAdmin && (
                                 <button
                                   type="button"
                                   onClick={() => setDeleteConfirmChecklist(checklist)}
-                                  className="p-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-600 text-rose-500 dark:text-rose-400 hover:text-white border border-rose-500/35 hover:border-rose-500 transition active:scale-95 cursor-pointer"
+                                  className="p-2 rounded-lg bg-rose-50 dark:bg-rose-500/15 hover:bg-rose-600 text-rose-600 dark:text-rose-400 hover:text-white border border-rose-200 dark:border-rose-500/35 hover:border-rose-600 transition cursor-pointer"
                                   title="Hapus Laporan Checklist (Khusus Super Admin)"
                                 >
-                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <Trash2 className="w-4 h-4" />
                                 </button>
                               )}
                             </div>
                           </div>
 
-                          {/* General Driver Notes if any */}
                           {checklist.notes && (
-                            <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
-                              <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-0.5">Catatan Supir:</span>
-                              <p className="text-slate-600 dark:text-slate-400 leading-relaxed">{checklist.notes}</p>
+                            <div className="bg-white dark:bg-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-800 text-sm">
+                              <span className="font-bold text-slate-800 dark:text-slate-200 mr-1.5">Catatan Supir:</span>
+                              <span className="text-slate-600 dark:text-slate-400">{checklist.notes}</span>
                             </div>
                           )}
 
-                          {/* KENDALA & INSTRUKSI KAPAN HARUS DIGANTI / DISERVIS */}
                           {issueItems.length > 0 ? (
-                            <div className="space-y-2.5">
-                              <div className="flex items-center justify-between text-xs font-bold text-rose-700 dark:text-rose-300">
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between text-xs sm:text-sm font-bold text-rose-700 dark:text-rose-300">
                                 <div className="flex items-center gap-1.5">
-                                  <Wrench className="w-3.5 h-3.5" />
-                                  <span>Rekomendasi Servis Berdasarkan Kendala ({issueItems.length}):</span>
+                                  <Wrench className="w-4 h-4" />
+                                  <span>Rekomendasi Servis ({issueItems.length} Kendala):</span>
                                 </div>
                                 <button
                                   type="button"
@@ -584,7 +568,7 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
                                       [checklist.id]: !prev[checklist.id]
                                     }));
                                   }}
-                                  className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[10px] font-bold hover:bg-slate-100 transition cursor-pointer"
+                                  className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:bg-slate-100 transition cursor-pointer"
                                 >
                                   {minimizedDirectives[checklist.id] ? 'Tampilkan Arahan' : 'Sembunyikan'}
                                 </button>
@@ -598,44 +582,43 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
                                     return (
                                       <div
                                         key={item.id}
-                                        className="bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-500/30 rounded-xl p-3 space-y-2"
+                                        className="bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-500/30 rounded-xl p-3.5 space-y-2"
                                       >
                                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                                          <div className="flex items-center gap-2">
-                                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-50 dark:bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-500/40">
+                                          <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="px-2 py-0.5 rounded-md text-xs font-bold bg-rose-50 dark:bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-500/40">
                                               {item.categoryLabel}
                                             </span>
-                                            <span className="text-xs font-bold text-slate-900 dark:text-white">
+                                            <span className="text-sm font-bold text-slate-900 dark:text-white">
                                               {item.name}
                                             </span>
                                           </div>
-                                          <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300">
+                                          <span className="text-xs px-2.5 py-0.5 rounded-md font-bold bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300 self-start sm:self-auto">
                                             Perlu Perbaikan Segera
                                           </span>
                                         </div>
 
                                         {item.note && (
-                                          <div className="text-xs text-rose-800 dark:text-rose-200 bg-rose-50 dark:bg-rose-500/10 p-2 rounded-lg border border-rose-200 dark:border-rose-500/20">
-                                            <strong>Keluhan Supir:</strong> {item.note}
+                                          <div className="text-sm text-rose-800 dark:text-rose-200 bg-rose-50/70 dark:bg-rose-500/10 p-2.5 rounded-lg border border-rose-200 dark:border-rose-500/20">
+                                            <strong>Keluhan:</strong> {item.note}
                                           </div>
                                         )}
 
                                         {rule && (
-                                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
-                                            <div className="bg-slate-50 dark:bg-slate-950 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800">
-                                              <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 block mb-0.5">
+                                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs sm:text-sm pt-1">
+                                            <div>
+                                              <span className="text-xs font-bold text-amber-700 dark:text-amber-400 block">
                                                 Interval Servis Rutin:
                                               </span>
-                                              <p className="text-slate-700 dark:text-slate-300 leading-tight">
+                                              <p className="text-slate-700 dark:text-slate-300 mt-0.5">
                                                 {rule.standardInterval}
                                               </p>
                                             </div>
-
-                                            <div className="bg-rose-50/50 dark:bg-slate-950 p-2.5 rounded-lg border border-rose-200 dark:border-rose-500/30">
-                                              <span className="text-[10px] font-bold text-rose-700 dark:text-rose-400 block mb-0.5">
+                                            <div>
+                                              <span className="text-xs font-bold text-rose-700 dark:text-rose-400 block">
                                                 Tindakan Segera:
                                               </span>
-                                              <p className="text-rose-800 dark:text-rose-200 leading-tight">
+                                              <p className="text-rose-800 dark:text-rose-200 mt-0.5">
                                                 {rule.immediateAction}
                                               </p>
                                             </div>
@@ -648,7 +631,7 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
                               )}
                             </div>
                           ) : (
-                            <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-500/20 rounded-xl p-2.5 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+                            <div className="bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-500/20 rounded-lg px-3 py-2 text-sm text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
                               <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                               <span>Seluruh 9 komponen pemeriksaan dalam kondisi prima dan siap jalan.</span>
                             </div>
@@ -666,72 +649,69 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
 
       {/* MODAL RINCIAN LENGKAP 9 POIN CHECKLIST */}
       {selectedChecklistModal && (
-        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full overflow-hidden shadow-2xl flex flex-col max-h-[92vh]">
-            
-            {/* Modal Header */}
-            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-3xl w-full overflow-hidden flex flex-col max-h-[92vh]">
+            <div className="px-5 py-4 bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-cyan-400" />
-                  <span>Rincian Lengkap Inspeksi: {selectedChecklistModal.plateNumber}</span>
+                <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                  <span>Rincian Inspeksi: <span className="font-mono">{selectedChecklistModal.plateNumber}</span></span>
                 </h3>
-                <p className="text-[10px] text-slate-400 mt-0.5">
-                  Driver: {selectedChecklistModal.driverName} · Tanggal: {selectedChecklistModal.date} {selectedChecklistModal.time} WIB · Odometer: {selectedChecklistModal.odometerKm.toLocaleString()} KM
+                <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                  Driver: {selectedChecklistModal.driverName} · {selectedChecklistModal.date} {selectedChecklistModal.time} WIB · Odometer: {selectedChecklistModal.odometerKm.toLocaleString()} KM
                 </p>
               </div>
               <button
                 onClick={() => setSelectedChecklistModal(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                className="p-2 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Modal Content */}
-            <div className="p-4 flex-1 overflow-y-auto space-y-4">
-              
-              <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                <div className="bg-slate-950 p-2 rounded-xl border border-slate-800">
-                  <span className="text-[10px] text-slate-400 block">Status Keseluruhan</span>
-                  <span className="font-bold text-white capitalize">{selectedChecklistModal.overallStatus}</span>
+            <div className="p-5 flex-1 overflow-y-auto space-y-4">
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                  <span className="text-xs font-medium text-slate-500 dark:text-slate-400 block">Status</span>
+                  <span className="text-base font-bold text-slate-900 dark:text-white capitalize">{selectedChecklistModal.overallStatus}</span>
                 </div>
-                <div className="bg-slate-950 p-2 rounded-xl border border-slate-800">
-                  <span className="text-[10px] text-slate-400 block">Poin Lolos (OK)</span>
-                  <span className="font-bold text-emerald-400">{selectedChecklistModal.passedCount}</span>
+                <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                  <span className="text-xs font-medium text-slate-500 dark:text-slate-400 block">Lolos (OK)</span>
+                  <span className="text-base font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400">{selectedChecklistModal.passedCount}</span>
                 </div>
-                <div className="bg-slate-950 p-2 rounded-xl border border-slate-800">
-                  <span className="text-[10px] text-slate-400 block">Poin Bermasalah</span>
-                  <span className="font-bold text-rose-400">{selectedChecklistModal.issueCount}</span>
+                <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                  <span className="text-xs font-medium text-slate-500 dark:text-slate-400 block">Bermasalah</span>
+                  <span className="text-base font-bold font-mono tabular-nums text-rose-600 dark:text-rose-400">{selectedChecklistModal.issueCount}</span>
                 </div>
               </div>
 
-              {/* 9 Points Checklist Table */}
               <div className="space-y-2">
-                <h4 className="text-xs font-bold text-slate-300">Daftar {selectedChecklistModal.items.length} Poin Pemeriksaan Fisik:</h4>
-                <div className="divide-y divide-slate-800/80 border border-slate-800 rounded-xl overflow-hidden bg-slate-950">
+                <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                  Daftar {selectedChecklistModal.items.length} Poin Pemeriksaan Fisik:
+                </h4>
+                <div className="divide-y divide-slate-200 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden bg-white dark:bg-slate-950">
                   {selectedChecklistModal.items.map((item, idx) => (
-                    <div key={item.id} className="p-3 text-xs flex items-start justify-between gap-3 hover:bg-slate-900/60 transition">
-                      <div className="space-y-0.5 min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-[10px] text-slate-500">{idx + 1}.</span>
-                          <span className="font-bold text-white">{item.name}</span>
-                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 font-mono">
+                    <div key={item.id} className="p-3.5 flex items-start justify-between gap-3 hover:bg-slate-50 dark:hover:bg-slate-900/60 transition">
+                      <div className="space-y-1 min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-xs text-slate-400">{idx + 1}.</span>
+                          <span className="text-sm font-bold text-slate-900 dark:text-white">{item.name}</span>
+                          <span className="text-xs px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium">
                             {item.categoryLabel}
                           </span>
                         </div>
-                        <p className="text-[11px] text-slate-400 pl-4">{item.description}</p>
+                        <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 pl-4">{item.description}</p>
                         {item.photoUrl && (
                           <div className="pl-4 pt-1.5">
                             <img
                               src={item.photoUrl}
                               alt={item.name}
-                              className="w-full max-w-xs max-h-36 object-cover rounded-lg border border-cyan-500/40"
+                              className="w-full max-w-xs max-h-36 object-cover rounded-lg border border-slate-200 dark:border-slate-700"
                             />
                           </div>
                         )}
                         {item.note && (
-                          <div className="text-[11px] text-rose-300 pl-4 mt-1">
+                          <div className="text-xs sm:text-sm text-rose-700 dark:text-rose-300 pl-4 mt-1">
                             <strong>Catatan Kendala:</strong> {item.note}
                           </div>
                         )}
@@ -739,13 +719,13 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
 
                       <div className="shrink-0">
                         {item.status === 'ok' ? (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                            <CheckCircle2 className="w-3 h-3" />
+                          <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
                             <span>OK</span>
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-400 border border-rose-500/30 animate-pulse">
-                            <AlertTriangle className="w-3 h-3" />
+                          <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-lg bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-500/30">
+                            <AlertTriangle className="w-3.5 h-3.5" />
                             <span>KENDALA</span>
                           </span>
                         )}
@@ -755,199 +735,189 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
                 </div>
               </div>
 
-              {/* Verifikasi Checker & Signature */}
-              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs flex items-center justify-between">
+              <div className="bg-slate-50 dark:bg-slate-950 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 text-sm flex items-center justify-between gap-4">
                 <div>
-                  <span className="text-[10px] text-slate-400 block">Tanda Tangan Supir:</span>
-                  <span className="font-bold text-white">{selectedChecklistModal.driverSignature || selectedChecklistModal.driverName}</span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400 block">Tanda Tangan Supir:</span>
+                  <span className="font-bold text-slate-900 dark:text-white">{selectedChecklistModal.driverSignature || selectedChecklistModal.driverName}</span>
                 </div>
                 <div className="text-right">
-                  <span className="text-[10px] text-slate-400 block">Petugas Checker DC:</span>
-                  <span className="font-bold text-cyan-400">{selectedChecklistModal.checkerName || 'Petugas Checker DC'} (Diverifikasi)</span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400 block">Petugas Checker DC:</span>
+                  <span className="font-bold text-blue-600 dark:text-blue-400">{selectedChecklistModal.checkerName || 'Petugas Checker DC'} (Diverifikasi)</span>
                 </div>
               </div>
-
             </div>
 
-            {/* Modal Footer */}
-            <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-between">
-              <span className="text-[10px] text-slate-500">PT Anugrah Kemasan Kreatif · Banyuwangi DC Logistik</span>
+            <div className="px-5 py-3.5 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <span className="text-xs text-slate-500">PT Anugrah Kemasan Kreatif · Banyuwangi DC Logistik</span>
               <button
                 onClick={() => setSelectedChecklistModal(null)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition cursor-pointer"
+                className="px-4 py-2 rounded-lg bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-white font-semibold text-xs sm:text-sm transition cursor-pointer"
               >
                 Tutup
               </button>
             </div>
-
           </div>
         </div>
       )}
 
       {/* MODAL KATALOG STANDAR SERVIS ARMADA AKK */}
       {showCatalogModal && (
-        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-4xl w-full overflow-hidden shadow-2xl flex flex-col max-h-[92vh]">
-            
-            {/* Header */}
-            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-blue-500/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-4xl w-full overflow-hidden flex flex-col max-h-[92vh]">
+            <div className="px-5 py-4 bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-blue-50 dark:bg-blue-500/20 border border-blue-200 dark:border-blue-500/30 flex items-center justify-center text-blue-600 dark:text-blue-400">
                   <BookOpen className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white">
-                    Pedoman Standar Servis &amp; Penggantian Komponen Truk AKK
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Pedoman Standar Servis &amp; Penggantian Komponen
                   </h3>
-                  <p className="text-[10px] text-slate-400">
-                    Katalog acuan interval penggantian, kondisi kendala, dan tindakan darurat bagi SPV logistik, mekanik, &amp; supir
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Acuan interval servis dan tindakan perbaikan armada AKK.
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setShowCatalogModal(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                className="p-2 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Category Filter Pills */}
-            <div className="px-4 py-2 bg-slate-950/70 border-b border-slate-800 flex items-center gap-1.5 overflow-x-auto text-xs">
+            <div className="px-5 py-2.5 bg-slate-50 dark:bg-slate-950/70 border-b border-slate-200 dark:border-slate-800 flex items-center gap-2 overflow-x-auto text-xs sm:text-sm">
               <button
                 onClick={() => setCatalogCategory('all')}
-                className={`px-3 py-1 rounded-lg font-bold transition whitespace-nowrap cursor-pointer ${catalogCategory === 'all' ? 'bg-cyan-500 text-slate-950' : 'bg-slate-900 text-slate-400 hover:text-white'}`}
+                className={`px-3 py-1.5 rounded-lg font-bold transition whitespace-nowrap cursor-pointer ${catalogCategory === 'all' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300'}`}
               >
-                Semua Komponen ({MAINTENANCE_COMPONENT_RULES.length})
+                Semua ({MAINTENANCE_COMPONENT_RULES.length})
               </button>
               <button
                 onClick={() => setCatalogCategory('mesin_fluida')}
-                className={`px-3 py-1 rounded-lg font-bold transition whitespace-nowrap cursor-pointer ${catalogCategory === 'mesin_fluida' ? 'bg-cyan-500 text-slate-950' : 'bg-slate-900 text-slate-400 hover:text-white'}`}
+                className={`px-3 py-1.5 rounded-lg font-bold transition whitespace-nowrap cursor-pointer ${catalogCategory === 'mesin_fluida' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300'}`}
               >
                 Oli &amp; Radiator
               </button>
               <button
                 onClick={() => setCatalogCategory('lampu_listrik')}
-                className={`px-3 py-1 rounded-lg font-bold transition whitespace-nowrap cursor-pointer ${catalogCategory === 'lampu_listrik' ? 'bg-cyan-500 text-slate-950' : 'bg-slate-900 text-slate-400 hover:text-white'}`}
+                className={`px-3 py-1.5 rounded-lg font-bold transition whitespace-nowrap cursor-pointer ${catalogCategory === 'lampu_listrik' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300'}`}
               >
                 Air Accu
               </button>
               <button
                 onClick={() => setCatalogCategory('rem_roda')}
-                className={`px-3 py-1 rounded-lg font-bold transition whitespace-nowrap cursor-pointer ${catalogCategory === 'rem_roda' ? 'bg-cyan-500 text-slate-950' : 'bg-slate-900 text-slate-400 hover:text-white'}`}
+                className={`px-3 py-1.5 rounded-lg font-bold transition whitespace-nowrap cursor-pointer ${catalogCategory === 'rem_roda' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300'}`}
               >
                 Rem &amp; Ban
               </button>
               <button
                 onClick={() => setCatalogCategory('fisik_dokumen')}
-                className={`px-3 py-1 rounded-lg font-bold transition whitespace-nowrap cursor-pointer ${catalogCategory === 'fisik_dokumen' ? 'bg-cyan-500 text-slate-950' : 'bg-slate-900 text-slate-400 hover:text-white'}`}
+                className={`px-3 py-1.5 rounded-lg font-bold transition whitespace-nowrap cursor-pointer ${catalogCategory === 'fisik_dokumen' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300'}`}
               >
                 Kabin &amp; Inventaris
               </button>
             </div>
 
-            {/* Content List */}
-            <div className="p-4 flex-1 overflow-y-auto space-y-3">
+            <div className="p-5 flex-1 overflow-y-auto space-y-3">
               {MAINTENANCE_COMPONENT_RULES.filter(r => catalogCategory === 'all' || r.category === catalogCategory).map(rule => (
-                <div key={rule.id} className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-white text-xs">{rule.name}</span>
-                      <span className="text-[9px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">
+                <div key={rule.id} className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-slate-900 dark:text-white text-sm">{rule.name}</span>
+                      <span className="text-xs px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium">
                         {rule.categoryLabel}
                       </span>
                     </div>
-                    <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold border ${rule.urgencyLevel === 'kritis' ? 'bg-rose-500/15 text-rose-400 border-rose-500/30' : 'bg-amber-500/15 text-amber-300 border-amber-500/30'}`}>
+                    <span className={`text-xs px-2.5 py-0.5 rounded-md font-bold border ${rule.urgencyLevel === 'kritis' ? 'bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-400 border-rose-200 dark:border-rose-500/30' : 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/30'}`}>
                       {rule.urgencyLevel === 'kritis' ? 'Urgensi Kritis' : 'Urgensi Waspada'}
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-[11px]">
-                    <div className="bg-slate-900 p-2.5 rounded-lg border border-slate-800/80">
-                      <span className="text-[10px] font-bold text-cyan-400 block">Jadwal Servis Rutin</span>
-                      <p className="text-slate-300 mt-0.5">{rule.standardInterval}</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs sm:text-sm pt-1 border-t border-slate-100 dark:border-slate-800">
+                    <div>
+                      <span className="text-xs font-bold text-blue-600 dark:text-blue-400 block">Jadwal Servis Rutin</span>
+                      <p className="text-slate-700 dark:text-slate-300 mt-0.5">{rule.standardInterval}</p>
                     </div>
 
-                    <div className="bg-slate-900 p-2.5 rounded-lg border border-slate-800/80">
-                      <span className="text-[10px] font-bold text-amber-400 block">Kondisi Kendala Checklist</span>
-                      <p className="text-slate-300 mt-0.5">{rule.issueTriggerCondition}</p>
+                    <div>
+                      <span className="text-xs font-bold text-amber-700 dark:text-amber-400 block">Kondisi Kendala</span>
+                      <p className="text-slate-700 dark:text-slate-300 mt-0.5">{rule.issueTriggerCondition}</p>
                     </div>
 
-                    <div className="bg-slate-900 p-2.5 rounded-lg border border-rose-500/30">
-                      <span className="text-[10px] font-bold text-rose-400 block">Tindakan Segera Perbaikan</span>
-                      <p className="text-rose-200 mt-0.5">{rule.immediateAction}</p>
+                    <div>
+                      <span className="text-xs font-bold text-rose-700 dark:text-rose-400 block">Tindakan Segera</span>
+                      <p className="text-rose-700 dark:text-rose-200 mt-0.5">{rule.immediateAction}</p>
                     </div>
                   </div>
                 </div>
               ))}
             </div>
 
-            {/* Footer */}
-            <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-end">
+            <div className="px-5 py-3.5 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end">
               <button
                 onClick={() => setShowCatalogModal(false)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition cursor-pointer"
+                className="px-4 py-2 rounded-lg bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-white font-semibold text-xs sm:text-sm transition cursor-pointer"
               >
                 Tutup Katalog
               </button>
             </div>
-
           </div>
         </div>
       )}
 
       {/* Modal Konfirmasi Hapus Laporan Checklist (Khusus Super Admin) */}
       {deleteConfirmChecklist && isSuperAdmin && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-slate-900 border border-rose-500/40 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl">
-            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-rose-500/40 rounded-2xl max-w-md w-full overflow-hidden">
+            <div className="px-5 py-4 bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
+                <div className="w-9 h-9 rounded-lg bg-rose-50 dark:bg-rose-500/20 border border-rose-200 dark:border-rose-500/30 flex items-center justify-center text-rose-600 dark:text-rose-400 shrink-0">
                   <Trash2 className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-black text-white">
-                    Hapus Laporan Checklist Armada
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Hapus Laporan Checklist
                   </h3>
-                  <p className="text-[10px] font-bold text-rose-400 uppercase tracking-wider">
-                    Otorisasi Khusus Super Admin
+                  <p className="text-xs font-semibold text-rose-600 dark:text-rose-400">
+                    Otorisasi Super Admin
                   </p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setDeleteConfirmChecklist(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="p-4 space-y-3 text-xs">
-              <p className="text-slate-300 leading-relaxed">
+            <div className="p-5 space-y-3 text-sm">
+              <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
                 Apakah Anda yakin ingin menghapus data checklist pemeriksaan armada ini secara permanen?
               </p>
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-1.5">
+              <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Driver:</span>
-                  <span className="font-bold text-white">{deleteConfirmChecklist.driverName}</span>
+                  <span className="text-slate-500">Driver:</span>
+                  <span className="font-bold text-slate-900 dark:text-white">{deleteConfirmChecklist.driverName}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Armada:</span>
-                  <span className="font-mono font-bold text-amber-300">{deleteConfirmChecklist.plateNumber}</span>
+                  <span className="text-slate-500">Armada:</span>
+                  <span className="font-mono font-bold text-slate-900 dark:text-amber-300">{deleteConfirmChecklist.plateNumber}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Waktu:</span>
-                  <span className="font-mono text-slate-200">{deleteConfirmChecklist.date} • {deleteConfirmChecklist.time} WIB</span>
+                  <span className="text-slate-500">Waktu:</span>
+                  <span className="font-mono text-slate-700 dark:text-slate-200">{deleteConfirmChecklist.date} · {deleteConfirmChecklist.time} WIB</span>
                 </div>
               </div>
             </div>
 
-            <div className="p-3.5 bg-slate-950 border-t border-slate-800 flex items-center justify-end gap-2">
+            <div className="px-5 py-3.5 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setDeleteConfirmChecklist(null)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition cursor-pointer"
+                className="px-4 py-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 text-slate-700 dark:text-slate-300 font-semibold text-xs sm:text-sm transition cursor-pointer"
               >
                 Batal
               </button>
@@ -963,10 +933,10 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
                   );
                   setDeleteConfirmChecklist(null);
                 }}
-                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs flex items-center gap-1.5 shadow-md shadow-rose-600/20 transition cursor-pointer active:scale-95"
+                className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition cursor-pointer"
               >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Ya, Hapus Checklist</span>
+                <Trash2 className="w-4 h-4" />
+                <span>Ya, Hapus</span>
               </button>
             </div>
           </div>

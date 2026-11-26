@@ -688,7 +688,7 @@ export default function App() {
       case 'spareparts': return 'Manajemen Stok & Pemakaian Sparepart';
       case 'maintenance_costs': return 'Biaya Servis & Pemeliharaan Armada';
       case 'fuel_efficiency': return 'Efisiensi Bahan Bakar (BBM) & Konsumsi Armada';
-      case 'crew_history': return 'Riwayat Pengiriman & Audit SLA Kru';
+      case 'crew_history': return 'Riwayat Kru Pengiriman';
       case 'fleet_forms': return 'Formulir Pengadaan Armada';
       case 'sales_dashboard': return 'Dashboard Admin Penjualan';
       case 'sales_activities': return 'Sales Hub: Aktivitas Harian Admin';

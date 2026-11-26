@@ -273,6 +273,9 @@ export interface CrewDeliveryHistory {
   cargoDescription: string;
   completionDate: string;
   deliveryDate?: string;
+  departureTime?: string;
+  targetReturnTime?: string;
+  returnDate?: string;
   status: 'delivered' | 'returned' | 'partial';
   onTimeStatus: 'Tepat Waktu' | 'Terlambat' | 'Lebih Cepat';
   delayReason?: string;

@@ -661,48 +661,49 @@ body.akk-clean-ui button[title="Pop-up Form Tambah Jadwal Baru (Manual)"] { disp
 }
 .akk-ship-create-trigger:hover { background: #1d4ed8; border-color: #1e40af; }
 .akk-ship-qa-trigger { bottom: 24px; top: auto; right: 24px; z-index: 1080; }
-.akk-ship-backdrop { position: fixed; inset: 0; z-index: 2147483000; background: rgba(7, 23, 42, .52); display: flex; align-items: center; justify-content: center; padding: 16px; backdrop-filter: blur(5px); }
-.akk-ship-dialog { width: 100%; max-width: 580px; max-height: min(760px, 95dvh); display: flex; flex-direction: column; border-radius: 24px; overflow: hidden; background: #fff; color: #18283d; border: 1px solid #e4eaf2; box-shadow: 0 32px 96px rgba(10, 22, 41, .24); }
-html.dark .akk-ship-dialog { background: #192a40; color: #edf4ff; border-color: #2b3b50; }
-.akk-ship-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 24px 16px; border-bottom: 1px solid #e4eaf2; }
-html.dark .akk-ship-dialog-head { border-bottom-color: #2b3b50; }
-.akk-ship-dialog-head h2 { color: #18283d; font: 750 21px/1.25 'Plus Jakarta Sans', system-ui, sans-serif; letter-spacing: -.03em; margin: 2px 0 0; }
-html.dark .akk-ship-dialog-head h2 { color: #edf4ff; }
-.akk-ship-kicker { margin: 0; color: #5a6b80; letter-spacing: .12em; font-size: 10px; font-weight: 700; }
-html.dark .akk-ship-kicker { color: #b2c1d3; }
-.akk-ship-close { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 999px; color: #5a6b80; background: #f3f6fb; border: 0; cursor: pointer; }
-html.dark .akk-ship-close { background: #253e64; color: #edf4ff; }
-.akk-ship-close:hover { background: #e9f2ff; color: #1764db; }
-.akk-ship-dialog-body { padding: 20px 24px; overflow-y: auto; overscroll-behavior: contain; min-height: 0; }
+.akk-ship-backdrop { position: fixed; inset: 0; z-index: 2147483000; background: rgba(15, 23, 42, .42); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.akk-ship-dialog { width: 100%; max-width: 620px; max-height: min(820px, 95dvh); display: flex; flex-direction: column; border-radius: 14px; overflow: hidden; background: #ffffff; color: #0f172a; border: 1px solid #e2e8f0; box-shadow: 0 12px 32px rgba(15, 23, 42, .12); }
+html.dark .akk-ship-dialog { background: #0f172a; color: #f8fafc; border-color: #1e293b; box-shadow: 0 12px 32px rgba(0, 0, 0, .38); }
+.akk-ship-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 24px 16px; border-bottom: 1px solid #e2e8f0; background: #ffffff; }
+html.dark .akk-ship-dialog-head { border-bottom-color: #1e293b; background: #0f172a; }
+.akk-ship-dialog-head h2 { color: #0f172a; font: 750 22px/1.25 'Plus Jakarta Sans', system-ui, sans-serif; letter-spacing: -.025em; margin: 3px 0 0; }
+html.dark .akk-ship-dialog-head h2 { color: #f8fafc; }
+.akk-ship-kicker { margin: 0; color: #64748b; letter-spacing: .1em; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+html.dark .akk-ship-kicker { color: #94a3b8; }
+.akk-ship-close { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 10px; color: #475569; background: #f8fafc; border: 1px solid #e2e8f0; cursor: pointer; transition: background-color .15s ease, color .15s ease; }
+html.dark .akk-ship-close { background: #1e293b; color: #e2e8f0; border-color: #334155; }
+.akk-ship-close:hover { background: #eff6ff; color: #2563eb; border-color: #bfdbfe; }
+.akk-ship-dialog-body { padding: 22px 24px; overflow-y: auto; overscroll-behavior: contain; min-height: 0; background: #ffffff; }
+html.dark .akk-ship-dialog-body { background: #0f172a; }
 .akk-ship-dialog-body select, .akk-ship-dialog-body input { color-scheme: light; }
 html.dark .akk-ship-dialog-body select, html.dark .akk-ship-dialog-body input { color-scheme: dark; }
 .akk-ship-dialog-body input:focus, .akk-ship-dialog-body select:focus { outline: none; }
-.akk-ship-crew-picker { background: #f3f6fb; border: 1px solid #e4eaf2; padding: 15px; border-radius: 19px; }
-html.dark .akk-ship-crew-picker { background: #111d2c; border-color: #2b3b50; }
-.akk-ship-dialog-footer { border-top: 1px solid #e4eaf2; padding: 14px 24px; display: flex; gap: 10px; align-items: center; justify-content: flex-end; }
-html.dark .akk-ship-dialog-footer { border-top-color: #2b3b50; }
-.akk-ship-cancel { min-height: 44px; padding: 0 18px; color: #1764db; border-radius: 999px; background: #e9f2ff; border: 0; font: 700 13px 'Plus Jakarta Sans', system-ui, sans-serif; cursor: pointer; }
-html.dark .akk-ship-cancel { background: #253e64; color: #c3d9ff; }
-.akk-ship-cancel:hover { filter: brightness(0.96); }
-.akk-ship-qa-warning { display: flex; align-items: flex-start; gap: 8px; padding: 11px 13px; border-radius: 14px; margin-bottom: 15px; background: #e9f2ff; color: #1764db; font-size: 12px; font-weight: 600; }
-.akk-ship-error { margin-top: 14px; padding: 11px 13px; border-radius: 14px; background: #ffedf0; color: #b42338; font-size: 12px; font-weight: 700; }
-.akk-ship-test-list { border-top: 1px solid #e4eaf2; margin-top: 20px; padding-top: 18px; display: grid; gap: 10px; }
-.akk-ship-test-list h3 { margin: 0 0 4px; font: 750 14px 'Plus Jakarta Sans', system-ui, sans-serif; }
-.akk-ship-test-card { border: 1px solid #e4eaf2; border-radius: 16px; padding: 13px; }
-.akk-ship-test-slot { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; border: 1px solid #e4eaf2; padding: 10px; border-radius: 12px; }
-.akk-ship-test-claim { color: #1764db; font-size: 12px; font-weight: 700; }
+.akk-ship-crew-picker { background: #f8fafc; border: 1px solid #e2e8f0; padding: 16px; border-radius: 12px; }
+html.dark .akk-ship-crew-picker { background: #1e293b; border-color: #334155; }
+.akk-ship-dialog-footer { border-top: 1px solid #e2e8f0; background: #f8fafc; padding: 14px 24px; display: flex; gap: 10px; align-items: center; justify-content: flex-end; }
+html.dark .akk-ship-dialog-footer { border-top-color: #1e293b; background: #0f172a; }
+.akk-ship-cancel { min-height: 44px; padding: 0 20px; color: #334155; border-radius: 10px; background: #ffffff; border: 1px solid #cbd5e1; font: 650 14px 'Plus Jakarta Sans', system-ui, sans-serif; cursor: pointer; transition: background-color .15s ease, border-color .15s ease; }
+html.dark .akk-ship-cancel { background: #1e293b; color: #e2e8f0; border-color: #334155; }
+.akk-ship-cancel:hover { background: #f1f5f9; border-color: #94a3b8; }
+.akk-ship-qa-warning { display: flex; align-items: flex-start; gap: 8px; padding: 12px 14px; border-radius: 10px; margin-bottom: 16px; background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8; font-size: 13px; font-weight: 600; }
+.akk-ship-error { margin-top: 14px; padding: 12px 14px; border-radius: 10px; background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; font-size: 13px; font-weight: 600; }
+.akk-ship-test-list { border-top: 1px solid #e2e8f0; margin-top: 20px; padding-top: 18px; display: grid; gap: 10px; }
+.akk-ship-test-list h3 { margin: 0 0 4px; font: 750 15px 'Plus Jakarta Sans', system-ui, sans-serif; }
+.akk-ship-test-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; }
+.akk-ship-test-slot { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; border: 1px solid #e2e8f0; padding: 10px; border-radius: 10px; }
+.akk-ship-test-claim { color: #2563eb; font-size: 13px; font-weight: 700; }
 .akk-ship-test-claim:hover { text-decoration: underline; }
-.akk-ship-notice { z-index: 1091; position: fixed; right: 24px; bottom: 82px; top: auto; max-width: min(470px, calc(100vw - 32px)); display: flex; gap: 8px; align-items: center; background: #e4f7ed; border: 1px solid #9de2be; color: #08774e; padding: 12px 16px; border-radius: 12px; font: 600 12px/1.4 'Plus Jakarta Sans', system-ui, sans-serif; box-shadow: 0 6px 20px rgba(15, 23, 42, .08); }
+.akk-ship-notice { z-index: 1091; position: fixed; right: 24px; bottom: 82px; top: auto; max-width: min(490px, calc(100vw - 32px)); display: flex; gap: 8px; align-items: center; background: #ecfdf5; border: 1px solid #a7f3d0; color: #047857; padding: 12px 16px; border-radius: 12px; font: 600 13px/1.4 'Plus Jakarta Sans', system-ui, sans-serif; box-shadow: 0 4px 12px rgba(15, 23, 42, .06); }
 .akk-ship-notice.akk-ship-notice--inline { bottom: 24px; }
 .akk-ship-notice button { margin-left: auto; }
 @media (max-width: 767px) {
-  .akk-ship-create-trigger { right: 14px; bottom: 18px; top: auto; padding: 11px 16px; min-height: 44px; border-radius: 12px; font-size: 13px; }
+  .akk-ship-create-trigger { right: 14px; bottom: 18px; top: auto; padding: 11px 16px; min-height: 44px; border-radius: 12px; font-size: 13.5px; }
   .akk-ship-qa-trigger { bottom: 18px; top: auto; right: 14px; }
   .akk-ship-backdrop { padding: 0; align-items: flex-end; }
-  .akk-ship-dialog { max-height: 93dvh; border-radius: 24px 24px 0 0; }
-  .akk-ship-dialog-head { padding: 19px 18px 13px; }
+  .akk-ship-dialog { max-height: 93dvh; border-radius: 16px 16px 0 0; }
+  .akk-ship-dialog-head { padding: 18px 18px 14px; }
   .akk-ship-dialog-body { padding: 18px; }
-  .akk-ship-dialog-footer { padding: 12px 18px; }
+  .akk-ship-dialog-footer { padding: 14px 18px; }
   .akk-ship-notice { bottom: 74px; top: auto; right: 10px; left: 10px; max-width: none; }
   .akk-ship-notice.akk-ship-notice--inline { bottom: 18px; }
 }
