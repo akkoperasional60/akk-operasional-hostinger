@@ -228,6 +228,9 @@ export interface Schedule {
   isChecklistBypassed?: boolean;
   checklistBypassedBy?: string;
   checklistBypassedAt?: string;
+  crewOdometerStart?: string;
+  crewOdometerEnd?: string;
+  crewOdometerEndAt?: string;
   departureValidation?: {
     summary: {
       driverName: string;

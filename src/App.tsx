@@ -26,6 +26,7 @@ import {
   loadSparePartManagement,
   loadFleetMaintenanceCostManagement,
   loadFuelEfficiencyManagement,
+  loadKmRecapManagement,
   loadUserManagement,
   loadCustomerMapping,
   loadFleetFormCenter,
@@ -64,6 +65,7 @@ const FleetCrewManagement = lazyWithRetry(loadFleetCrewManagement);
 const SparePartManagement = lazyWithRetry(loadSparePartManagement);
 const FleetMaintenanceCostManagement = lazyWithRetry(loadFleetMaintenanceCostManagement);
 const FuelEfficiencyManagement = lazyWithRetry(loadFuelEfficiencyManagement);
+const KmRecapManagement = lazyWithRetry(loadKmRecapManagement);
 const UserManagement = lazyWithRetry(loadUserManagement);
 const CustomerMapping = lazyWithRetry(loadCustomerMapping);
 const FleetFormCenter = lazyWithRetry(loadFleetFormCenter);
@@ -324,6 +326,7 @@ const FLEET_MANAGEMENT_TABS: NavTab[] = [
   'spareparts',
   'maintenance_costs',
   'fuel_efficiency',
+  'km_recap',
   'fleet_forms'
 ];
 
@@ -688,6 +691,7 @@ export default function App() {
       case 'spareparts': return 'Manajemen Stok & Pemakaian Sparepart';
       case 'maintenance_costs': return 'Biaya Servis & Pemeliharaan Armada';
       case 'fuel_efficiency': return 'Efisiensi Bahan Bakar (BBM) & Konsumsi Armada';
+      case 'km_recap': return 'Rekap KM Berangkat & Pulang Armada';
       case 'crew_history': return 'Riwayat Kru Pengiriman';
       case 'fleet_forms': return 'Formulir Pengadaan Armada';
       case 'sales_dashboard': return 'Dashboard Admin Penjualan';
@@ -1067,7 +1071,16 @@ export default function App() {
           )}
 
           {currentTab === 'fuel_efficiency' && (canManageFleet() || canAccess(currentUser, 'fuel_efficiency')) && (
-            <FuelEfficiencyManagement onNavigateToFleets={() => setCurrentTab('fleets')} />
+            <FuelEfficiencyManagement
+              onNavigateToFleets={() => setCurrentTab('fleets')}
+              onNavigateToKmRecap={() => setCurrentTab('km_recap')}
+            />
+          )}
+
+          {currentTab === 'km_recap' && (canManageFleet() || canAccess(currentUser, 'km_recap')) && (
+            <KmRecapManagement
+              onNavigateToFuel={() => setCurrentTab('fuel_efficiency')}
+            />
           )}
 
           {currentTab === 'crew_history' && (

@@ -239,10 +239,30 @@ export async function recordKm(user: UserProfile, tripId: string, value: string)
   if (!isQaAccount(user)) {
     const gps = await freshGps();
     await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/task`, 'POST', { action:'km', value:String(num), gps });
+    void logisticsStore.hydrateOperationalDataFromHostinger(true);
     notifyCrewChanged();
     return;
   }
   await jsonRequest(`/api/crew-qa/trips/${encodeURIComponent(tripId)}/action`, 'POST', { action: 'km', value: String(num) });
+  notifyCrewChanged();
+}
+
+export async function recordEndKm(user: UserProfile, tripId: string, value: string, minStartKm?: number): Promise<void> {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0 || num > 99999999) {
+    throw new Error('KM akhir harus berupa angka yang valid.');
+  }
+  if (minStartKm && minStartKm > 0 && num <= minStartKm) {
+    throw new Error(`KM akhir harus lebih besar dari KM awal (${minStartKm.toLocaleString('id-ID')} km).`);
+  }
+  if (!isQaAccount(user)) {
+    const gps = await freshGps();
+    await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/task`, 'POST', { action: 'km_end', value: String(num), gps });
+    void logisticsStore.hydrateOperationalDataFromHostinger(true);
+    notifyCrewChanged();
+    return;
+  }
+  await jsonRequest(`/api/crew-qa/trips/${encodeURIComponent(tripId)}/action`, 'POST', { action: 'km_end', value: String(num) });
   notifyCrewChanged();
 }
 

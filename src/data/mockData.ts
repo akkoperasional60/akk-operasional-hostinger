@@ -131,19 +131,6 @@ export const INITIAL_PROFILES: UserProfile[] = IS_PROD_BUILD ? [] : [
     notes: 'Operasional / Head Management AKK'
   },
   {
-    id: 'usr-sales',
-    email: 'shoim.sales@gmail.com',
-    fullName: 'Muhammad Shoim',
-    role: 'sales_admin',
-    department: 'Adm. Penjualan',
-    phone: '0813-4455-6611',
-    status: 'approved',
-    createdAt: '2026-01-10T08:00:00Z',
-    approvedAt: '2026-01-10T08:05:00Z',
-    approvedBy: 'Super Admin',
-    notes: 'Adm. Penjualan — Terintegrasi langsung ke Menu Admin Penjualan'
-  },
-  {
     id: 'usr-purchasing',
     email: 'dewi.purchasing@gmail.com',
     fullName: 'Dewi Lestari',

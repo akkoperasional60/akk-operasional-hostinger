@@ -171,6 +171,7 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
         spareparts: isAll || isLogistikStaff ? 'full_access' : 'none',
         maintenance_costs: isAll || isLogistikStaff ? 'full_access' : 'none',
         fuel_efficiency: isAll || isLogistikStaff ? 'full_access' : 'none',
+        km_recap: isAll || isLogistikStaff ? 'full_access' : 'none',
         warehouse_fleet_cubication: isAll || isLogistikStaff || isKoordinatorGudang ? 'full_access' : 'none',
         // Legacy keys preserved for backward compatibility
         dashboard_logistik: isAll || isLogistikStaff ? 'full_access' : 'none',
@@ -378,6 +379,7 @@ const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }
   spareparts: { moduleId: 'logistics', subMenuId: 'spareparts' },
   maintenance_costs: { moduleId: 'logistics', subMenuId: 'maintenance_costs' },
   fuel_efficiency: { moduleId: 'logistics', subMenuId: 'fuel_efficiency' },
+  km_recap: { moduleId: 'logistics', subMenuId: 'km_recap' },
   crew_history: { moduleId: 'logistics', subMenuId: 'crew_history' },
   fleet_forms: { moduleId: 'logistics', subMenuId: 'fleet_forms' },
   customer_map: { moduleId: 'marketing', subMenuId: 'customer_map' },
@@ -467,6 +469,7 @@ export const LEGACY_SUBMENU_KEY_MAP: Record<string, string[]> = {
   spareparts: ['armada_ceklis'],
   maintenance_costs: ['armada_ceklis', 'spareparts'],
   fuel_efficiency: ['armada_ceklis'],
+  km_recap: ['fuel_efficiency', 'armada_ceklis'],
   warehouse_fleet_cubication: ['armada_ceklis'],
   driver_reports: ['monitoring_sla'],
   crew_history: ['monitoring_sla'],
@@ -534,6 +537,7 @@ export const CANONICAL_SIDEBAR_MODULES: CanonicalModuleDef[] = [
       { id: 'spareparts', name: 'Suku Cadang & Bengkel' },
       { id: 'maintenance_costs', name: 'Biaya Servis & Pemeliharaan' },
       { id: 'fuel_efficiency', name: 'Efisiensi Bahan Bakar (BBM)' },
+      { id: 'km_recap', name: 'Rekap KM Berangkat & Pulang' },
       { id: 'warehouse_fleet_cubication', name: 'Simulasi Box Muatan Armada (2D)' }
     ]
   },

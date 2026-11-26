@@ -16,7 +16,7 @@ import {
   type InspectionChecklistEntry, type VehicleChecklistKey, type WorkAction
 } from './crewModel';
 import { canClaimLive, claimTrip, freshGps, getTripsForUser, listenCrewChanged, markTask,
-  moveTrip, recordKm, submitWorkReport } from './crewApi';
+  moveTrip, recordEndKm, recordKm, submitWorkReport } from './crewApi';
 import { TABS, shortDate, initials, roleName, Button, IconTile, Heading,
   Panel, Empty, TripCard, ActiveTrip, TaskRow, Journey, Dialog, BackButton, ActionGrid, TAB_ART, type Screen } from './CrewFieldUI';
 import { CrewLiveCamera, EvidencePreview } from './CrewLiveCamera';
@@ -117,6 +117,7 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
   const [returBarangEvidence, setReturBarangEvidence] = useState<CameraEvidence | null>(null);
   const [formKirimTick, setFormKirimTick] = useState(0);
   const [kmValue, setKmValue] = useState('');
+  const [endKmByTrip, setEndKmByTrip] = useState<Record<string, string>>({});
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
   const alive = useRef(true);
   const refreshInFlight = useRef<Promise<void> | null>(null);
@@ -212,6 +213,10 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
         .filter(isCompleted)
         .sort((a, b) => String(b.returnedAt || b.date || '').localeCompare(String(a.returnedAt || a.date || ''))),
     [mine]
+  );
+  const pendingEndKmTrips = useMemo(
+    () => completed.filter(t => slotForUser(t, user) === 'driver' && !t.odometerEnd),
+    [completed, user]
   );
   const hasActiveAssignment = ongoing.length > 0 || claimReceipt !== null;
   const openTrips = useMemo(() => {
@@ -511,6 +516,22 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     e.preventDefault(); if (!activeTrip || activeSlot !== 'driver' || activeTrip.odometerStart) return;
     void invoke(() => recordKm(user,activeTrip.id,kmValue), 'KM awal tersimpan.', () => setKmValue(''));
   };
+  const saveEndKm = (trip: FieldTrip, e: React.FormEvent) => {
+    e.preventDefault();
+    if (slotForUser(trip, user) !== 'driver' || trip.odometerEnd) return;
+    const rawValue = endKmByTrip[trip.id] || '';
+    const minStartKm = Number(trip.odometerStart || 0);
+    void invoke(
+      () => recordEndKm(user, trip.id, rawValue, minStartKm),
+      'KM akhir tersimpan. Jarak tempuh otomatis tercatat di Rekap KM & BBM.',
+      () =>
+        setEndKmByTrip(prev => {
+          const next = { ...prev };
+          delete next[trip.id];
+          return next;
+        })
+    );
+  };
   const handleMove = (phase: 'going' | 'returned') => {
     if (!activeTrip || !activeSlot) return;
     void invoke(() => moveTrip(user,activeTrip.id,phase), phase === 'going' ? 'Keberangkatan tercatat.' : 'Kiriman selesai.', phase === 'returned' ? () => {setScreen('riwayat'); setExpandedHistory(activeTrip.id); resetReport();} : undefined);
@@ -611,12 +632,78 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
               </>}
               {screen === 'tugas' && <>
                 <Heading title="Tugas"/>
-                {!activeTrip || !activeSlot ? <Empty icon={ClipboardCheck} title="Belum ada tugas" action={{label:'Lihat Kiriman',run:()=>nav('kiriman')}}/> : <>
+                {!activeTrip || !activeSlot ? (
+                  <>
+                    {pendingEndKmTrips.length > 0 && (() => {
+                      const target = pendingEndKmTrips[0];
+                      const startNum = Number(target.odometerStart || 0);
+                      const draftVal = endKmByTrip[target.id] || '';
+                      const draftNum = Number(draftVal);
+                      const validDraft = Number.isFinite(draftNum) && draftNum > 0 && draftNum <= 99999999 && (startNum <= 0 || draftNum > startNum);
+                      const previewDist = validDraft && startNum > 0 ? draftNum - startNum : 0;
+                      return (
+                        <Panel title="Input KM Akhir (Tiba di Gudang)">
+                          <div className="cv75-flat-card space-y-2.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <div>
+                                <div className="text-sm font-bold text-slate-900">{target.area}</div>
+                                <div className="text-xs text-slate-500">{shortDate(target.date)} · {target.fleetLabel}</div>
+                              </div>
+                              <span className="cv75-badge cv75-badge--amber">Perlu KM Akhir</span>
+                            </div>
+                            <div className="text-xs text-slate-600">
+                              KM Awal tercatat: <strong className="font-mono text-slate-900">{startNum > 0 ? `${startNum.toLocaleString('id-ID')} km` : '-'}</strong>
+                            </div>
+                            <form className="cv66-km-form" onSubmit={e => saveEndKm(target, e)}>
+                              <input
+                                type="number"
+                                inputMode="numeric"
+                                min={startNum > 0 ? startNum + 1 : 1}
+                                max="99999999"
+                                step="1"
+                                value={draftVal}
+                                placeholder="Masukkan KM Akhir"
+                                aria-label="KM akhir kendaraan tiba di gudang"
+                                onChange={e => setEndKmByTrip(prev => ({ ...prev, [target.id]: e.target.value }))}
+                                required
+                              />
+                              <Button type="submit" disabled={busy || !validDraft} loading={busy}>Simpan</Button>
+                            </form>
+                            {draftVal !== '' && startNum > 0 && Number(draftVal) <= startNum && (
+                              <p className="text-xs font-semibold text-rose-600">KM akhir harus lebih besar dari KM awal ({startNum.toLocaleString('id-ID')} km).</p>
+                            )}
+                            {previewDist > 0 && (
+                              <div className="text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">
+                                Estimasi jarak tempuh: {previewDist.toLocaleString('id-ID')} km
+                              </div>
+                            )}
+                          </div>
+                        </Panel>
+                      );
+                    })()}
+                    <Empty icon={ClipboardCheck} title="Belum ada tugas" action={{label:'Lihat Kiriman',run:()=>nav('kiriman')}}/>
+                  </>
+                ) : <>
                   {tripPicker}<ActiveTrip trip={activeTrip} slot={activeSlot}/>
                   <Panel title="Persiapan">
                     {activeSlot === 'driver' ? <>
                       <div className="cv66-km"><div className="cv66-km-label"><IconTile icon={activeTrip.odometerStart ? CheckCircle2 : Truck} art={activeTrip.odometerStart ? 'success' : 'gauge'} tone={activeTrip.odometerStart ? 'green' : 'blue'}/><span className="cv66-row-title">KM Awal</span>{activeTrip.odometerStart && <span className="cv66-km-value">{activeTrip.odometerStart} km</span>}</div>
                         {!activeTrip.odometerStart && <form className="cv66-km-form" onSubmit={saveKm}><input type="number" inputMode="numeric" min="1" max="99999999" step="1" value={kmValue} placeholder="Isi KM" aria-label="KM awal kendaraan" onChange={e=>setKmValue(e.target.value)} required/><Button type="submit" disabled={busy || !Number.isFinite(Number(kmValue)) || Number(kmValue)<=0 || Number(kmValue)>99999999}>Simpan</Button></form>}
+                      </div>
+                      <div className="cv66-km">
+                        <div className="cv66-km-label">
+                          <IconTile icon={activeTrip.odometerEnd ? CheckCircle2 : Truck} art={activeTrip.odometerEnd ? 'success' : 'gauge'} tone={activeTrip.odometerEnd ? 'green' : 'blue'}/>
+                          <div className="cv66-row-text">
+                            <span className="cv66-row-title">KM Akhir (Pulang)</span>
+                            <span className="cv66-meta">
+                              {activeTrip.odometerEnd
+                                ? `${Number(activeTrip.odometerEnd).toLocaleString('id-ID')} km`
+                                : activeTrip.phase === 'going'
+                                  ? 'Terbuka otomatis setelah klik Tiba di Gudang'
+                                  : 'Diisi setelah armada tiba kembali di gudang'}
+                            </span>
+                          </div>
+                        </div>
                       </div>
                       <TaskRow
                         icon={ShieldCheck}
@@ -1151,10 +1238,107 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
               </>}
               {screen === 'riwayat' && <>
                 <Heading title="Riwayat"/>
-                {completed.length ? completed.map(t=>{const open=expandedHistory===t.id;const slot=slotForUser(t,user);return <article className="cv66-panel cv66-history" key={t.id}>
-                  <button type="button" className="cv66-row" aria-expanded={open} onClick={()=>setExpandedHistory(open?null:t.id)}><IconTile icon={CheckCircle2} tone="green"/><span className="cv66-row-text"><span className="cv66-history-title">{t.area}</span><span className="cv66-meta">{shortDate(t.date)} · {t.fleetLabel}{slot ? ` · ${roleName(slot)}` : ''}</span></span><ChevronDown size={20} className={`cv66-chevron ${open?'cv66-rotated':''}`}/></button>
-                  {open && <dl className="cv66-history-detail"><div><dt>Berangkat</dt><dd>{t.departedAt?new Date(t.departedAt).toLocaleString('id-ID'):'-'}</dd></div><div><dt>Tiba di Gudang</dt><dd>{t.returnedAt?new Date(t.returnedAt).toLocaleString('id-ID'):'-'}</dd></div><div><dt>Laporan</dt><dd>{t.reports.length}</dd></div></dl>}
-                </article>}) : <Empty icon={FileClock} title="Belum ada riwayat"/>}
+                {pendingEndKmTrips.length > 0 && (() => {
+                  const target = pendingEndKmTrips[0];
+                  const startNum = Number(target.odometerStart || 0);
+                  const draftVal = endKmByTrip[target.id] || '';
+                  const draftNum = Number(draftVal);
+                  const validDraft = Number.isFinite(draftNum) && draftNum > 0 && draftNum <= 99999999 && (startNum <= 0 || draftNum > startNum);
+                  const previewDist = validDraft && startNum > 0 ? draftNum - startNum : 0;
+                  return (
+                    <Panel title="Input KM Akhir (Tiba di Gudang)">
+                      <div className="cv75-flat-card space-y-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <div className="text-sm font-bold text-slate-900">{target.area}</div>
+                            <div className="text-xs text-slate-500">{shortDate(target.date)} · {target.fleetLabel}</div>
+                          </div>
+                          <span className="cv75-badge cv75-badge--amber">Wajib KM Akhir</span>
+                        </div>
+                        <div className="text-xs text-slate-600">
+                          KM Awal tercatat: <strong className="font-mono text-slate-900">{startNum > 0 ? `${startNum.toLocaleString('id-ID')} km` : '-'}</strong>
+                        </div>
+                        <form className="cv66-km-form" onSubmit={e => saveEndKm(target, e)}>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min={startNum > 0 ? startNum + 1 : 1}
+                            max="99999999"
+                            step="1"
+                            value={draftVal}
+                            placeholder="Isi KM Akhir setelah tiba"
+                            aria-label="KM akhir kendaraan"
+                            onChange={e => setEndKmByTrip(prev => ({ ...prev, [target.id]: e.target.value }))}
+                            required
+                          />
+                          <Button type="submit" disabled={busy || !validDraft} loading={busy}>Simpan KM Akhir</Button>
+                        </form>
+                        {draftVal !== '' && startNum > 0 && Number(draftVal) <= startNum && (
+                          <p className="text-xs font-semibold text-rose-600">KM akhir harus lebih besar dari KM awal ({startNum.toLocaleString('id-ID')} km).</p>
+                        )}
+                        {previewDist > 0 && (
+                          <div className="text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">
+                            Jarak Tempuh: {previewDist.toLocaleString('id-ID')} km
+                          </div>
+                        )}
+                      </div>
+                    </Panel>
+                  );
+                })()}
+                {completed.length ? completed.map(t=>{
+                  const open=expandedHistory===t.id;
+                  const slot=slotForUser(t,user);
+                  const startNum = Number(t.odometerStart || 0);
+                  const endNum = Number(t.odometerEnd || 0);
+                  const tripDist = startNum > 0 && endNum > startNum ? endNum - startNum : 0;
+                  const inlineDraftVal = endKmByTrip[t.id] || '';
+                  const inlineDraftNum = Number(inlineDraftVal);
+                  const validInlineDraft = Number.isFinite(inlineDraftNum) && inlineDraftNum > 0 && inlineDraftNum <= 99999999 && (startNum <= 0 || inlineDraftNum > startNum);
+                  return (
+                    <article className="cv66-panel cv66-history" key={t.id}>
+                      <button type="button" className="cv66-row" aria-expanded={open} onClick={()=>setExpandedHistory(open?null:t.id)}>
+                        <IconTile icon={CheckCircle2} tone="green"/>
+                        <span className="cv66-row-text">
+                          <span className="cv66-history-title">{t.area}</span>
+                          <span className="cv66-meta">
+                            {shortDate(t.date)} · {t.fleetLabel}{slot ? ` · ${roleName(slot)}` : ''}
+                            {tripDist > 0 ? ` · ${tripDist.toLocaleString('id-ID')} km` : slot === 'driver' && !t.odometerEnd ? ' · Menunggu KM Akhir' : ''}
+                          </span>
+                        </span>
+                        <ChevronDown size={20} className={`cv66-chevron ${open?'cv66-rotated':''}`}/>
+                      </button>
+                      {open && (
+                        <div className="space-y-3">
+                          <dl className="cv66-history-detail">
+                            <div><dt>Berangkat</dt><dd>{t.departedAt?new Date(t.departedAt).toLocaleString('id-ID'):'-'}</dd></div>
+                            <div><dt>Tiba di Gudang</dt><dd>{t.returnedAt?new Date(t.returnedAt).toLocaleString('id-ID'):'-'}</dd></div>
+                            <div><dt>KM Awal</dt><dd>{startNum > 0 ? `${startNum.toLocaleString('id-ID')} km` : '-'}</dd></div>
+                            <div><dt>KM Akhir</dt><dd>{endNum > 0 ? `${endNum.toLocaleString('id-ID')} km` : 'Belum diisi'}</dd></div>
+                            <div><dt>Jarak Tempuh</dt><dd>{tripDist > 0 ? `${tripDist.toLocaleString('id-ID')} km` : '-'}</dd></div>
+                            <div><dt>Laporan</dt><dd>{t.reports.length}</dd></div>
+                          </dl>
+                          {slot === 'driver' && !t.odometerEnd && t.id !== pendingEndKmTrips[0]?.id && (
+                            <form className="cv66-km-form" onSubmit={e => saveEndKm(t, e)}>
+                              <input
+                                type="number"
+                                inputMode="numeric"
+                                min={startNum > 0 ? startNum + 1 : 1}
+                                max="99999999"
+                                step="1"
+                                value={inlineDraftVal}
+                                placeholder="Isi KM Akhir"
+                                aria-label="KM akhir kendaraan"
+                                onChange={e => setEndKmByTrip(prev => ({ ...prev, [t.id]: e.target.value }))}
+                                required
+                              />
+                              <Button type="submit" disabled={busy || !validInlineDraft} loading={busy}>Simpan</Button>
+                            </form>
+                          )}
+                        </div>
+                      )}
+                    </article>
+                  );
+                }) : <Empty icon={FileClock} title="Belum ada riwayat"/>}
               </>}
             </motion.div>
           </AnimatePresence>}

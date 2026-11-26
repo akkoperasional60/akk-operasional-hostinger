@@ -132,7 +132,7 @@ export const SalesAdminDashboardTab: React.FC<SalesAdminDashboardTabProps> = ({
     if (effectiveBranchId === 'cab-sidoarjo') {
       return ['ADMIN SIDOARJO'];
     }
-    return ['MUHAMMAD SHOIM', 'ISTI', 'IZZUL', 'FATA', 'MEINDA MAULINA', 'BINTANG MEDITA SARI'];
+    return ['MOHAMMAD SHOIM', 'ISTI', 'IZZUL', 'FATA', 'MEINDA MAULINA', 'BINTANG MEDITA SARI'];
   }, [salesAdminUsers, effectiveBranchId]);
 
   // Live state from all MySQL endpoints of Admin Penjualan sub-menus

@@ -3,7 +3,6 @@ import {
   FileSpreadsheet,
   Download,
   Calendar,
-  Truck,
   Printer,
   ChevronDown,
   ChevronLeft,
@@ -77,8 +76,8 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
   });
   const [selectedSpbu, setSelectedSpbu] = useState<'all' | 'Farly' | 'Gajah Mada' | 'SPBU Lain'>('all');
   const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [exportError, setExportError] = useState<string>('');
 
-  // Extract distinct years present in logs merged with current/surrounding operational years
   const availableYears = useMemo(() => {
     const set = new Set<string>(['2025', '2026', String(new Date().getFullYear())]);
     fuelLogs.forEach(l => {
@@ -88,7 +87,6 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
     return Array.from(set).sort((a, b) => b.localeCompare(a));
   }, [fuelLogs]);
 
-  // Dates with logs (for subtle indicator dots in calendar)
   const logDatesSet = useMemo(() => {
     const set = new Set<string>();
     fuelLogs.forEach(l => {
@@ -104,7 +102,6 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
     return set;
   }, [fuelLogs, selectedSpbu]);
 
-  // Filter logs cleanly by SPBU, Year, Month, and Custom Calendar Day Range
   const filteredLogs = useMemo(() => {
     return fuelLogs.filter(log => {
       const iso = normalizeLogIsoDate(log.date);
@@ -133,7 +130,7 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
   }, [fuelLogs, selectedSpbu, rangeStart, rangeEnd, selectedYear, selectedMonth]);
 
   const activePeriodLabel = useMemo(() => {
-    const spbuTag = selectedSpbu !== 'all' ? ` • ${selectedSpbu}` : '';
+    const spbuTag = selectedSpbu !== 'all' ? ` · ${selectedSpbu}` : '';
     if (rangeStart) {
       const effectiveEnd = rangeEnd || rangeStart;
       const low = rangeStart <= effectiveEnd ? rangeStart : effectiveEnd;
@@ -157,7 +154,6 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
     [filteredLogs, activePeriodLabel, rangeStart, rangeEnd]
   );
 
-  // Aggregate Metrics for Active Filter
   const activeMetrics = useMemo(() => {
     const totalLiters = Number(fleetSummaries.reduce((sum, f) => sum + f.totalLiters, 0).toFixed(1));
     const totalCost = fleetSummaries.reduce((sum, f) => sum + f.totalCost, 0);
@@ -234,6 +230,7 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
 
   const handleExportPDF = () => {
     setIsExporting(true);
+    setExportError('');
     try {
       exportFuelReportToPDF({
         fleetSummaries,
@@ -244,6 +241,7 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
       });
     } catch (err) {
       console.error(err);
+      setExportError('Gagal membuat file PDF. Pastikan data periode terisi.');
     } finally {
       setIsExporting(false);
     }
@@ -251,6 +249,7 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
 
   const handleExportExcel = () => {
     setIsExporting(true);
+    setExportError('');
     try {
       exportFuelReportToExcel({
         fleetSummaries,
@@ -261,6 +260,7 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
       });
     } catch (err) {
       console.error(err);
+      setExportError('Gagal membuat file Excel.');
     } finally {
       setIsExporting(false);
     }
@@ -278,34 +278,27 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
   const normalizedHigh = rangeStart ? (rangeEnd ? (rangeEnd > rangeStart ? rangeEnd : rangeStart) : rangeStart) : '';
 
   return (
-    <div className="space-y-5">
-      {/* SECTION HEADER & QUICK EXPORT ACTIONS */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
+    <div className="akk-flat-fuel space-y-5">
+      {/* HEADER & FILTER */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2.5">
-              <span className="p-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400">
-                <FileSpreadsheet className="w-5 h-5" />
-              </span>
-              <div>
-                <h3 className="text-base font-bold text-white">
-                  Rekapitulasi Konsumsi BBM Armada
-                </h3>
-                <p className="text-xs text-slate-400">
-                  Pilih bulan, tahun, dan rentang hari pada kalender untuk merekap konsumsi BBM serta biaya operasional tiap armada.
-                </p>
-              </div>
-            </div>
+          <div>
+            <h3 className="text-lg font-bold text-slate-900">
+              Rekapitulasi Konsumsi BBM Armada
+            </h3>
+            <p className="text-sm text-slate-500 mt-0.5">
+              Pilih bulan, tahun, atau rentang tanggal kalender untuk rekap per unit armada.
+            </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={handleExportPDF}
               disabled={isExporting}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs transition cursor-pointer disabled:opacity-50 whitespace-nowrap"
             >
-              <Download className="w-4 h-4" />
+              <Download className="w-4 h-4 text-slate-500" />
               <span>Export PDF</span>
             </button>
 
@@ -313,7 +306,7 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
               type="button"
               onClick={handleExportExcel}
               disabled={isExporting}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition cursor-pointer disabled:opacity-50 whitespace-nowrap"
             >
               <FileSpreadsheet className="w-4 h-4" />
               <span>Export Excel</span>
@@ -322,25 +315,33 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
             <button
               type="button"
               onClick={() => window.print()}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold transition cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition cursor-pointer whitespace-nowrap"
             >
-              <Printer className="w-4 h-4 text-slate-400" />
+              <Printer className="w-4 h-4 text-slate-500" />
               <span>Print</span>
             </button>
           </div>
         </div>
 
-        {/* SIMPLIFIED FILTER BAR: BULAN + TAHUN + KALENDER RENTANG HARI + SPBU */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-3 border-t border-slate-800/80">
+        {exportError && (
+          <div className="px-3.5 py-2 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-medium flex items-center justify-between">
+            <span>{exportError}</span>
+            <button type="button" onClick={() => setExportError('')} className="text-red-500 hover:text-red-700 cursor-pointer">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* FILTER CONTROLS */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-4 border-t border-slate-100">
           <div className="flex flex-wrap items-center gap-2.5">
-            {/* 1. Dropdown Filter Bulan */}
             <div className="relative min-w-[155px]">
-              <Calendar className="w-3.5 h-3.5 text-amber-400 absolute left-3 top-2.5 pointer-events-none" />
+              <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
               <select
                 value={selectedMonth}
                 onChange={(e) => applyMonthDropdown(e.target.value)}
                 aria-label="Filter Bulan"
-                className="w-full pl-8 pr-7 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white font-semibold focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
+                className="w-full pl-9 pr-8 py-2 rounded-lg bg-white border border-slate-200 text-sm text-slate-800 font-medium focus:outline-none focus:border-blue-600 cursor-pointer appearance-none"
               >
                 {MONTH_OPTIONS.map(m => (
                   <option key={m.value} value={m.value}>
@@ -348,17 +349,16 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
                   </option>
                 ))}
               </select>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
+              <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
             </div>
 
-            {/* 2. Dropdown Filter Tahun */}
-            <div className="relative min-w-[130px]">
-              <Calendar className="w-3.5 h-3.5 text-cyan-400 absolute left-3 top-2.5 pointer-events-none" />
+            <div className="relative min-w-[140px]">
+              <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
               <select
                 value={selectedYear}
                 onChange={(e) => applyYearDropdown(e.target.value)}
                 aria-label="Filter Tahun"
-                className="w-full pl-8 pr-7 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white font-semibold focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
+                className="w-full pl-9 pr-8 py-2 rounded-lg bg-white border border-slate-200 text-sm text-slate-800 font-medium focus:outline-none focus:border-blue-600 cursor-pointer appearance-none"
               >
                 <option value="all">Semua Tahun</option>
                 {availableYears.map(yr => (
@@ -367,30 +367,29 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
                   </option>
                 ))}
               </select>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
+              <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
             </div>
 
-            {/* 3. Custom Calendar & Date Range Picker */}
             <div className="relative">
               <div className="flex items-center">
                 <button
                   type="button"
                   onClick={() => setIsCalendarOpen(prev => !prev)}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                  className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition cursor-pointer ${
                     rangeStart
-                      ? 'bg-amber-500/15 border-amber-500/60 text-amber-300'
-                      : 'bg-slate-950 border-slate-800 text-slate-200 hover:border-amber-500/50'
+                      ? 'bg-blue-50 border-blue-200 text-blue-700'
+                      : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
                   }`}
                 >
-                  <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
                   <span>
                     {rangeStart
                       ? (normalizedLow === normalizedHigh
                         ? formatDisplayDate(normalizedLow)
                         : `${formatDisplayDate(normalizedLow)} – ${formatDisplayDate(normalizedHigh)}`)
-                      : 'Pilih Kalender (Rentang Hari)'}
+                      : 'Rentang Tanggal'}
                   </span>
-                  <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isCalendarOpen ? 'rotate-180 text-amber-400' : ''}`} />
+                  <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isCalendarOpen ? 'rotate-180 text-blue-600' : ''}`} />
                 </button>
                 {rangeStart && (
                   <button
@@ -400,7 +399,7 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
                       setRangeEnd('');
                     }}
                     title="Hapus rentang kalender"
-                    className="ml-1 p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-400 cursor-pointer"
+                    className="ml-1 p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 cursor-pointer"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -408,54 +407,48 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
               </div>
 
               {isCalendarOpen && (
-                <div className="absolute left-0 top-full mt-2 z-50 w-80 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-3.5 space-y-3">
-                  {/* Calendar Month & Year Navigation */}
-                  <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                <div className="absolute left-0 top-full mt-2 z-50 w-80 bg-white border border-slate-200 rounded-xl shadow-lg p-3.5 space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
                     <button
                       type="button"
                       onClick={() => setCalendarMonthDate(new Date(calendarYear, calendarMonthIdx - 1, 1))}
-                      className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:border-amber-500 cursor-pointer"
+                      className="p-1.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 hover:border-blue-600 cursor-pointer"
                       aria-label="Bulan sebelumnya"
                     >
                       <ChevronLeft className="w-4 h-4" />
                     </button>
-                    <div className="text-xs font-black text-white">
+                    <div className="text-sm font-bold text-slate-900">
                       {MONTHS_FULL_ID[calendarMonthIdx]} {calendarYear}
                     </div>
                     <button
                       type="button"
                       onClick={() => setCalendarMonthDate(new Date(calendarYear, calendarMonthIdx + 1, 1))}
-                      className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:border-amber-500 cursor-pointer"
+                      className="p-1.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 hover:border-blue-600 cursor-pointer"
                       aria-label="Bulan berikutnya"
                     >
                       <ChevronRight className="w-4 h-4" />
                     </button>
                   </div>
 
-                  {/* Helper Text */}
-                  <div className="text-[10px] text-slate-400 bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800 flex items-center justify-between">
+                  <div className="text-xs text-slate-600 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200 flex items-center justify-between">
                     <span>
                       {!rangeStart
-                        ? 'Klik tanggal awal, lalu klik tanggal akhir'
+                        ? 'Klik tanggal awal & akhir'
                         : !rangeEnd
-                        ? `Awal: ${formatDisplayDate(rangeStart)} • Pilih tanggal akhir`
+                        ? `Awal: ${formatDisplayDate(rangeStart)}`
                         : `${formatDisplayDate(normalizedLow)} – ${formatDisplayDate(normalizedHigh)}`}
                     </span>
-                    <span className="inline-flex items-center gap-1 text-emerald-400 font-semibold">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" /> Ada BBM
-                    </span>
+                    <span className="text-emerald-700 font-semibold">Bertanda = Ada BBM</span>
                   </div>
 
-                  {/* Weekday Headers */}
                   <div className="grid grid-cols-7 gap-1 text-center">
                     {['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].map(d => (
-                      <div key={d} className="text-[10px] font-bold text-slate-500 py-0.5">
+                      <div key={d} className="text-[11px] font-semibold text-slate-500 py-0.5">
                         {d}
                       </div>
                     ))}
                   </div>
 
-                  {/* Calendar Grid */}
                   <div className="grid grid-cols-7 gap-1">
                     {calendarCells.map((day, idx) => {
                       if (day === null) return <div key={`empty-${idx}`} className="h-8" />;
@@ -470,43 +463,37 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
                           key={iso}
                           type="button"
                           onClick={() => handleDayClick(iso)}
-                          className={`relative h-8 rounded-lg text-[11px] font-mono font-bold flex flex-col items-center justify-center transition cursor-pointer ${
+                          className={`relative h-8 rounded-lg text-xs font-mono font-semibold flex flex-col items-center justify-center transition cursor-pointer ${
                             isStart || isEnd
-                              ? 'bg-amber-500 text-slate-950 shadow-sm'
+                              ? 'bg-blue-600 text-white'
                               : inRange
-                              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                              : 'text-slate-200 hover:bg-amber-500/10'
+                              ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                              : hasLogs
+                              ? 'text-slate-900 bg-emerald-50/70 hover:bg-blue-50'
+                              : 'text-slate-700 hover:bg-slate-100'
                           }`}
                         >
                           <span>{day}</span>
-                          {hasLogs && (
-                            <span
-                              className={`w-1 h-1 rounded-full absolute bottom-0.5 ${
-                                isStart || isEnd ? 'bg-slate-950' : 'bg-emerald-400'
-                              }`}
-                            />
-                          )}
                         </button>
                       );
                     })}
                   </div>
 
-                  {/* Quick Footer Actions */}
-                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800">
+                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
                     <button
                       type="button"
                       onClick={() => {
                         setRangeStart('');
                         setRangeEnd('');
                       }}
-                      className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-semibold text-slate-300 hover:border-slate-600 cursor-pointer"
+                      className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
                     >
-                      Reset Hari
+                      Reset
                     </button>
                     <button
                       type="button"
                       onClick={() => setIsCalendarOpen(false)}
-                      className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-bold cursor-pointer"
+                      className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold cursor-pointer"
                     >
                       Terapkan
                     </button>
@@ -515,29 +502,27 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
               )}
             </div>
 
-            {/* 4. Filter SPBU */}
-            <div className="relative min-w-[155px]">
-              <MapPin className="w-3.5 h-3.5 text-blue-400 absolute left-3 top-2.5 pointer-events-none" />
+            <div className="relative min-w-[160px]">
+              <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
               <select
                 value={selectedSpbu}
-                onChange={(e) => setSelectedSpbu(e.target.value as any)}
+                onChange={(e) => setSelectedSpbu(e.target.value as 'all' | 'Farly' | 'Gajah Mada' | 'SPBU Lain')}
                 aria-label="Filter SPBU"
-                className="w-full pl-8 pr-7 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white font-semibold focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
+                className="w-full pl-9 pr-8 py-2 rounded-lg bg-white border border-slate-200 text-sm text-slate-800 font-medium focus:outline-none focus:border-blue-600 cursor-pointer appearance-none"
               >
                 <option value="all">Semua SPBU</option>
                 <option value="Farly">SPBU Farly</option>
                 <option value="Gajah Mada">SPBU Gajah Mada</option>
                 <option value="SPBU Lain">SPBU Lain (Urgent)</option>
               </select>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
+              <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
             </div>
 
             {hasActiveFilter && (
               <button
                 type="button"
                 onClick={resetAllFilters}
-                className="flex items-center gap-1 px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold transition cursor-pointer"
-                title="Reset semua filter"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition cursor-pointer"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span>Reset</span>
@@ -545,120 +530,128 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
             )}
           </div>
 
-          <div className="text-xs text-slate-400 font-medium shrink-0">
-            Periode: <span className="font-bold text-amber-400">{activePeriodLabel}</span>
+          <div className="text-xs text-slate-500 font-medium shrink-0">
+            Periode: <span className="font-semibold text-slate-900">{activePeriodLabel}</span>
           </div>
         </div>
 
-        {/* 5 FLEET SUMMARY KPI CARDS */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 pt-2">
-          <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800">
-            <span className="text-[10px] text-slate-400 block font-semibold">Total Konsumsi</span>
-            <span className="text-lg font-black text-white font-mono">{activeMetrics.totalLiters.toLocaleString('id-ID')} L</span>
-            <span className="text-[10px] text-slate-500 block">{activeMetrics.totalRefuels}x isi BBM</span>
+        {/* 5 SUMMARY STRIPS */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 pt-2">
+          <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/70">
+            <span className="text-xs text-slate-500 block font-medium">Total Konsumsi</span>
+            <span className="text-xl font-bold text-slate-900 font-mono tabular-nums mt-0.5 block">
+              {activeMetrics.totalLiters.toLocaleString('id-ID')} L
+            </span>
+            <span className="text-xs text-slate-500 block mt-0.5">{activeMetrics.totalRefuels}x pengisian</span>
           </div>
 
-          <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800">
-            <span className="text-[10px] text-slate-400 block font-semibold">Total Biaya Operasional</span>
-            <span className="text-lg font-black text-emerald-400 font-mono">{formatRupiah(activeMetrics.totalCost)}</span>
-            <span className="text-[10px] text-slate-500 block">Rp {activeMetrics.avgCostPerKm.toLocaleString('id-ID')}/KM</span>
+          <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/70">
+            <span className="text-xs text-slate-500 block font-medium">Total Biaya BBM</span>
+            <span className="text-xl font-bold text-slate-900 font-mono tabular-nums mt-0.5 block">
+              {formatRupiah(activeMetrics.totalCost)}
+            </span>
+            <span className="text-xs text-slate-500 block mt-0.5">Rp {activeMetrics.avgCostPerKm.toLocaleString('id-ID')}/KM</span>
           </div>
 
-          <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800">
-            <span className="text-[10px] text-slate-400 block font-semibold">Jarak Tempuh Total</span>
-            <span className="text-lg font-black text-cyan-400 font-mono">{activeMetrics.totalDistance.toLocaleString('id-ID')} KM</span>
-            <span className="text-[10px] text-slate-500 block">Akumulasi ritase</span>
+          <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/70">
+            <span className="text-xs text-slate-500 block font-medium">Jarak Tempuh Total</span>
+            <span className="text-xl font-bold text-blue-600 font-mono tabular-nums mt-0.5 block">
+              {activeMetrics.totalDistance.toLocaleString('id-ID')} KM
+            </span>
+            <span className="text-xs text-slate-500 block mt-0.5">Tersinkron KM driver</span>
           </div>
 
-          <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800">
-            <span className="text-[10px] text-slate-400 block font-semibold">Rerata Rasio Armada</span>
-            <span className="text-lg font-black text-amber-400 font-mono">{activeMetrics.avgKmPerLiter} KM/L</span>
-            <span className="text-[10px] text-slate-500 block">Target: 7.5 KM/L</span>
+          <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/70">
+            <span className="text-xs text-slate-500 block font-medium">Rerata Rasio</span>
+            <span className="text-xl font-bold text-slate-900 font-mono tabular-nums mt-0.5 block">
+              {activeMetrics.avgKmPerLiter} KM/L
+            </span>
+            <span className="text-xs text-slate-500 block mt-0.5">Target standar 7.5 KM/L</span>
           </div>
 
-          <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800">
-            <span className="text-[10px] text-slate-400 block font-semibold">Konsumsi Liter / KM</span>
-            <span className="text-lg font-black text-white font-mono">{activeMetrics.avgLiterPerKm}</span>
-            <span className="text-[10px] text-slate-500 block">{(activeMetrics.avgLiterPerKm * 100).toFixed(2)} L/100KM</span>
+          <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/70">
+            <span className="text-xs text-slate-500 block font-medium">Konsumsi Liter / KM</span>
+            <span className="text-xl font-bold text-slate-900 font-mono tabular-nums mt-0.5 block">
+              {activeMetrics.avgLiterPerKm}
+            </span>
+            <span className="text-xs text-slate-500 block mt-0.5">{(activeMetrics.avgLiterPerKm * 100).toFixed(2)} L/100KM</span>
           </div>
         </div>
       </div>
 
-      {/* TABLE: REKAPITULASI PER ARMADA */}
-      <div className="overflow-x-auto bg-slate-900 border border-slate-800 rounded-2xl shadow-sm">
-        <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-xs font-bold text-white">
-            <Truck className="w-4 h-4 text-amber-400" />
-            <span>Rekapitulasi Per Armada ({fleetSummaries.length} Unit)</span>
+      {/* TABLE: REKAP PER ARMADA */}
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between">
+          <div className="text-sm font-bold text-slate-900">
+            Rekapitulasi Per Armada ({fleetSummaries.length} Unit)
           </div>
-          <span className="text-[11px] text-slate-400">
-            Menampilkan {filteredLogs.length} transaksi BBM
+          <span className="text-xs text-slate-500 tabular-nums">
+            {filteredLogs.length} transaksi BBM
           </span>
         </div>
 
-        <table className="w-full text-left text-xs text-slate-300">
-          <thead className="bg-slate-950 text-[11px] uppercase tracking-wider text-slate-400 font-bold border-b border-slate-800 whitespace-nowrap">
-            <tr>
-              <th className="py-2 px-2.5">No</th>
-              <th className="py-2 px-2.5">Armada &amp; Plat</th>
-              <th className="py-2 px-2.5">Tipe Kendaraan</th>
-              <th className="py-2 px-2.5 text-right">Isi</th>
-              <th className="py-2 px-2.5 text-right">Total Liter</th>
-              <th className="py-2 px-2.5 text-right">Jarak (KM)</th>
-              <th className="py-2 px-2.5 text-right">Biaya BBM (Rp)</th>
-              <th className="py-2 px-2.5 text-right">Rasio (KM/L)</th>
-              <th className="py-2 px-2.5 text-right">Liter / KM</th>
-              <th className="py-2 px-2.5 text-right">Target</th>
-              <th className="py-2 px-2.5 text-center">Status Evaluasi</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800/60 font-mono">
-            {fleetSummaries.length === 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm text-slate-700">
+            <thead className="bg-slate-50 text-xs font-semibold text-slate-500 border-b border-slate-200 whitespace-nowrap">
               <tr>
-                <td colSpan={11} className="py-10 text-center text-slate-500 font-sans text-sm">
-                  Tidak ada data konsumsi BBM armada untuk periode yang dipilih.
-                </td>
+                <th className="py-3 px-3.5">No</th>
+                <th className="py-3 px-3.5">Armada &amp; Plat</th>
+                <th className="py-3 px-3.5">Tipe</th>
+                <th className="py-3 px-3.5 text-right">Isi</th>
+                <th className="py-3 px-3.5 text-right">Total Liter</th>
+                <th className="py-3 px-3.5 text-right">Jarak (KM)</th>
+                <th className="py-3 px-3.5 text-right">Biaya BBM</th>
+                <th className="py-3 px-3.5 text-right">Rasio (KM/L)</th>
+                <th className="py-3 px-3.5 text-right">Liter / KM</th>
+                <th className="py-3 px-3.5 text-right">Target</th>
+                <th className="py-3 px-3.5 text-center">Status</th>
               </tr>
-            ) : (
-              fleetSummaries.map((f, i) => (
-                <tr key={f.id} className="hover:bg-slate-800/40 transition">
-                  <td className="py-1.5 px-2.5 text-slate-400 font-sans text-xs whitespace-nowrap">{i + 1}</td>
-                  <td className="py-1.5 px-2.5 whitespace-nowrap">
-                    <div className="flex items-baseline gap-1.5 leading-tight">
-                      <Truck className="w-3.5 h-3.5 text-blue-400 shrink-0 self-center" />
-                      <span className="font-extrabold text-white text-sm font-sans">{f.initialCode || f.plateNumber}</span>
-                      <span className="text-xs text-slate-400 font-medium">({f.plateNumber})</span>
-                    </div>
-                  </td>
-                  <td className="py-1.5 px-2.5 font-sans text-slate-300 text-xs font-medium whitespace-nowrap">{f.vehicleType}</td>
-                  <td className="py-1.5 px-2.5 text-right text-slate-200 text-sm font-semibold whitespace-nowrap">{f.refuelCount}x</td>
-                  <td className="py-1.5 px-2.5 text-right font-bold text-white text-sm whitespace-nowrap">{f.totalLiters} L</td>
-                  <td className="py-1.5 px-2.5 text-right text-cyan-300 font-bold text-sm whitespace-nowrap">{f.totalDistanceKm.toLocaleString('id-ID')}</td>
-                  <td className="py-1.5 px-2.5 text-right text-emerald-400 font-bold text-sm whitespace-nowrap">{formatRupiah(f.totalCost)}</td>
-                  <td className="py-1.5 px-2.5 text-right font-black text-amber-400 text-base whitespace-nowrap">{f.avgKmPerLiter}</td>
-                  <td className="py-1.5 px-2.5 text-right text-slate-200 whitespace-nowrap leading-tight">
-                    <div className="text-sm font-bold">{f.avgLiterPerKm}</div>
-                    <div className="text-[11px] text-slate-500">({f.avgLiterPer100Km} L/100KM)</div>
-                  </td>
-                  <td className="py-1.5 px-2.5 text-right text-slate-400 text-xs font-semibold whitespace-nowrap">{f.targetRatio}</td>
-                  <td className="py-1.5 px-2.5 font-sans text-center whitespace-nowrap">
-                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border inline-block text-center ${
-                      f.status === 'Sangat Efisien'
-                        ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                        : f.status === 'Efisien / Normal'
-                        ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
-                        : f.status === 'Boros'
-                        ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                        : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                    }`}>
-                      {f.status}
-                    </span>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {fleetSummaries.length === 0 ? (
+                <tr>
+                  <td colSpan={11} className="py-12 text-center text-slate-500 text-sm">
+                    Tidak ada data konsumsi BBM armada untuk periode yang dipilih.
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                fleetSummaries.map((f, i) => (
+                  <tr key={f.id} className="hover:bg-slate-50/80 transition">
+                    <td className="py-3 px-3.5 text-slate-400 text-xs tabular-nums whitespace-nowrap">{i + 1}</td>
+                    <td className="py-3 px-3.5 whitespace-nowrap">
+                      <div className="font-semibold text-slate-900">{f.initialCode || f.plateNumber}</div>
+                      <div className="text-xs text-slate-500 font-mono">{f.plateNumber}</div>
+                    </td>
+                    <td className="py-3 px-3.5 text-slate-600 text-xs whitespace-nowrap">{f.vehicleType}</td>
+                    <td className="py-3 px-3.5 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap">{f.refuelCount}x</td>
+                    <td className="py-3 px-3.5 text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">{f.totalLiters} L</td>
+                    <td className="py-3 px-3.5 text-right font-mono tabular-nums font-semibold text-blue-600 whitespace-nowrap">{f.totalDistanceKm.toLocaleString('id-ID')}</td>
+                    <td className="py-3 px-3.5 text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">{formatRupiah(f.totalCost)}</td>
+                    <td className="py-3 px-3.5 text-right font-mono tabular-nums font-bold text-slate-900 whitespace-nowrap">{f.avgKmPerLiter}</td>
+                    <td className="py-3 px-3.5 text-right font-mono tabular-nums whitespace-nowrap">
+                      <div className="font-semibold text-slate-900">{f.avgLiterPerKm}</div>
+                      <div className="text-[11px] text-slate-500">{f.avgLiterPer100Km} L/100KM</div>
+                    </td>
+                    <td className="py-3 px-3.5 text-right font-mono tabular-nums text-slate-500 text-xs whitespace-nowrap">{f.targetRatio}</td>
+                    <td className="py-3 px-3.5 text-center whitespace-nowrap">
+                      <span className={`px-2.5 py-1 rounded-md text-xs font-semibold border inline-block ${
+                        f.status === 'Sangat Efisien'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : f.status === 'Efisien / Normal'
+                          ? 'bg-blue-50 text-blue-700 border-blue-200'
+                          : f.status === 'Boros'
+                          ? 'bg-amber-50 text-amber-700 border-amber-200'
+                          : 'bg-red-50 text-red-700 border-red-200'
+                      }`}>
+                        {f.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

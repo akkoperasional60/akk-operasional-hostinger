@@ -82,6 +82,7 @@ const getTabContextName = (tab?: string): string => {
     case 'fleets': return 'Armada & Kru Supir';
     case 'schedules': return 'Jadwal Pengiriman';
     case 'fuel_efficiency': return 'Efisiensi BBM';
+    case 'km_recap': return 'Rekap KM Armada';
     case 'customer_map': return 'Pemetaan Toko';
     case 'fleet_forms': return 'Formulir Armada';
     case 'crew_history': return 'Audit SLA & Kru';

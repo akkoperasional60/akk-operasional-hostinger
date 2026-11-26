@@ -250,7 +250,7 @@ export function registerCrewQaRoutes(app: Express, requireAuth: any) {
     const u=check(req,res);if(!u)return;
     if(!isQa(u))return res.status(403).json({success:false,error:'Aksi hanya untuk kru uji.'});
     const action=str(req.body?.action);
-    if(!['km','inspection','waybill','depart','arrive','report'].includes(action))return res.status(400).json({success:false,error:'Aksi tidak dikenal.'});
+    if(!['km','km_end','inspection','waybill','depart','arrive','report'].includes(action))return res.status(400).json({success:false,error:'Aksi tidak dikenal.'});
     try{
       const trip=await mutate(u,req.params.id,t=>{
         const slot=roleOf(t,u);
@@ -260,6 +260,15 @@ export function registerCrewQaRoutes(app: Express, requireAuth: any) {
           const km=Number(req.body?.value);
           if(!Number.isFinite(km)||km<=0||km>99999999)throw err('KM tidak valid.');
           t.odometerStart=String(km);
+        }else if(action==='km_end'){
+          if(slot!=='driver')throw err('KM akhir hanya untuk Driver.',403);
+          if(t.phase!=='returned')throw err('KM akhir hanya dapat diisi setelah Tiba di Gudang.',409);
+          const km=Number(req.body?.value);
+          if(!Number.isFinite(km)||km<=0||km>99999999)throw err('KM akhir tidak valid.');
+          const startKm=Number(t.odometerStart||0);
+          if(startKm>0 && km<=startKm)throw err(`KM akhir harus lebih besar dari KM awal (${startKm.toLocaleString('id-ID')} km).`);
+          t.odometerEnd=String(km);
+          t.odometerEndAt=new Date().toISOString();
         }else if(action==='inspection'){
           if(slot!=='driver')throw err('Checklist armada hanya untuk Driver.',403);
           if(!t.odometerStart)throw err('Isi KM awal terlebih dahulu sebelum mengisi checklist kendaraan.',409);
@@ -355,6 +364,8 @@ export function registerCrewQaRoutes(app: Express, requireAuth: any) {
         delete t.departedAt;
         delete t.returnedAt;
         delete t.odometerStart;
+        delete t.odometerEnd;
+        delete t.odometerEndAt;
         delete t.inspectionDone;
         delete t.inspectionChecklist;
         delete t.waybillValidated;

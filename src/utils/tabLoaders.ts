@@ -38,6 +38,8 @@ export const loadFleetMaintenanceCostManagement = () => loadOnce('FleetMaintenan
   import('../components/FleetMaintenanceCostManagement').then(m => ({ default: m.FleetMaintenanceCostManagement })));
 export const loadFuelEfficiencyManagement = () => loadOnce('FuelEfficiencyManagement', () =>
   import('../components/FuelEfficiencyManagement').then(m => ({ default: m.FuelEfficiencyManagement })));
+export const loadKmRecapManagement = () => loadOnce('KmRecapManagement', () =>
+  import('../components/KmRecapManagement').then(m => ({ default: m.KmRecapManagement })));
 export const loadUserManagement = () => loadOnce('UserManagement', () =>
   import('../components/UserManagement').then(m => ({ default: m.UserManagement })));
 export const loadCustomerMapping = () => loadOnce('CustomerMapping', () =>
@@ -96,6 +98,7 @@ export function getLoaderForTab(tab: NavTab): (() => Promise<any>) | null {
     case 'spareparts': return loadSparePartManagement;
     case 'maintenance_costs': return loadFleetMaintenanceCostManagement;
     case 'fuel_efficiency': return loadFuelEfficiencyManagement;
+    case 'km_recap': return loadKmRecapManagement;
     case 'customer_map': return loadCustomerMapping;
     case 'fleet_forms': return loadFleetFormCenter;
     case 'sales_dashboard':

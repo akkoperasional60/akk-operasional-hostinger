@@ -5271,58 +5271,42 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         </div>
       </div>
 
-      {/* Main Content: Flat Calendar & Selected Day Details */}
-      <div className="space-y-6">
-        {/* 4. Bagian Kalender Pengiriman (Kartu Utama Paling Bawah) */}
-          <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-2xl p-5 sm:p-6 space-y-5">
-            {/* Calendar Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-[#24344D] pb-4">
-              <div className="flex items-center gap-3.5">
-                <div className="w-10 h-10 rounded-[10px] bg-[#2563EB] text-white flex items-center justify-center shrink-0">
-                  <Calendar className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-[#0F172A] dark:text-white">
-                    Kalender Pengiriman — {selectedMonth === -1 ? `Semua Bulan (${calendarGridData.monthName})` : calendarGridData.monthName} {calendarGridData.year}
-                  </h3>
-                  <p className="text-xs text-[#64748B] dark:text-[#94A3B8] mt-0.5">
-                    Klik salah satu tanggal untuk melihat rincian supir, helper, area kirim, dan armada.
-                  </p>
-                </div>
+      {/* Main Content: Split View (Calendar on Left ~5 cols, Details & Standby Crew on Right ~7 cols) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Kolom Kiri: Kalender Pengiriman (~5 Kolom) */}
+        <div className="lg:col-span-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 space-y-4">
+          <div className="flex flex-col gap-3 border-b border-slate-200 dark:border-slate-800 pb-3.5">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0">
+                <Calendar className="w-4 h-4" />
               </div>
-
-              {/* Minimalist Unboxed Legend */}
-              {isSidoarjoBranch ? (
-                <div className="flex items-center gap-2 text-xs font-medium text-[#64748B] dark:text-[#94A3B8]">
-                  <MapPin className="w-4 h-4 text-[#2563EB] shrink-0" />
-                  <span>Ringkasan Total Area Kirim Harian · Cabang Sidoarjo</span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-4 flex-wrap text-xs font-medium text-[#475569] dark:text-[#CBD5E1]">
-                  <span
-                    className="inline-flex items-center gap-1.5"
-                    title="Selain jadwal Luar Kota & Bali termasuk Area Banyuwangi"
-                  >
-                    <span className="w-2 h-2 rounded-full bg-[#0EA5E9]" />
-                    <span>Area Banyuwangi</span>
-                  </span>
-                  <span
-                    className="inline-flex items-center gap-1.5"
-                    title="Jember Selatan, Jember Barat, Jember Kota, Kanvas LKT, Situbondo, Bondowoso, Susulan Situbondo Bondowoso"
-                  >
-                    <span className="w-2 h-2 rounded-full bg-[#2563EB]" />
-                    <span>Area Luar Kota</span>
-                  </span>
-                  <span
-                    className="inline-flex items-center gap-1.5"
-                    title="Negara, Singaraja, Denpasar 1, Denpasar 2, Kanvas LKT"
-                  >
-                    <span className="w-2 h-2 rounded-full bg-[#6366F1]" />
-                    <span>Area Bali</span>
-                  </span>
-                </div>
-              )}
+              <div>
+                <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+                  Kalender Pengiriman — {selectedMonth === -1 ? `Semua Bulan (${calendarGridData.monthName})` : calendarGridData.monthName} {calendarGridData.year}
+                </h3>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  Klik tanggal untuk melihat rincian pengiriman &amp; kru.
+                </p>
+              </div>
             </div>
+
+            {!isSidoarjoBranch && (
+              <div className="flex items-center gap-3 flex-wrap text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                <span className="inline-flex items-center gap-1.5" title="Area Banyuwangi">
+                  <span className="w-2 h-2 rounded-full bg-sky-500" />
+                  <span>Banyuwangi</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5" title="Area Luar Kota">
+                  <span className="w-2 h-2 rounded-full bg-blue-600" />
+                  <span>Luar Kota</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5" title="Area Bali">
+                  <span className="w-2 h-2 rounded-full bg-indigo-500" />
+                  <span>Bali</span>
+                </span>
+              </div>
+            )}
+          </div>
 
             {/* 7-Column Calendar Grid Header */}
             <div className="grid grid-cols-7 gap-2 text-center text-[11px] font-bold tracking-wider text-[#64748B] dark:text-[#94A3B8] bg-[#F8FAFC] dark:bg-[#1E293B] py-2.5 rounded-[10px] border border-[#E2E8F0] dark:border-[#24344D]">
@@ -5444,9 +5428,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               })}
             </div>
           </div>
+        </div>
 
-          {/* 4. Selected Date Details Panel */}
-          <div className="bg-white dark:bg-[#162234] border border-[#E2E8F0] dark:border-[#24344D] rounded-xl p-5 sm:p-6 space-y-5">
+        {/* Kolom Kanan: Rincian Pengiriman Terfaktur & Kru Stand By (~7 Kolom) */}
+        <div className="lg:col-span-7 space-y-6">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 space-y-5">
             {(() => {
               const allDaysFlat = filteredWeeks.flatMap((w: AdminScheduleWeek) => w.days);
               const activeDayObj = allDaysFlat.find((d: AdminScheduleDay) => d.dateString === selectedCalendarDate);

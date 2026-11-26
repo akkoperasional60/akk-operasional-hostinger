@@ -621,7 +621,7 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
     const actor = requiredActor(req, res);
     if (!actor) return;
     const task = clean(req.body?.action);
-    if (!['km', 'inspection', 'waybill'].includes(task)) return res.status(400).json({ success: false, error: 'Tugas tidak dikenal.' });
+    if (!['km', 'km_end', 'inspection', 'waybill'].includes(task)) return res.status(400).json({ success: false, error: 'Tugas tidak dikenal.' });
     const gps = checkLocation(req.body?.gps);
     if (!gps) return res.status(422).json({ success: false, error: 'Lokasi GPS aktual wajib diperoleh sebelum menyimpan.' });
     if (!isDatabaseConfigured() && !isPreviewRuntime) return res.status(503).json({ success: false, error: 'Database belum terhubung.' });
@@ -633,7 +633,19 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
         if (!branch || !branchAllowed(actor, branch, true)) throw Object.assign(new Error('Akses cabang ditolak.'), { status: 403 });
         const slot = currentCrewPosition(trip, actor);
         if (!slot) throw Object.assign(new Error('Belum mengambil posisi pada kiriman ini.'), { status: 403 });
-        if (String(trip.status || 'scheduled') !== 'scheduled') throw Object.assign(new Error('Persiapan hanya bisa dicatat sebelum berangkat.'), { status: 409 });
+        const tripStatusLower = String(trip.status || 'scheduled').toLowerCase();
+        const hasArrived =
+          tripStatusLower === 'delivered' ||
+          tripStatusLower === 'completed' ||
+          tripStatusLower === 'returned' ||
+          Boolean(trip.actualArrival);
+        if (task === 'km_end') {
+          if (!hasArrived) {
+            throw Object.assign(new Error('KM akhir hanya dapat diisi setelah Driver menekan Tiba di Gudang.'), { status: 409 });
+          }
+        } else if (tripStatusLower !== 'scheduled') {
+          throw Object.assign(new Error('Persiapan hanya bisa dicatat sebelum berangkat.'), { status: 409 });
+        }
         const now = new Date().toISOString();
         let normalizedChecklist: any[] | undefined;
         if (task === 'km') {
@@ -642,6 +654,17 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
           if (!Number.isFinite(value) || value <= 0 || value > 99999999) throw Object.assign(new Error('KM awal tidak valid.'), { status: 400 });
           if (trip.crewOdometerStart) throw Object.assign(new Error('KM awal sudah tercatat, tidak bisa diubah dari akun kru.'), { status: 409 });
           trip.crewOdometerStart = String(value);
+        } else if (task === 'km_end') {
+          if (slot !== 'driver') throw Object.assign(new Error('KM akhir hanya tugas Driver.'), { status: 403 });
+          const value = Number(req.body.value);
+          if (!Number.isFinite(value) || value <= 0 || value > 99999999) throw Object.assign(new Error('KM akhir tidak valid.'), { status: 400 });
+          const startVal = Number(trip.crewOdometerStart || 0);
+          if (startVal > 0 && value <= startVal) {
+            throw Object.assign(new Error(`KM akhir harus lebih besar dari KM awal (${startVal.toLocaleString('id-ID')} km).`), { status: 400 });
+          }
+          if (trip.crewOdometerEnd) throw Object.assign(new Error('KM akhir sudah tercatat. Hubungi Admin jika perlu koreksi.'), { status: 409 });
+          trip.crewOdometerEnd = String(value);
+          trip.crewOdometerEndAt = now;
         } else if (task === 'inspection') {
           if (slot !== 'driver') throw Object.assign(new Error('Checklist kendaraan hanya tugas Driver.'), { status: 403 });
           if (!trip.crewOdometerStart) throw Object.assign(new Error('Isi KM awal terlebih dahulu sebelum mengisi checklist kendaraan.'), { status: 409 });
@@ -658,7 +681,7 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
         trip.crewFieldEvents = (Array.isArray(trip.crewFieldEvents) ? trip.crewFieldEvents : []).slice(-(MAX_REPORT_EVENTS - 1));
         trip.crewFieldEvents.push({
           action: task, actorId: clean(actor.id), actorName: clean(actor.full_name), position: slot,
-          value: task === 'km' ? trip.crewOdometerStart : undefined, gps, at: now
+          value: task === 'km' ? trip.crewOdometerStart : task === 'km_end' ? trip.crewOdometerEnd : undefined, gps, at: now
         });
         trip.updatedAt = now;
         payload.updatedAt = now;
@@ -843,6 +866,8 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
         delete trip.actualDeparture;
         delete trip.actualArrival;
         delete trip.crewOdometerStart;
+        delete trip.crewOdometerEnd;
+        delete trip.crewOdometerEndAt;
         delete trip.crewInspectionDone;
         delete trip.crewInspectionChecklist;
         delete trip.crewWaybillValidated;

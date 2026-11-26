@@ -2816,156 +2816,164 @@ export const DriverReportsManagement: React.FC = () => {
             </div>
           </div>
 
-          {/* 4. Bagian Kalender */}
-          <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-xl p-4 sm:p-5 space-y-3.5">
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-200 dark:border-[#24344D] pb-3.5">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-green-600 text-white flex items-center justify-center shrink-0">
-                  <Calendar className="w-4 h-4" />
+          {/* Main Content: Split View (Calendar on Left ~5 cols, Table & Search on Right ~7 cols) */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Kolom Kiri: Kalender Laporan & Kendala (~5 Kolom) */}
+            <div className="lg:col-span-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 space-y-3.5">
+              <div className="flex flex-col gap-3 border-b border-slate-200 dark:border-slate-800 pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0">
+                    <Calendar className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white tracking-tight">
+                      Kalender Laporan &amp; Kendala — {monthlyCalendarGrid.monthName} {monthlyCalendarGrid.year}
+                    </h3>
+                    <div className="flex items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 flex-wrap">
+                      <span>
+                        Tanggal: <strong className="text-blue-600 dark:text-blue-400 font-mono tabular-nums">{selectedCalendarDate}</strong>
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-400 font-semibold">
+                        <AlertTriangle className="w-3 h-3" /> Kendala Masuk
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold">
+                        <CheckCircle2 className="w-3 h-3" /> Solusi Terkirim
+                      </span>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white tracking-tight">
-                    Kalender Laporan &amp; Kendala — {monthlyCalendarGrid.monthName} {monthlyCalendarGrid.year}
-                  </h3>
-                  <div className="flex items-center gap-4 text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex-wrap">
-                    <span>
-                      Terpilih: <strong className="text-green-600 dark:text-green-400 font-mono tabular-nums">{selectedCalendarDate}</strong>
-                    </span>
-                    <span className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-400 font-semibold">
-                      <AlertTriangle className="w-3.5 h-3.5" /> Kendala Masuk
-                    </span>
-                    <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400 font-semibold">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Solusi Terkirim
-                    </span>
+
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-slate-500 font-medium">Bulan &amp; Tahun:</span>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={calendarMonth}
+                      onChange={(e) => {
+                        const nextMonth = Number(e.target.value);
+                        setCalendarMonth(nextMonth);
+                        const nextIso = `${calendarYear}-${String(nextMonth + 1).padStart(2, '0')}-01`;
+                        setSelectedCalendarDate(nextIso);
+                        setDateFilterMode('single_date');
+                      }}
+                      className="h-8 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-lg px-2.5 focus:outline-none focus:border-blue-500 cursor-pointer"
+                    >
+                      {CALENDAR_MONTH_NAMES.map((m, idx) => (
+                        <option key={m} value={idx}>{m}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={calendarYear}
+                      onChange={(e) => {
+                        const nextYear = Number(e.target.value);
+                        setCalendarYear(nextYear);
+                        const nextIso = `${nextYear}-${String(calendarMonth + 1).padStart(2, '0')}-01`;
+                        setSelectedCalendarDate(nextIso);
+                        setDateFilterMode('single_date');
+                      }}
+                      className="h-8 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-lg px-2.5 focus:outline-none focus:border-blue-500 cursor-pointer tabular-nums"
+                    >
+                      {[2024, 2025, 2026, 2027, 2028].map(yr => (
+                        <option key={yr} value={yr}>{yr}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
-                <select
-                  value={calendarMonth}
-                  onChange={(e) => {
-                    const nextMonth = Number(e.target.value);
-                    setCalendarMonth(nextMonth);
-                    const nextIso = `${calendarYear}-${String(nextMonth + 1).padStart(2, '0')}-01`;
-                    setSelectedCalendarDate(nextIso);
-                    setDateFilterMode('single_date');
-                  }}
-                  className="h-9 bg-slate-50 dark:bg-[#0F172A] border border-slate-200 dark:border-[#24344D] text-slate-800 dark:text-white rounded-lg px-3 text-sm font-semibold focus:outline-none focus:border-green-600 cursor-pointer"
-                >
-                  {CALENDAR_MONTH_NAMES.map((m, idx) => (
-                    <option key={m} value={idx}>{m}</option>
-                  ))}
-                </select>
-                <select
-                  value={calendarYear}
-                  onChange={(e) => {
-                    const nextYear = Number(e.target.value);
-                    setCalendarYear(nextYear);
-                    const nextIso = `${nextYear}-${String(calendarMonth + 1).padStart(2, '0')}-01`;
-                    setSelectedCalendarDate(nextIso);
-                    setDateFilterMode('single_date');
-                  }}
-                  className="h-9 bg-slate-50 dark:bg-[#0F172A] border border-slate-200 dark:border-[#24344D] text-slate-800 dark:text-white rounded-lg px-3 text-sm font-semibold focus:outline-none focus:border-green-600 cursor-pointer tabular-nums"
-                >
-                  {[2024, 2025, 2026, 2027, 2028].map(yr => (
-                    <option key={yr} value={yr}>{yr}</option>
-                  ))}
-                </select>
+              {/* 7-Column Calendar Grid Header */}
+              <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/70 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800">
+                <div className="text-rose-600 dark:text-rose-400">Min</div>
+                <div>Sen</div>
+                <div>Sel</div>
+                <div>Rab</div>
+                <div>Kam</div>
+                <div>Jum</div>
+                <div className="text-blue-600 dark:text-blue-400">Sab</div>
               </div>
-            </div>
 
-            {/* 7-Column Calendar Grid Header */}
-            <div className="grid grid-cols-7 gap-1.5 text-center text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/70 py-2 rounded-lg border border-slate-200 dark:border-[#24344D]">
-              <div className="text-rose-600 dark:text-rose-400">Minggu</div>
-              <div>Senin</div>
-              <div>Selasa</div>
-              <div>Rabu</div>
-              <div>Kamis</div>
-              <div>Jumat</div>
-              <div className="text-blue-600 dark:text-blue-400">Sabtu</div>
-            </div>
+              {/* Calendar Cells Grid */}
+              <div className="grid grid-cols-7 gap-1.5">
+                {monthlyCalendarGrid.cells.map((cell) => {
+                  if (cell.type === 'padding') {
+                    return (
+                      <div
+                        key={cell.key}
+                        className="min-h-[58px] bg-slate-50/50 dark:bg-slate-900/20 rounded-xl border border-dashed border-slate-200 dark:border-slate-800/60"
+                      />
+                    );
+                  }
 
-            {/* Calendar Cells Grid */}
-            <div className="grid grid-cols-7 gap-1.5">
-              {monthlyCalendarGrid.cells.map((cell) => {
-                if (cell.type === 'padding') {
+                  const isSelected = selectedCalendarDate === cell.iso;
+                  const hasUnhandled = cell.needsActionCount > 0;
+                  const hasKendala = cell.kendalaCount > 0;
+                  const hasAkhirKiriman = cell.akhirKirimanCount > 0;
+                  const isAllResolvedGreen = !hasUnhandled && (cell.sentToPortalCount > 0 || hasAkhirKiriman);
+
                   return (
                     <div
                       key={cell.key}
-                      className="min-h-[64px] sm:min-h-[72px] bg-slate-50/50 dark:bg-slate-900/20 rounded-xl border border-dashed border-slate-200 dark:border-slate-800/60"
-                    />
-                  );
-                }
-
-                const isSelected = selectedCalendarDate === cell.iso;
-                const hasUnhandled = cell.needsActionCount > 0;
-                const hasKendala = cell.kendalaCount > 0;
-                const hasAkhirKiriman = cell.akhirKirimanCount > 0;
-                const isAllResolvedGreen = !hasUnhandled && (cell.sentToPortalCount > 0 || hasAkhirKiriman);
-
-                return (
-                  <div
-                    key={cell.key}
-                    onClick={() => {
-                      setSelectedCalendarDate(cell.iso);
-                      setDateFilterMode('single_date');
-                    }}
-                    className={`min-h-[64px] sm:min-h-[72px] p-2 rounded-xl border transition-colors cursor-pointer flex flex-col justify-between select-none relative gap-1 ${
-                      isSelected
-                        ? hasUnhandled
-                          ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-500 ring-1 ring-rose-500/30 z-10'
-                          : 'bg-green-50 dark:bg-green-950/40 border-green-500 ring-1 ring-green-500/25 z-10'
-                        : hasUnhandled
-                        ? 'bg-rose-50/80 dark:bg-rose-950/40 hover:bg-rose-100/70 dark:hover:bg-rose-950/60 border-rose-300 dark:border-rose-500/60'
-                        : isAllResolvedGreen
-                        ? 'bg-green-50/60 dark:bg-green-950/30 hover:bg-green-100/60 dark:hover:bg-green-950/50 border-green-300 dark:border-green-500/50'
-                        : 'bg-white dark:bg-[#162234] hover:bg-slate-50 dark:hover:bg-slate-800/50 border-slate-200 dark:border-[#24344D]'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-1">
-                      <span
-                        className={`text-xs sm:text-sm font-bold px-1.5 py-0.5 rounded-md tabular-nums ${
-                          hasUnhandled
-                            ? 'bg-rose-600 text-white'
-                            : isAllResolvedGreen || isSelected
-                            ? 'bg-green-600 text-white'
-                            : 'text-slate-700 dark:text-slate-300'
-                        }`}
-                      >
-                        {String(cell.dayNumber).padStart(2, '0')}
-                      </span>
-
-                      {isAllResolvedGreen && (
+                      onClick={() => {
+                        setSelectedCalendarDate(cell.iso);
+                        setDateFilterMode('single_date');
+                      }}
+                      className={`min-h-[58px] p-1.5 rounded-xl border transition-colors cursor-pointer flex flex-col justify-between select-none relative gap-1 ${
+                        isSelected
+                          ? hasUnhandled
+                            ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-500 ring-1 ring-rose-500/30 z-10'
+                            : 'bg-green-50 dark:bg-green-950/40 border-green-500 ring-1 ring-green-500/25 z-10'
+                          : hasUnhandled
+                          ? 'bg-rose-50/80 dark:bg-rose-950/40 hover:bg-rose-100/70 dark:hover:bg-rose-950/60 border-rose-300 dark:border-rose-500/60'
+                          : isAllResolvedGreen
+                          ? 'bg-green-50/60 dark:bg-green-950/30 hover:bg-green-100/60 dark:hover:bg-green-950/50 border-green-300 dark:border-green-500/50'
+                          : 'bg-white dark:bg-[#162234] hover:bg-slate-50 dark:hover:bg-slate-800/50 border-slate-200 dark:border-[#24344D]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1">
                         <span
-                          className="w-4 h-4 rounded-full bg-green-600 text-white flex items-center justify-center"
-                          title="Solusi terkirim / Tiba di gudang tercatat"
+                          className={`text-xs font-bold px-1 py-0.5 rounded-md tabular-nums ${
+                            hasUnhandled
+                              ? 'bg-rose-600 text-white'
+                              : isAllResolvedGreen || isSelected
+                              ? 'bg-green-600 text-white'
+                              : 'text-slate-700 dark:text-slate-300'
+                          }`}
                         >
-                          <Check className="w-2.5 h-2.5 stroke-[3]" />
+                          {String(cell.dayNumber).padStart(2, '0')}
                         </span>
-                      )}
-                    </div>
 
-                    <div className="space-y-0.5 mt-auto">
-                      {hasKendala && (
-                        <div className="px-1.5 py-0.5 rounded bg-rose-100/80 dark:bg-rose-500/20 text-rose-700 dark:text-rose-200 text-[11px] leading-tight font-bold flex items-center justify-between gap-1">
-                          <span className="truncate">Kendala</span>
-                          <span className="font-mono tabular-nums shrink-0">{cell.kendalaCount}</span>
-                        </div>
-                      )}
+                        {isAllResolvedGreen && (
+                          <span
+                            className="w-3.5 h-3.5 rounded-full bg-green-600 text-white flex items-center justify-center"
+                            title="Solusi terkirim / Tiba di gudang tercatat"
+                          >
+                            <Check className="w-2.5 h-2.5 stroke-[3]" />
+                          </span>
+                        )}
+                      </div>
 
-                      {hasAkhirKiriman && (
-                        <div className="px-1.5 py-0.5 rounded bg-blue-100/80 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200 text-[11px] leading-tight font-bold flex items-center justify-between gap-1">
-                          <span className="truncate">Gudang</span>
-                          <span className="font-mono tabular-nums shrink-0">{cell.akhirKirimanCount}</span>
-                        </div>
-                      )}
+                      <div className="space-y-0.5 mt-auto">
+                        {hasKendala && (
+                          <div className="px-1 py-0.5 rounded bg-rose-100/80 dark:bg-rose-500/20 text-rose-700 dark:text-rose-200 text-[10px] leading-tight font-bold flex items-center justify-between gap-1">
+                            <span className="truncate">Kendala</span>
+                            <span className="font-mono tabular-nums shrink-0">{cell.kendalaCount}</span>
+                          </div>
+                        )}
+
+                        {hasAkhirKiriman && (
+                          <div className="px-1 py-0.5 rounded bg-blue-100/80 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200 text-[10px] leading-tight font-bold flex items-center justify-between gap-1">
+                            <span className="truncate">Gudang</span>
+                            <span className="font-mono tabular-nums shrink-0">{cell.akhirKirimanCount}</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </div>
+
+            {/* Kolom Kanan: Daftar Kendala & Tindak Lanjut SPV (~7 Kolom) */}
+            <div className="lg:col-span-7 space-y-4">
 
           {/* 5. Baris Pencarian (Bawah Kalender) */}
           <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-xl p-3">
@@ -3366,6 +3374,8 @@ export const DriverReportsManagement: React.FC = () => {
                 </table>
               </div>
             )}
+          </div>
+          </div>
           </div>
         </>
       )}

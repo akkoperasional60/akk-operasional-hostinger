@@ -3,12 +3,11 @@ import {
   Download,
   Printer,
   Calendar,
-  Truck,
-  CheckCircle2,
   Search,
   X,
   FileSpreadsheet,
-  ChevronDown
+  ChevronDown,
+  AlertTriangle
 } from 'lucide-react';
 import { FuelLog } from '../types';
 import {
@@ -33,11 +32,10 @@ export const FuelConsumptionReportModal: React.FC<FuelConsumptionReportModalProp
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [filterFleet] = useState<string>('all');
   const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [exportError, setExportError] = useState<string>('');
 
-  // Compute all fleet summaries
   const allFleetSummaries = useMemo(() => computeWeeklyFleetSummaries(fuelLogs), [fuelLogs]);
 
-  // Extract distinct weeks for filter dropdown
   const availableWeeks = useMemo(() => {
     const map = new Map<string, string>();
     allFleetSummaries.forEach(f => {
@@ -48,7 +46,6 @@ export const FuelConsumptionReportModal: React.FC<FuelConsumptionReportModalProp
     return Array.from(map.entries()).map(([key, label]) => ({ key, label }));
   }, [allFleetSummaries]);
 
-  // Filtered summaries based on user selection
   const filteredFleetSummaries = useMemo(() => {
     return allFleetSummaries.filter(f => {
       const matchWeek = selectedWeek === 'all' || f.weekKey === selectedWeek;
@@ -64,7 +61,6 @@ export const FuelConsumptionReportModal: React.FC<FuelConsumptionReportModalProp
     });
   }, [allFleetSummaries, selectedWeek, filterFleet, searchQuery]);
 
-  // Aggregate Metrics for Active Filter
   const activeMetrics = useMemo(() => {
     const totalLiters = Number(filteredFleetSummaries.reduce((sum, f) => sum + f.totalLiters, 0).toFixed(1));
     const totalCost = filteredFleetSummaries.reduce((sum, f) => sum + f.totalCost, 0);
@@ -95,9 +91,9 @@ export const FuelConsumptionReportModal: React.FC<FuelConsumptionReportModalProp
     return found ? found.label : selectedWeek;
   }, [selectedWeek, availableWeeks]);
 
-  // Export handlers
   const handleExportPDF = () => {
     setIsExporting(true);
+    setExportError('');
     try {
       exportFuelReportToPDF({
         fleetSummaries: filteredFleetSummaries,
@@ -108,7 +104,7 @@ export const FuelConsumptionReportModal: React.FC<FuelConsumptionReportModalProp
       });
     } catch (err) {
       console.error('Failed to export PDF:', err);
-      alert('Gagal mengekspor PDF. Pastikan data terisi dengan benar.');
+      setExportError('Gagal mengekspor PDF. Pastikan data terisi dengan benar.');
     } finally {
       setIsExporting(false);
     }
@@ -116,6 +112,7 @@ export const FuelConsumptionReportModal: React.FC<FuelConsumptionReportModalProp
 
   const handleExportExcel = () => {
     setIsExporting(true);
+    setExportError('');
     try {
       const matchingLogs = selectedWeek === 'all'
         ? fuelLogs
@@ -134,7 +131,7 @@ export const FuelConsumptionReportModal: React.FC<FuelConsumptionReportModalProp
       });
     } catch (err) {
       console.error('Failed to export Excel:', err);
-      alert('Gagal mengekspor Excel.');
+      setExportError('Gagal mengekspor Excel. Periksa kembali data periode yang dipilih.');
     } finally {
       setIsExporting(false);
     }
@@ -147,58 +144,55 @@ export const FuelConsumptionReportModal: React.FC<FuelConsumptionReportModalProp
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-6xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-        
+    <div className="akk-flat-fuel fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
+      <div className="bg-white border border-slate-200 rounded-xl w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden">
         {/* MODAL HEADER */}
-        <div className="p-4 sm:p-5 border-b border-slate-800/80 flex items-center justify-between bg-slate-900/90 sticky top-0 z-20">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-gradient-to-br from-amber-500/20 to-emerald-500/20 border border-amber-500/30 text-amber-400">
-              <FileSpreadsheet className="w-5 h-5 text-amber-400" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base sm:text-lg font-bold text-white">
-                  Export Laporan Konsumsi BBM Mingguan
-                </h2>
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-mono">
-                  PDF & Excel
-                </span>
-              </div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Otomasi rekapitulasi performa konsumsi bahan bakar armada dan skor eco-driving driver per minggu PT AKK
-              </p>
-            </div>
+        <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between bg-white sticky top-0 z-20">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">
+              Export Laporan Konsumsi BBM Mingguan
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Rekapitulasi performa BBM per armada PT AKK siap unduh dalam format PDF dan Excel.
+            </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onClose}
-              className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition cursor-pointer"
-              title="Tutup"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-2 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+            title="Tutup"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
-        {/* MODAL CONTROLS & EXPORT ACTIONS */}
-        <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-950/50 space-y-4">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-            
-            {/* Filter Bar */}
-            <div className="flex flex-wrap items-center gap-2.5">
-              {/* Select Week Dropdown */}
-              <div className="relative min-w-[240px]">
-                <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                  PILIH PERIODE MINGGU
+        {/* CONTROLS & SUMMARY */}
+        <div className="p-5 border-b border-slate-200 bg-slate-50/70 space-y-4">
+          {exportError && (
+            <div className="px-3.5 py-2.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-medium flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                {exportError}
+              </span>
+              <button type="button" onClick={() => setExportError('')} className="text-red-500 hover:text-red-700 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-3">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-[240px]">
+                <label className="block text-xs font-semibold text-slate-600 mb-1">
+                  Periode Minggu
                 </label>
                 <div className="relative">
-                  <Calendar className="w-4 h-4 text-amber-400 absolute left-3 top-2.5 pointer-events-none" />
+                  <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
                   <select
                     value={selectedWeek}
                     onChange={(e) => setSelectedWeek(e.target.value)}
-                    className="w-full pl-9 pr-8 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer appearance-none"
+                    className="w-full pl-9 pr-8 py-2 rounded-lg bg-white border border-slate-200 text-sm text-slate-800 focus:outline-none focus:border-blue-600 cursor-pointer appearance-none"
                   >
                     <option value="all">Semua Periode Minggu ({availableWeeks.length} Minggu)</option>
                     {availableWeeks.map(w => (
@@ -207,218 +201,194 @@ export const FuelConsumptionReportModal: React.FC<FuelConsumptionReportModalProp
                       </option>
                     ))}
                   </select>
-                  <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-2.5 pointer-events-none" />
+                  <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
                 </div>
               </div>
 
-              {/* Search query */}
-              <div className="relative w-48 sm:w-56">
-                <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
-                  CARI ARMADA / DRIVER
+              <div className="w-56">
+                <label className="block text-xs font-semibold text-slate-600 mb-1">
+                  Cari Armada / Driver
                 </label>
                 <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
                   <input
                     type="text"
-                    placeholder="Ketik plat atau supir..."
+                    placeholder="Plat nomor atau driver..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-8 pr-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                    className="w-full pl-9 pr-3 py-2 rounded-lg bg-white border border-slate-200 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-600"
                   />
                 </div>
               </div>
             </div>
 
-            {/* Export Buttons */}
-            <div className="flex items-center gap-2.5 self-end lg:self-center pt-2 lg:pt-0">
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
               <button
+                type="button"
                 onClick={handleExportPDF}
                 disabled={isExporting}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer disabled:opacity-50"
-                title="Unduh berkas PDF siap cetak dengan tanda tangan"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs transition cursor-pointer disabled:opacity-50 whitespace-nowrap"
               >
-                <Download className="w-4 h-4" />
-                <span>Export PDF (.pdf)</span>
+                <Download className="w-4 h-4 text-slate-500" />
+                <span>Export PDF</span>
               </button>
 
               <button
+                type="button"
                 onClick={handleExportExcel}
                 disabled={isExporting}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer disabled:opacity-50"
-                title="Unduh berkas Excel Multi-Sheet (.xlsx)"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition cursor-pointer disabled:opacity-50 whitespace-nowrap"
               >
                 <FileSpreadsheet className="w-4 h-4" />
-                <span>Export Excel (.xlsx)</span>
+                <span>Export Excel</span>
               </button>
 
               <button
+                type="button"
                 onClick={handlePrint}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold transition cursor-pointer"
-                title="Cetak langsung menggunakan printer dialog"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition cursor-pointer whitespace-nowrap"
               >
-                <Printer className="w-4 h-4 text-slate-400" />
-                <span className="hidden sm:inline">Print</span>
+                <Printer className="w-4 h-4 text-slate-500" />
+                <span>Print</span>
               </button>
             </div>
           </div>
 
-          {/* ACTIVE METRICS ROW */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 pt-2">
-            <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
-              <span className="text-[10px] text-slate-400 block font-semibold">Total BBM Terdata</span>
-              <span className="text-base font-black text-white font-mono">{activeMetrics.totalLiters.toLocaleString('id-ID')} L</span>
-              <span className="text-[10px] text-slate-500 block">{activeMetrics.totalRefuels} kali isi</span>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            <div className="bg-white p-3 rounded-lg border border-slate-200">
+              <span className="text-xs text-slate-500 block">Total BBM</span>
+              <span className="text-lg font-bold text-slate-900 font-mono tabular-nums">{activeMetrics.totalLiters.toLocaleString('id-ID')} L</span>
+              <span className="text-xs text-slate-500 block">{activeMetrics.totalRefuels}x isi</span>
             </div>
 
-            <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
-              <span className="text-[10px] text-slate-400 block font-semibold">Total Biaya BBM</span>
-              <span className="text-base font-black text-emerald-400 font-mono">{formatRupiah(activeMetrics.totalCost)}</span>
-              <span className="text-[10px] text-slate-500 block">Rp {activeMetrics.avgCostPerKm.toLocaleString('id-ID')}/KM</span>
+            <div className="bg-white p-3 rounded-lg border border-slate-200">
+              <span className="text-xs text-slate-500 block">Total Biaya</span>
+              <span className="text-lg font-bold text-slate-900 font-mono tabular-nums">{formatRupiah(activeMetrics.totalCost)}</span>
+              <span className="text-xs text-slate-500 block">Rp {activeMetrics.avgCostPerKm.toLocaleString('id-ID')}/KM</span>
             </div>
 
-            <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
-              <span className="text-[10px] text-slate-400 block font-semibold">Jarak Tempuh</span>
-              <span className="text-base font-black text-cyan-400 font-mono">{activeMetrics.totalDistance.toLocaleString('id-ID')} KM</span>
-              <span className="text-[10px] text-slate-500 block">Akumulasi armada</span>
+            <div className="bg-white p-3 rounded-lg border border-slate-200">
+              <span className="text-xs text-slate-500 block">Jarak Tempuh</span>
+              <span className="text-lg font-bold text-blue-600 font-mono tabular-nums">{activeMetrics.totalDistance.toLocaleString('id-ID')} KM</span>
+              <span className="text-xs text-slate-500 block">Akumulasi armada</span>
             </div>
 
-            <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
-              <span className="text-[10px] text-slate-400 block font-semibold">Rasio Armada (KM/L)</span>
-              <span className="text-base font-black text-amber-400 font-mono">{activeMetrics.avgKmPerLiter} KM/L</span>
-              <span className="text-[10px] text-slate-500 block">Target: 7.5 KM/L</span>
+            <div className="bg-white p-3 rounded-lg border border-slate-200">
+              <span className="text-xs text-slate-500 block">Rasio Armada</span>
+              <span className="text-lg font-bold text-slate-900 font-mono tabular-nums">{activeMetrics.avgKmPerLiter} KM/L</span>
+              <span className="text-xs text-slate-500 block">Target: 7.5 KM/L</span>
             </div>
 
-            <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
-              <span className="text-[10px] text-slate-400 block font-semibold">Konsumsi Liter/KM</span>
-              <span className="text-base font-black text-white font-mono">{activeMetrics.avgLiterPerKm}</span>
-              <span className="text-[10px] text-slate-500 block">{(activeMetrics.avgLiterPerKm * 100).toFixed(2)} L/100KM</span>
+            <div className="bg-white p-3 rounded-lg border border-slate-200">
+              <span className="text-xs text-slate-500 block">Liter / KM</span>
+              <span className="text-lg font-bold text-slate-900 font-mono tabular-nums">{activeMetrics.avgLiterPerKm}</span>
+              <span className="text-xs text-slate-500 block">{(activeMetrics.avgLiterPerKm * 100).toFixed(2)} L/100KM</span>
             </div>
           </div>
         </div>
 
-        {/* HEADER TAB: PER ARMADA */}
-        <div className="px-5 pt-3 border-b border-slate-800 flex items-center gap-2 bg-slate-900">
-          <div className="flex items-center gap-2 px-4 py-2 rounded-t-lg text-xs font-bold border-b-2 border-amber-500 text-amber-400 bg-amber-500/10">
-            <Truck className="w-3.5 h-3.5" />
-            <span>Rekapitulasi Per Armada ({filteredFleetSummaries.length})</span>
+        {/* TABLE BODY */}
+        <div className="p-5 flex-1 overflow-y-auto space-y-3">
+          <div className="flex items-center justify-between text-xs text-slate-500">
+            <span>Rekapitulasi Per Armada ({filteredFleetSummaries.length} baris)</span>
+            <span className="font-semibold text-slate-800">{selectedWeekLabel}</span>
           </div>
-        </div>
 
-        {/* MODAL BODY TABLE PREVIEW */}
-        <div className="p-4 sm:p-5 flex-1 overflow-y-auto">
-          {(
-            <div className="space-y-4">
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>Menampilkan rekapitulasi konsumsi BBM per unit truk berdasarkan minggu pengiriman:</span>
-                <span className="font-semibold text-amber-400">{selectedWeekLabel}</span>
-              </div>
-
-              <div className="overflow-x-auto border border-slate-800 rounded-xl">
-                <table className="w-full text-left text-xs text-slate-300">
-                  <thead className="bg-slate-950 text-[11px] uppercase tracking-wider text-slate-400 font-bold border-b border-slate-800">
-                    <tr>
-                      <th className="py-3 px-3">No</th>
-                      <th className="py-3 px-3">Periode Minggu</th>
-                      <th className="py-3 px-3">Armada & Plat</th>
-                      <th className="py-3 px-3">Tipe Truk</th>
-                      <th className="py-3 px-3 text-right">Rit</th>
-                      <th className="py-3 px-3 text-right">Total Liter</th>
-                      <th className="py-3 px-3 text-right">Jarak (KM)</th>
-                      <th className="py-3 px-3 text-right">Biaya BBM (Rp)</th>
-                      <th className="py-3 px-3 text-right">Rasio (KM/L)</th>
-                      <th className="py-3 px-3 text-right">Liter/KM</th>
-                      <th className="py-3 px-3 text-right">Target</th>
-                      <th className="py-3 px-3">Status Evaluasi</th>
-                      <th className="py-3 px-3">Driver Bertugas</th>
+          <div className="overflow-x-auto border border-slate-200 rounded-xl">
+            <table className="w-full text-left text-sm text-slate-700">
+              <thead className="bg-slate-50 text-xs font-semibold text-slate-500 border-b border-slate-200 whitespace-nowrap">
+                <tr>
+                  <th className="py-3 px-3">No</th>
+                  <th className="py-3 px-3">Periode Minggu</th>
+                  <th className="py-3 px-3">Armada &amp; Plat</th>
+                  <th className="py-3 px-3">Tipe Truk</th>
+                  <th className="py-3 px-3 text-right">Rit</th>
+                  <th className="py-3 px-3 text-right">Total Liter</th>
+                  <th className="py-3 px-3 text-right">Jarak (KM)</th>
+                  <th className="py-3 px-3 text-right">Biaya BBM</th>
+                  <th className="py-3 px-3 text-right">KM/L</th>
+                  <th className="py-3 px-3 text-right">L/KM</th>
+                  <th className="py-3 px-3 text-right">Target</th>
+                  <th className="py-3 px-3 text-center">Status</th>
+                  <th className="py-3 px-3">Driver</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredFleetSummaries.length === 0 ? (
+                  <tr>
+                    <td colSpan={13} className="py-10 text-center text-slate-500 text-sm">
+                      Tidak ada data ringkasan armada untuk filter ini.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredFleetSummaries.map((f, i) => (
+                    <tr key={f.id} className="hover:bg-slate-50/80 transition">
+                      <td className="py-2.5 px-3 text-slate-400 text-xs tabular-nums">{i + 1}</td>
+                      <td className="py-2.5 px-3 text-slate-600 text-xs whitespace-nowrap">{f.weekLabel}</td>
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <div className="font-semibold text-slate-900">{f.initialCode || f.plateNumber}</div>
+                        <div className="text-xs text-slate-500 font-mono">{f.plateNumber}</div>
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-600 text-xs whitespace-nowrap">{f.vehicleType}</td>
+                      <td className="py-2.5 px-3 text-right font-mono tabular-nums">{f.refuelCount}x</td>
+                      <td className="py-2.5 px-3 text-right font-mono tabular-nums font-semibold text-slate-900">{f.totalLiters} L</td>
+                      <td className="py-2.5 px-3 text-right font-mono tabular-nums font-semibold text-blue-600">{f.totalDistanceKm.toLocaleString('id-ID')}</td>
+                      <td className="py-2.5 px-3 text-right font-mono tabular-nums font-semibold text-slate-900">{formatRupiah(f.totalCost)}</td>
+                      <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-slate-900">{f.avgKmPerLiter}</td>
+                      <td className="py-2.5 px-3 text-right font-mono tabular-nums text-xs text-slate-600">{f.avgLiterPerKm}</td>
+                      <td className="py-2.5 px-3 text-right font-mono tabular-nums text-xs text-slate-500">{f.targetRatio}</td>
+                      <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                        <span className={`px-2 py-0.5 rounded-md text-xs font-semibold border inline-block ${
+                          f.status === 'Sangat Efisien'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : f.status === 'Efisien / Normal'
+                            ? 'bg-blue-50 text-blue-700 border-blue-200'
+                            : f.status === 'Boros'
+                            ? 'bg-amber-50 text-amber-700 border-amber-200'
+                            : 'bg-red-50 text-red-700 border-red-200'
+                        }`}>
+                          {f.status}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-600 text-xs max-w-[180px] truncate" title={f.driverNames.join(', ')}>
+                        {f.driverNames.join(', ') || '-'}
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60 font-mono">
-                    {filteredFleetSummaries.length === 0 ? (
-                      <tr>
-                        <td colSpan={13} className="py-8 text-center text-slate-500 font-sans">
-                          Tidak ada data ringkasan armada untuk filter ini.
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredFleetSummaries.map((f, i) => (
-                        <tr key={f.id} className="hover:bg-slate-800/40 transition">
-                          <td className="py-2.5 px-3 text-slate-400 font-sans">{i + 1}</td>
-                          <td className="py-2.5 px-3 font-sans text-slate-300 text-[11px] whitespace-nowrap">
-                            {f.weekLabel}
-                          </td>
-                          <td className="py-2.5 px-3">
-                            <div className="font-bold text-white">{f.plateNumber}</div>
-                            {f.initialCode && (
-                              <span className="text-[10px] text-amber-400 bg-amber-500/10 px-1 rounded font-sans">
-                                {f.initialCode}
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-2.5 px-3 font-sans text-slate-300 text-[11px]">{f.vehicleType}</td>
-                          <td className="py-2.5 px-3 text-right text-slate-200">{f.refuelCount}x</td>
-                          <td className="py-2.5 px-3 text-right font-bold text-white">{f.totalLiters} L</td>
-                          <td className="py-2.5 px-3 text-right text-cyan-300">{f.totalDistanceKm.toLocaleString('id-ID')}</td>
-                          <td className="py-2.5 px-3 text-right text-emerald-400 font-semibold">{formatRupiah(f.totalCost)}</td>
-                          <td className="py-2.5 px-3 text-right font-black text-amber-400">{f.avgKmPerLiter}</td>
-                          <td className="py-2.5 px-3 text-right text-slate-300 text-[11px]">{f.avgLiterPerKm}</td>
-                          <td className="py-2.5 px-3 text-right text-slate-400 text-[11px]">{f.targetRatio}</td>
-                          <td className="py-2.5 px-3 font-sans">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold border block text-center truncate ${
-                              f.status === 'Sangat Efisien'
-                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                                : f.status === 'Efisien / Normal'
-                                ? 'bg-blue-500/10 text-blue-400 border-blue-500/30'
-                                : f.status === 'Boros'
-                                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                                : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
-                            }`}>
-                              {f.status}
-                            </span>
-                          </td>
-                          <td className="py-2.5 px-3 font-sans text-slate-300 text-[11px] max-w-xs truncate" title={f.driverNames.join(', ')}>
-                            {f.driverNames.join(', ') || '-'}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
 
-        {/* MODAL FOOTER */}
-        <div className="p-4 border-t border-slate-800 bg-slate-950/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-            <span>Format PDF menyertakan kop resmi PT AKK dan blok tanda tangan validasi operasional.</span>
-          </div>
+        {/* FOOTER */}
+        <div className="px-5 py-3.5 border-t border-slate-200 bg-slate-50 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+          <span>Format PDF menyertakan kop resmi PT AKK dan kolom tanda tangan operasional.</span>
 
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={handleExportPDF}
-              className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow transition cursor-pointer flex items-center gap-1.5"
+              className="px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 font-semibold text-xs transition cursor-pointer"
             >
-              <Download className="w-3.5 h-3.5" />
-              <span>Download PDF</span>
+              Download PDF
             </button>
             <button
+              type="button"
               onClick={handleExportExcel}
-              className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow transition cursor-pointer flex items-center gap-1.5"
+              className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition cursor-pointer"
             >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>Download Excel</span>
+              Download Excel
             </button>
             <button
+              type="button"
               onClick={onClose}
-              className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition cursor-pointer"
+              className="px-3.5 py-2 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-semibold transition cursor-pointer"
             >
               Tutup
             </button>
           </div>
         </div>
-
       </div>
     </div>
   );

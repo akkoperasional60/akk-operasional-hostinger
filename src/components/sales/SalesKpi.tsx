@@ -75,6 +75,7 @@ import {
   SALES_BRANCH_OPTIONS
 } from './SalesHeaderFilter';
 import { OFFICIAL_DESTINATION_AREAS } from '../../utils/areaNormalizer';
+import { DiscountErrorMonitoringSection } from './DiscountErrorMonitoringSection';
 
 // ============================================================================
 // INTERFACES & TYPES
@@ -187,12 +188,12 @@ export const ModernKpiDropdown: React.FC<ModernKpiDropdownProps> = ({
     }
   };
 
-  const activeGradient =
+  const activeSolidClass =
     accentColor === 'rose'
-      ? 'from-rose-600 to-orange-600 text-white shadow-sm shadow-rose-500/20'
+      ? 'bg-rose-600 text-white'
       : accentColor === 'emerald'
-      ? 'from-emerald-600 to-teal-600 text-white shadow-sm shadow-emerald-500/20'
-      : 'from-indigo-600 to-blue-600 text-white shadow-sm shadow-indigo-500/20';
+      ? 'bg-emerald-600 text-white'
+      : 'bg-blue-600 text-white';
 
   const selectedBadge = selectedOption.badgeText || selectedOption.badge;
 
@@ -205,30 +206,30 @@ export const ModernKpiDropdown: React.FC<ModernKpiDropdownProps> = ({
             setIsOpen(prev => !prev);
             setSearchQuery('');
           }}
-          className={`w-full text-left bg-white/95 dark:bg-slate-950/80 p-3 rounded-2xl border transition-all cursor-pointer group ${
+          className={`w-full text-left bg-white dark:bg-slate-950 p-3 rounded-xl border transition-colors cursor-pointer group ${
             isOpen
-              ? 'border-indigo-500 ring-2 ring-indigo-500/20 shadow-md'
-              : 'border-slate-200/90 dark:border-slate-800 hover:border-indigo-300 dark:hover:border-indigo-700 shadow-2xs'
+              ? 'border-blue-600 ring-2 ring-blue-600/15'
+              : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
           }`}
         >
           {label && (
-            <span className="block text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">
+            <span className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
               {label}
             </span>
           )}
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
               {icon && (
-                <span className="w-6 h-6 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                <span className="w-6 h-6 rounded-lg bg-slate-100 dark:bg-slate-800 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
                   {icon}
                 </span>
               )}
-              <span className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
+              <span className="text-sm font-semibold text-slate-900 dark:text-white truncate">
                 {selectedOption.label}
               </span>
               {selectedBadge && (
                 <span
-                  className={`px-1.5 py-0.5 rounded-md text-[9px] font-black border shrink-0 ${badgeToneClasses(
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-semibold border shrink-0 ${badgeToneClasses(
                     selectedOption.badgeTone,
                     false
                   )}`}
@@ -238,10 +239,10 @@ export const ModernKpiDropdown: React.FC<ModernKpiDropdownProps> = ({
               )}
             </div>
             <span
-              className={`w-6 h-6 rounded-lg flex items-center justify-center transition-transform duration-200 shrink-0 ${
+              className={`w-6 h-6 rounded-lg flex items-center justify-center transition-transform duration-150 shrink-0 ${
                 isOpen
-                  ? 'bg-indigo-600 text-white rotate-180'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400'
+                  ? 'bg-blue-600 text-white rotate-180'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500 group-hover:text-blue-600'
               }`}
             >
               <ChevronDown className="w-3.5 h-3.5" />
@@ -255,19 +256,19 @@ export const ModernKpiDropdown: React.FC<ModernKpiDropdownProps> = ({
             setIsOpen(prev => !prev);
             setSearchQuery('');
           }}
-          className={`px-3.5 py-2 rounded-xl border text-xs font-extrabold flex items-center justify-between gap-2.5 transition-all cursor-pointer min-w-[145px] ${
+          className={`px-3.5 py-2 rounded-lg border text-xs font-semibold flex items-center justify-between gap-2.5 transition-colors cursor-pointer min-w-[145px] ${
             isOpen
-              ? 'border-indigo-500 bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-300 ring-2 ring-indigo-500/20 shadow-md'
-              : 'border-slate-200/90 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-indigo-300 dark:hover:border-indigo-700 text-slate-800 dark:text-white shadow-2xs'
+              ? 'border-blue-600 bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 ring-2 ring-blue-600/15'
+              : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-slate-300 text-slate-800 dark:text-white'
           }`}
         >
           <div className="flex items-center gap-2 min-w-0">
-            {icon && <span className="text-indigo-600 dark:text-indigo-400 shrink-0">{icon}</span>}
+            {icon && <span className="text-blue-600 dark:text-blue-400 shrink-0">{icon}</span>}
             <span className="truncate">{selectedOption.label}</span>
           </div>
           <ChevronDown
-            className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 shrink-0 ${
-              isOpen ? 'rotate-180 text-indigo-600' : ''
+            className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-150 shrink-0 ${
+              isOpen ? 'rotate-180 text-blue-600' : ''
             }`}
           />
         </button>
@@ -278,18 +279,18 @@ export const ModernKpiDropdown: React.FC<ModernKpiDropdownProps> = ({
             setIsOpen(prev => !prev);
             setSearchQuery('');
           }}
-          className={`w-full px-3.5 py-2.5 rounded-xl border text-xs font-extrabold flex items-center justify-between gap-2 transition-all cursor-pointer ${
+          className={`w-full px-3 py-2 rounded-lg border text-xs font-semibold flex items-center justify-between gap-2 transition-colors cursor-pointer ${
             isOpen
-              ? 'border-indigo-500 bg-white dark:bg-slate-900 text-slate-900 dark:text-white ring-2 ring-indigo-500/20 shadow-sm'
-              : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 hover:border-indigo-300 text-slate-900 dark:text-white'
+              ? 'border-blue-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white ring-2 ring-blue-600/15'
+              : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-slate-300 text-slate-900 dark:text-white'
           }`}
         >
           <div className="flex items-center gap-2 min-w-0">
-            {icon && <span className="text-indigo-600 dark:text-indigo-400 shrink-0">{icon}</span>}
+            {icon && <span className="text-blue-600 dark:text-blue-400 shrink-0">{icon}</span>}
             <span className="truncate">{selectedOption.label}</span>
             {selectedBadge && (
               <span
-                className={`px-1.5 py-0.5 rounded text-[9px] font-black border shrink-0 ${badgeToneClasses(
+                className={`px-1.5 py-0.5 rounded text-[10px] font-semibold border shrink-0 ${badgeToneClasses(
                   selectedOption.badgeTone,
                   false
                 )}`}
@@ -299,8 +300,8 @@ export const ModernKpiDropdown: React.FC<ModernKpiDropdownProps> = ({
             )}
           </div>
           <ChevronDown
-            className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 shrink-0 ${
-              isOpen ? 'rotate-180 text-indigo-600' : ''
+            className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-150 shrink-0 ${
+              isOpen ? 'rotate-180 text-blue-600' : ''
             }`}
           />
         </button>
@@ -308,7 +309,7 @@ export const ModernKpiDropdown: React.FC<ModernKpiDropdownProps> = ({
 
       {isOpen && (
         <div
-          className={`absolute left-0 mt-2 z-50 bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-700 rounded-2xl shadow-2xl shadow-slate-900/15 dark:shadow-black/50 p-2 animate-fade-in ${
+          className={`absolute left-0 mt-1.5 z-50 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg p-1.5 ${
             gridCols === 3
               ? 'w-72 sm:w-80'
               : gridCols === 2
@@ -317,14 +318,14 @@ export const ModernKpiDropdown: React.FC<ModernKpiDropdownProps> = ({
           }`}
         >
           {searchable && (
-            <div className="relative mb-2 px-1 pt-1">
+            <div className="relative mb-1.5 px-1 pt-1">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 placeholder={searchPlaceholder}
-                className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-medium text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
               />
             </div>
           )}
@@ -335,7 +336,7 @@ export const ModernKpiDropdown: React.FC<ModernKpiDropdownProps> = ({
                 ? 'grid grid-cols-3 gap-1'
                 : gridCols === 2
                 ? 'grid grid-cols-2 gap-1'
-                : 'space-y-1'
+                : 'space-y-0.5'
             }`}
           >
             {filteredOptions.length === 0 ? (
@@ -354,10 +355,10 @@ export const ModernKpiDropdown: React.FC<ModernKpiDropdownProps> = ({
                       onChange(opt.value);
                       setIsOpen(false);
                     }}
-                    className={`w-full text-left px-3 py-2 rounded-xl text-xs transition-all cursor-pointer flex items-center justify-between gap-2 ${
+                    className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors cursor-pointer flex items-center justify-between gap-2 ${
                       isSelected
-                        ? `bg-gradient-to-r ${activeGradient} font-black`
-                        : 'text-slate-700 dark:text-slate-200 hover:bg-indigo-50/80 dark:hover:bg-slate-800/80 font-bold'
+                        ? `${activeSolidClass} font-semibold`
+                        : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 font-medium'
                     }`}
                   >
                     <div className="min-w-0 flex-1">
@@ -365,7 +366,7 @@ export const ModernKpiDropdown: React.FC<ModernKpiDropdownProps> = ({
                         <span className="truncate">{opt.label}</span>
                         {optBadge && (
                           <span
-                            className={`px-1.5 py-0.5 rounded-md text-[9px] font-black border shrink-0 ${badgeToneClasses(
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border shrink-0 ${badgeToneClasses(
                               opt.badgeTone,
                               isSelected
                             )}`}
@@ -377,7 +378,7 @@ export const ModernKpiDropdown: React.FC<ModernKpiDropdownProps> = ({
                       {opt.subLabel && (
                         <span
                           className={`block text-[10px] truncate mt-0.5 ${
-                            isSelected ? 'text-white/80 font-medium' : 'text-slate-400 dark:text-slate-500 font-medium'
+                            isSelected ? 'text-white/85 font-normal' : 'text-slate-400 dark:text-slate-500 font-normal'
                           }`}
                         >
                           {opt.subLabel}
@@ -468,8 +469,7 @@ const DEFAULT_NUSANTARA_ADMINS = [
   'BINTANG MEDITA SARI',
   'FATAUDIN RIFKY MAULANA',
   'PIPIT ISTIANI',
-  'IZZUL BAHRUL HISAM',
-  'MUHAMMAD SHOIM'
+  'IZZUL BAHRUL HISAM'
 ];
 
 const DEFAULT_SIDOARJO_ADMINS = [
@@ -687,7 +687,12 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
         if (res.ok) {
           const json = await res.json();
           if (isMounted && json?.data) {
-            setIndividualKpiList(Array.isArray(json.data.individualKpiList) ? json.data.individualKpiList : []);
+            const rawIndList: AdminIndividualKpiRecord[] = Array.isArray(json.data.individualKpiList)
+              ? json.data.individualKpiList
+              : [];
+            setIndividualKpiList(
+              rawIndList.filter(r => String(r.adminName || '').trim().toUpperCase() !== 'MUHAMMAD SHOIM')
+            );
             setDiscountErrorLogs(Array.isArray(json.data.discountErrorLogs) ? json.data.discountErrorLogs : []);
             setDendaCheckerList(Array.isArray(json.data.dendaCheckerList) ? json.data.dendaCheckerList : []);
             setReorderList(Array.isArray(json.data.reorderList) ? json.data.reorderList : []);
@@ -1140,17 +1145,30 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     );
   };
 
-  // Discount Error Form State
-  const [isAddDiscountErrOpen, setIsAddDiscountErrOpen] = useState(false);
-  const [editingDiscountId, setEditingDiscountId] = useState<string | null>(null);
-  const [dscDate, setDscDate] = useState('');
-  const [dscAdmin, setDscAdmin] = useState('');
-  const [dscNoFaktur, setDscNoFaktur] = useState('');
-  const [dscCustomer, setDscCustomer] = useState('');
-  const [dscExpected, setDscExpected] = useState('');
-  const [dscInput, setDscInput] = useState('');
-  const [dscSelisihRp, setDscSelisihRp] = useState('');
-  const [dscKeterangan, setDscKeterangan] = useState('');
+  // Sync Discount Error Logs changes back into KPI Individu Staff & MySQL
+  const handleSaveDiscountErrorLogs = (nextLogs: DiscountErrorLogItem[]) => {
+    setDiscountErrorLogs(nextLogs);
+
+    const syncedKpiList = individualKpiList.map(rec => {
+      const exactCount = nextLogs.filter(
+        d =>
+          d.adminName.toUpperCase() === rec.adminName.toUpperCase() &&
+          d.branchId === rec.branchId &&
+          d.month === rec.month &&
+          d.year === rec.year
+      ).length;
+      return {
+        ...rec,
+        discountErrorsCount: exactCount
+      };
+    });
+
+    setIndividualKpiList(syncedKpiList);
+    void persistSalesKpiToMysql({
+      discountErrorLogs: nextLogs,
+      individualKpiList: syncedKpiList
+    });
+  };
 
   // Upload Excel State for Denda Checker
   const [isDendaUploadOpen, setIsDendaUploadOpen] = useState(false);
@@ -2253,24 +2271,24 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
   // ============================================================================
   if (isKpiUploadOpen) {
     return (
-      <div className="space-y-5 animate-fade-in">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6 relative">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-slate-100 dark:border-slate-800">
+      <div className="akk-flat-kpi bg-slate-50 dark:bg-slate-950 p-4 sm:p-6 rounded-xl space-y-5">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 space-y-6">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-slate-200 dark:border-slate-800">
             <div className="flex items-center gap-3.5">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-600 via-blue-600 to-cyan-600 text-white flex items-center justify-center shadow-md shadow-indigo-500/20 shrink-0">
+              <div className="w-11 h-11 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
                 <FileSpreadsheet className="w-5 h-5" />
               </div>
               <div>
-                <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white tracking-tight">
-                  Upload File Excel KPI Individu Staf
+                <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white tracking-tight">
+                  Upload File Excel KPI Individu Staff
                 </h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Pilih cabang, bulan, tahun &amp; pilih admin evaluasi, lalu unggah file Excel KPI Individu Staf Admin Penjualan
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Pilih cabang, bulan, tahun, dan admin evaluasi, lalu unggah file Excel KPI Staff Admin Penjualan
                 </p>
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2.5">
+            <div className="flex flex-wrap items-center gap-2">
               <ModernKpiDropdown
                 variant="compact"
                 value={selectedBranchId}
@@ -2312,31 +2330,30 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             </div>
           </div>
 
-          {/* Mode Upload Data */}
-          <div className="space-y-2.5">
-            <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              MODE UPLOAD DATA
+          <div className="space-y-2">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Mode Upload Data
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => setKpiImportMode('replace_all')}
-                className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
+                className={`p-3.5 rounded-lg border text-left transition-colors cursor-pointer ${
                   kpiImportMode === 'replace_all'
-                    ? 'border-indigo-500 bg-indigo-50/70 dark:bg-indigo-950/30 text-slate-900 dark:text-white ring-2 ring-indigo-500/20'
+                    ? 'border-blue-600 bg-blue-50/70 dark:bg-blue-950/30 text-slate-900 dark:text-white'
                     : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300'
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs sm:text-sm font-bold flex items-center gap-2.5">
+                  <span className="text-sm font-semibold flex items-center gap-2.5">
                     <span
                       className={`w-3 h-3 rounded-full border-2 ${
-                        kpiImportMode === 'replace_all' ? 'border-indigo-600 bg-indigo-600' : 'border-slate-300'
+                        kpiImportMode === 'replace_all' ? 'border-blue-600 bg-blue-600' : 'border-slate-300'
                       }`}
                     />
                     Timpa Data Periode Ini (Replace All)
                   </span>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300">
+                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300">
                     Direkomendasikan
                   </span>
                 </div>
@@ -2345,16 +2362,16 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
               <button
                 type="button"
                 onClick={() => setKpiImportMode('append')}
-                className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
+                className={`p-3.5 rounded-lg border text-left transition-colors cursor-pointer ${
                   kpiImportMode === 'append'
-                    ? 'border-indigo-500 bg-indigo-50/70 dark:bg-indigo-950/30 text-slate-900 dark:text-white ring-2 ring-indigo-500/20'
+                    ? 'border-blue-600 bg-blue-50/70 dark:bg-blue-950/30 text-slate-900 dark:text-white'
                     : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300'
                 }`}
               >
-                <span className="text-xs sm:text-sm font-bold flex items-center gap-2.5">
+                <span className="text-sm font-semibold flex items-center gap-2.5">
                   <span
                     className={`w-3 h-3 rounded-full border-2 ${
-                      kpiImportMode === 'append' ? 'border-indigo-600 bg-indigo-600' : 'border-slate-300'
+                      kpiImportMode === 'append' ? 'border-blue-600 bg-blue-600' : 'border-slate-300'
                     }`}
                   />
                   Gabungkan / Perbarui per Admin (Append)
@@ -2363,21 +2380,20 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             </div>
           </div>
 
-          {/* Input File Excel tanpa tombol Template Excel */}
-          <div className="space-y-2.5">
-            <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              PILIH FILE EXCEL KPI INDIVIDU (.XLSX / .XLS / .CSV)
+          <div className="space-y-2">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Pilih File Excel KPI Individu (.xlsx / .xls / .csv)
             </label>
 
-            <div className="p-5 rounded-2xl border-2 border-dashed border-indigo-200 dark:border-indigo-800/70 hover:border-indigo-400 bg-gradient-to-r from-indigo-50/40 via-slate-50/60 to-blue-50/40 dark:from-indigo-950/20 dark:via-slate-950/50 dark:to-blue-950/20 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="p-5 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <input
                 type="file"
                 accept=".xlsx,.xls,.csv"
                 onChange={handleKpiExcelSelect}
-                className="w-full sm:w-auto text-xs text-slate-700 dark:text-slate-300 file:mr-3 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:bg-gradient-to-r file:from-indigo-600 file:to-blue-600 file:text-xs file:font-bold file:text-white hover:file:opacity-95 file:cursor-pointer cursor-pointer"
+                className="w-full sm:w-auto text-xs text-slate-700 dark:text-slate-300 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-600 file:text-xs file:font-semibold file:text-white hover:file:bg-blue-700 file:cursor-pointer cursor-pointer"
               />
               {kpiExcelFileName && (
-                <div className="px-3.5 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-2 shrink-0">
+                <div className="px-3.5 py-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs font-semibold text-emerald-700 dark:text-emerald-300 flex items-center gap-2 shrink-0">
                   <CheckCircle2 className="w-4 h-4 shrink-0" />
                   <span>
                     {kpiExcelFileName} ({kpiPreviewRows.length} staf terbaca)
@@ -2387,7 +2403,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             </div>
           </div>
 
-          <div className="p-4 rounded-2xl bg-slate-50/90 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800 text-slate-700 dark:text-slate-300 text-xs font-medium">
+          <div className="p-4 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 text-xs">
             Kolom yang otomatis dikenali sistem:{' '}
             <strong className="text-slate-900 dark:text-white">
               Nama Admin, Cabang, Bulan Sebelumnya (%), Validasi Sales Order &amp; Website (%), Pembuatan Faktur Penjualan (%), Pengecekan Faktur Penjualan (%), Kesalahan Penginputan Diskon (Kali), Total Order / Faktur, Keterangan
@@ -2397,12 +2413,12 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
 
           {showKpiUploadPreview && kpiPreviewRows.length > 0 && (
             <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
-              <h4 className="text-sm font-black text-slate-900 dark:text-white">
+              <h4 className="text-sm font-bold text-slate-900 dark:text-white">
                 Preview Sebelum Simpan ({kpiPreviewRows.length} Admin)
               </h4>
-              <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-700">
+              <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
                 <table className="w-full text-xs text-left border-collapse bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
-                  <thead className="bg-slate-100 dark:bg-slate-800 font-bold text-[11px] border-b border-slate-200 dark:border-slate-700">
+                  <thead className="bg-slate-50 dark:bg-slate-800 font-semibold text-xs border-b border-slate-200 dark:border-slate-700">
                     <tr>
                       <th className="py-2.5 px-3">No</th>
                       <th className="py-2.5 px-3">Nama Admin</th>
@@ -2416,26 +2432,26 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       <th className="py-2.5 px-3 text-center">Kesalahan Diskon</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800 tabular-nums">
                     {kpiPreviewRows.map((row, idx) => {
                       const avg = Number(((row.validasiSoWeb + row.pembuatanFaktur + row.pengecekanFaktur) / 3).toFixed(1));
                       const gap = Number(Math.max(0, 100 - avg).toFixed(1));
                       return (
                         <tr key={row.id}>
                           <td className="py-2 px-3">{idx + 1}</td>
-                          <td className="py-2 px-3 font-bold">{row.adminName}</td>
+                          <td className="py-2 px-3 font-semibold">{row.adminName}</td>
                           <td className="py-2 px-3">
                             {row.branchId === 'cab-sidoarjo' ? 'Cabang Sidoarjo' : 'Cabang Nusantara'}
                           </td>
-                          <td className="py-2 px-3 text-center font-semibold text-slate-600 dark:text-slate-300">
+                          <td className="py-2 px-3 text-center font-medium text-slate-600 dark:text-slate-300">
                             {Number(row.lastMonthPct ?? 0).toFixed(1)}%
                           </td>
-                          <td className="py-2 px-3 text-center font-semibold">{row.validasiSoWeb}%</td>
-                          <td className="py-2 px-3 text-center font-semibold">{row.pembuatanFaktur}%</td>
-                          <td className="py-2 px-3 text-center font-semibold">{row.pengecekanFaktur}%</td>
-                          <td className="py-2 px-3 text-center font-black text-indigo-600 dark:text-indigo-400">{avg}%</td>
-                          <td className="py-2 px-3 text-center font-black text-amber-600 dark:text-amber-400">{gap}%</td>
-                          <td className="py-2 px-3 text-center font-bold text-rose-600">{row.discountErrorsCount}x</td>
+                          <td className="py-2 px-3 text-center font-medium">{row.validasiSoWeb}%</td>
+                          <td className="py-2 px-3 text-center font-medium">{row.pembuatanFaktur}%</td>
+                          <td className="py-2 px-3 text-center font-medium">{row.pengecekanFaktur}%</td>
+                          <td className="py-2 px-3 text-center font-bold text-blue-600 dark:text-blue-400">{avg}%</td>
+                          <td className="py-2 px-3 text-center font-semibold text-amber-600 dark:text-amber-400">{gap}%</td>
+                          <td className="py-2 px-3 text-center font-semibold text-rose-600">{row.discountErrorsCount}x</td>
                         </tr>
                       );
                     })}
@@ -2445,7 +2461,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             </div>
           )}
 
-          <div className="flex flex-wrap items-center justify-end gap-3 pt-2">
+          <div className="flex flex-wrap items-center justify-end gap-2.5 pt-2">
             <button
               type="button"
               onClick={() => {
@@ -2454,14 +2470,14 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                 setKpiExcelFileName('');
                 setShowKpiUploadPreview(false);
               }}
-              className="px-5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-bold text-xs sm:text-sm cursor-pointer"
+              className="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-semibold text-xs sm:text-sm cursor-pointer"
             >
               Kembali ke KPI Individu
             </button>
             <button
               type="button"
               onClick={() => setShowKpiUploadPreview(prev => !prev)}
-              className="px-5 py-2.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-bold text-xs sm:text-sm flex items-center gap-2 cursor-pointer"
+              className="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-xs sm:text-sm flex items-center gap-2 cursor-pointer"
             >
               <Eye className="w-4 h-4" />
               <span>{showKpiUploadPreview ? 'Tutup Preview' : 'Preview Sebelum Simpan'}</span>
@@ -2469,7 +2485,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
             <button
               type="button"
               onClick={handleSaveKpiUpload}
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs sm:text-sm flex items-center gap-2 shadow-sm cursor-pointer"
+              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs sm:text-sm flex items-center gap-2 cursor-pointer"
             >
               <Save className="w-4 h-4" />
               <span>Simpan KPI Individu</span>
@@ -2797,29 +2813,35 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
   // MAIN RENDER
   // ============================================================================
   return (
-    <div className="space-y-6">
+    <div
+      className={
+        activeTab === 'sales_kpi_individual'
+          ? 'akk-flat-kpi bg-slate-50 dark:bg-slate-950 p-4 sm:p-5 rounded-xl space-y-5'
+          : 'space-y-6'
+      }
+    >
       {toastMsg && (
-        <div className="fixed bottom-5 right-5 z-50 max-w-md bg-emerald-600 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-2.5 text-xs font-bold animate-fade-in">
-          <CheckCircle2 className="w-4 h-4 shrink-0" />
+        <div className="fixed bottom-5 right-5 z-50 max-w-md bg-slate-900 text-white px-4 py-3 rounded-xl border border-slate-700 flex items-center gap-2.5 text-xs font-semibold">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{toastMsg}</span>
         </div>
       )}
 
       {/* ===================================================================== */}
-      {/* HEADER BAR MODERN & INTERAKTIF                                        */}
+      {/* HEADER BAR FLAT / MODERN CLEAN                                        */}
       {/* ===================================================================== */}
-      <div className="relative bg-gradient-to-br from-white via-slate-50/70 to-indigo-50/30 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950/30 border border-slate-200/90 dark:border-slate-800 p-5 sm:p-6 rounded-3xl shadow-xs space-y-5">
+      <div className="relative bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 sm:p-6 rounded-xl space-y-4">
         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 relative">
           <div className="flex items-start sm:items-center gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-600 via-blue-600 to-cyan-500 text-white flex items-center justify-center shadow-md shadow-indigo-500/20 shrink-0">
-              {activeTab === 'sales_kpi_individual' && <Award className="w-6 h-6" />}
-              {activeTab === 'sales_kpi_fines' && <AlertTriangle className="w-6 h-6" />}
-              {activeTab === 'sales_kpi_nusantara' && <Truck className="w-6 h-6" />}
-              {activeTab === 'sales_kpi_omset' && <BarChart3 className="w-6 h-6" />}
+            <div className="w-11 h-11 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+              {activeTab === 'sales_kpi_individual' && <Award className="w-5 h-5" />}
+              {activeTab === 'sales_kpi_fines' && <AlertTriangle className="w-5 h-5" />}
+              {activeTab === 'sales_kpi_nusantara' && <Truck className="w-5 h-5" />}
+              {activeTab === 'sales_kpi_omset' && <BarChart3 className="w-5 h-5" />}
             </div>
             <div>
-              <div className="flex flex-wrap items-center gap-2 mb-1">
-                <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400">
+              <div className="flex flex-wrap items-center gap-2 mb-0.5">
+                <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">
                   {selectedBranchId === 'cab-sidoarjo'
                     ? 'Cabang Sidoarjo'
                     : selectedBranchId === 'cab-banyuwangi'
@@ -2828,19 +2850,19 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                   &bull; {selectedMonth} {selectedYear}
                 </span>
               </div>
-              <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white uppercase tracking-tight">
+              <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
                 {activeTab === 'sales_kpi_individual' && 'KPI Individu Staff'}
                 {activeTab === 'sales_kpi_fines' && 'Akumulasi Denda'}
                 {activeTab === 'sales_kpi_nusantara' && 'Persentase Kiriman'}
                 {activeTab === 'sales_kpi_omset' && 'Omset Admin Penjualan'}
               </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">
-                Terintegrasi dengan User Management (Hak Akses Admin Penjualan) &bull; Terpisah per Cabang
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                Terintegrasi dengan User Management (Admin Penjualan) &bull; Terpisah per Cabang
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2">
             {activeTab === 'sales_kpi_individual' && (
               <>
                 <button
@@ -2862,10 +2884,10 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     setManualKpiIsInactive(Boolean(existing?.isInactive));
                     setIsManualKpiOpen(prev => !prev);
                   }}
-                  className="px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-slate-700 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/80 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+                  className="px-3.5 py-2 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition cursor-pointer"
                 >
-                  <Plus className="w-4 h-4" />
-                  <span>{isManualKpiOpen ? 'Tutup Form KPI' : 'Input / Edit KPI Manual'}</span>
+                  <Plus className="w-4 h-4 text-blue-600" />
+                  <span>{isManualKpiOpen ? 'Tutup Form KPI' : 'Input / Edit Manual'}</span>
                 </button>
                 <button
                   type="button"
@@ -2873,10 +2895,10 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     setShowKpiUploadPreview(false);
                     setIsKpiUploadOpen(true);
                   }}
-                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-sm shadow-emerald-500/15"
+                  className="px-3.5 py-2 rounded-lg bg-white dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-700 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition cursor-pointer"
                 >
                   <Upload className="w-4 h-4" />
-                  <span>Upload File Excel</span>
+                  <span>Upload Excel</span>
                 </button>
               </>
             )}
@@ -2888,7 +2910,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                   setShowDendaUploadPreview(false);
                   setIsDendaUploadOpen(true);
                 }}
-                className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-sm shadow-emerald-500/15"
+                className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
               >
                 <Upload className="w-4 h-4" />
                 <span>Upload File Excel</span>
@@ -2907,7 +2929,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     setManualOmsetAdmin(defaultAdmin);
                     setIsManualOmsetOpen(prev => !prev);
                   }}
-                  className="px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-slate-700 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/80 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+                  className="px-3.5 py-2 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
                   <span>{isManualOmsetOpen ? 'Tutup Form Omset' : 'Input / Edit Omset Manual'}</span>
@@ -2918,7 +2940,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     setShowOmsetUploadPreview(false);
                     setIsOmsetUploadOpen(true);
                   }}
-                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-sm shadow-emerald-500/15"
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
                 >
                   <Upload className="w-4 h-4" />
                   <span>Upload File Excel</span>
@@ -2930,9 +2952,9 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
               type="button"
               onClick={exportKpiToPdf}
               disabled={isExporting}
-              className="flex items-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs rounded-xl transition-all cursor-pointer disabled:opacity-50 shadow-sm shadow-indigo-500/15"
+              className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs sm:text-sm rounded-lg transition cursor-pointer disabled:opacity-50"
             >
-              {isExporting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+              {isExporting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
               <span>Ekspor PDF</span>
             </button>
           </div>
@@ -2942,7 +2964,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
         <div
           className={`grid grid-cols-1 sm:grid-cols-2 ${
             activeTab === 'sales_kpi_omset' ? 'lg:grid-cols-6' : 'lg:grid-cols-4'
-          } gap-3 pt-4 border-t border-slate-200/70 dark:border-slate-800 relative z-20`}
+          } gap-3 pt-4 border-t border-slate-200 dark:border-slate-800 relative z-20`}
         >
           {/* 1. CABANG */}
           <ModernKpiDropdown
@@ -3039,26 +3061,26 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
         {/* 100%, AKTUAL BULAN INI, DAN SELISIH GAP = TARGET - AKTUAL)          */}
         {/* =================================================================== */}
         {activeTab === 'sales_kpi_individual' && (
-          <div className="space-y-6 animate-fade-in">
+          <div className="space-y-5">
             {/* FORM INPUT / EDIT MANUAL KPI INDIVIDU */}
             {isManualKpiOpen && (
               <form
                 onSubmit={handleSaveManualKpi}
-                className="bg-white dark:bg-slate-900 border-2 border-indigo-500/30 dark:border-indigo-500/40 rounded-3xl p-5 sm:p-6 shadow-md space-y-4"
+                className="bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-800 rounded-xl p-5 sm:p-6 space-y-4"
               >
-                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
                   <div>
-                    <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400">
-                      FORM EVALUASI KPI
+                    <span className="text-xs font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                      Form Evaluasi KPI
                     </span>
-                    <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white">
-                      Input Capaian KPI Individu Staf ({selectedMonth} {selectedYear})
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white mt-0.5">
+                      Input Capaian KPI Individu Staff ({selectedMonth} {selectedYear})
                     </h3>
                   </div>
                   <button
                     type="button"
                     onClick={() => setIsManualKpiOpen(false)}
-                    className="text-xs font-bold text-slate-500 hover:text-slate-800 dark:hover:text-white cursor-pointer"
+                    className="text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-white cursor-pointer"
                   >
                     Tutup
                   </button>
@@ -3066,7 +3088,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3.5">
                   <div className="lg:col-span-2">
-                    <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
                       Nama Admin Penjualan
                     </label>
                     <ModernKpiDropdown
@@ -3092,7 +3114,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
                       Bulan Sebelumnya (%)
                     </label>
                     <input
@@ -3103,12 +3125,12 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       value={manualKpiPrevPct}
                       onChange={e => setManualKpiPrevPct(e.target.value)}
                       placeholder="Contoh: 92.5"
-                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm font-semibold tabular-nums"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
                       Validasi SO &amp; Web (%)
                     </label>
                     <input
@@ -3119,12 +3141,12 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       value={manualKpiValidasi}
                       onChange={e => setManualKpiValidasi(e.target.value)}
                       placeholder="0 - 100"
-                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm font-semibold tabular-nums"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
                       Pembuatan Faktur (%)
                     </label>
                     <input
@@ -3135,12 +3157,12 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       value={manualKpiPembuatan}
                       onChange={e => setManualKpiPembuatan(e.target.value)}
                       placeholder="0 - 100"
-                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm font-semibold tabular-nums"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
                       Pengecekan Faktur (%)
                     </label>
                     <input
@@ -3151,39 +3173,38 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       value={manualKpiPengecekan}
                       onChange={e => setManualKpiPengecekan(e.target.value)}
                       placeholder="0 - 100"
-                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-bold"
+                      className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm font-semibold tabular-nums"
                     />
                   </div>
                 </div>
 
-                {/* FITUR ADMIN TIDAK AKTIF PADA BULAN EVALUASI (KHUSUS USER DENGAN HAK UBAH KPI STAFF) */}
                 {canEditKpiStaff && (
-                  <div className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex items-start sm:items-center gap-3">
                       <div
-                        className={`p-2 rounded-xl border shrink-0 ${
+                        className={`p-2 rounded-lg border shrink-0 ${
                           manualKpiIsInactive
-                            ? 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
-                            : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                            ? 'bg-rose-50 border-rose-200 text-rose-600 dark:bg-rose-950/40 dark:border-rose-800 dark:text-rose-400'
+                            : 'bg-emerald-50 border-emerald-200 text-emerald-600 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-400'
                         }`}
                       >
                         {manualKpiIsInactive ? <UserX className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
                       </div>
                       <div>
-                        <div className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-2">
-                          <span>Status Analisa Admin Bulan {selectedMonth} {selectedYear}</span>
+                        <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                          <span>Status Analisa Admin ({selectedMonth} {selectedYear})</span>
                           <span
-                            className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase ${
+                            className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
                               manualKpiIsInactive
-                                ? 'bg-rose-100 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
-                                : 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                                ? 'bg-rose-100 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300'
+                                : 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300'
                             }`}
                           >
-                            {manualKpiIsInactive ? 'Admin Tidak Aktif' : 'Admin Aktif'}
+                            {manualKpiIsInactive ? 'Tidak Aktif' : 'Aktif'}
                           </span>
                         </div>
-                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                          Jika ditandai <strong>Admin Tidak Aktif</strong>, data KPI yang diinput pada bulan ini tidak ikut masuk pada perhitungan analisa &amp; rata-rata cabang.
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                          Jika ditandai <strong>Tidak Aktif</strong>, data bulan ini tidak ikut masuk pada perhitungan analisa cabang.
                         </p>
                       </div>
                     </div>
@@ -3191,10 +3212,10 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     <button
                       type="button"
                       onClick={() => setManualKpiIsInactive(prev => !prev)}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition cursor-pointer shrink-0 ${
+                      className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shrink-0 ${
                         manualKpiIsInactive
-                          ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs'
-                          : 'bg-rose-50 dark:bg-rose-950/60 hover:bg-rose-100 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
+                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          : 'bg-white dark:bg-slate-900 hover:bg-rose-50 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800'
                       }`}
                     >
                       {manualKpiIsInactive ? (
@@ -3205,20 +3226,20 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       ) : (
                         <>
                           <UserX className="w-3.5 h-3.5" />
-                          <span>Set Admin Tidak Aktif</span>
+                          <span>Set Tidak Aktif</span>
                         </>
                       )}
                     </button>
                   </div>
                 )}
 
-                <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
-                  <div className="flex flex-wrap items-center gap-3 text-xs">
-                    <span className="px-3 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 font-bold text-slate-700 dark:text-slate-300">
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+                  <div className="flex flex-wrap items-center gap-2.5 text-xs">
+                    <span className="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 font-semibold text-slate-700 dark:text-slate-300 tabular-nums">
                       Target: <strong>100%</strong>
                     </span>
-                    <span className="px-3 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 font-bold text-indigo-700 dark:text-indigo-300">
-                      Aktual Bulan Ini:{' '}
+                    <span className="px-3 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/50 font-semibold text-blue-700 dark:text-blue-300 tabular-nums">
+                      Aktual:{' '}
                       <strong>
                         {(
                           (Math.min(100, Math.max(0, parseNum(manualKpiValidasi))) +
@@ -3229,8 +3250,8 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                         %
                       </strong>
                     </span>
-                    <span className="px-3 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/60 font-bold text-amber-700 dark:text-amber-300">
-                      Selisih Gap:{' '}
+                    <span className="px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/50 font-semibold text-amber-700 dark:text-amber-300 tabular-nums">
+                      Gap:{' '}
                       <strong>
                         {Math.max(
                           0,
@@ -3249,13 +3270,13 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     <button
                       type="button"
                       onClick={() => setIsManualKpiOpen(false)}
-                      className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold cursor-pointer"
+                      className="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold cursor-pointer"
                     >
                       Batal
                     </button>
                     <button
                       type="submit"
-                      className="px-5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm"
+                      className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                     >
                       <Save className="w-3.5 h-3.5" />
                       <span>Simpan Data</span>
@@ -3265,131 +3286,126 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
               </form>
             )}
 
-            {/* ================================================================= */}
-            {/* GAMBAR 1: PERHITUNGAN CAPAIAN KPI BULANAN (TONE WARNA CERAH &     */}
-            {/* KONTRAS TINGGI, TANPA NOMOR 1, 2, 3, 4 DAN TANPA RUMUS)           */}
-            {/* ================================================================= */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3.5">
+            {/* RINGKASAN CAPAIAN KPI BULANAN (FLAT / MODERN CLEAN) */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-3.5">
                 <div>
-                  <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400 block">
-                    ANALISA PERBANDINGAN CAPAIAN KPI STAFF ({selectedMonth.toUpperCase()} {selectedYear})
-                  </span>
-                  <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white mt-0.5">
-                    Perhitungan Bulan Sebelumnya, Target, Aktual Bulan Ini &amp; Selisih Gap
+                  <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white">
+                    Ringkasan Capaian KPI Bulanan ({selectedMonth} {selectedYear})
                   </h3>
+                  <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+                    Perbandingan capaian bulan sebelumnya, target standar 100%, aktual bulan berjalan, dan selisih gap
+                  </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="px-3 py-1 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200/70 dark:border-emerald-800 text-[11px] font-bold">
-                    {activeDisplayedKpiList.length} Admin Aktif Dianalisa
+                  <span className="px-3 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-semibold">
+                    {activeDisplayedKpiList.length} Admin Aktif
                   </span>
                   {displayedKpiList.some(r => r.isInactive) && (
-                    <span className="px-3 py-1 rounded-xl bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 border border-rose-200/70 dark:border-rose-800 text-[11px] font-bold flex items-center gap-1.5">
+                    <span className="px-3 py-1 rounded-lg bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-xs font-semibold flex items-center gap-1.5">
                       <UserX className="w-3.5 h-3.5" />
-                      <span>
-                        {displayedKpiList.filter(r => r.isInactive).length} Admin Tidak Aktif (Dikecualikan)
-                      </span>
+                      <span>{displayedKpiList.filter(r => r.isInactive).length} Tidak Aktif</span>
                     </span>
                   )}
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-                {/* Bulan Sebelumnya (%) */}
-                <div className="p-4 rounded-2xl bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200/80 dark:border-sky-800/60">
+                {/* Bulan Sebelumnya */}
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-sky-800 dark:text-sky-300">
-                      BULAN SEBELUMNYA ({prevMonthName.slice(0, 3).toUpperCase()})
+                    <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      Bulan Sebelumnya ({prevMonthName.slice(0, 3)})
                     </span>
-                    <TrendingUp className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+                    <TrendingUp className="w-4 h-4 text-slate-400" />
                   </div>
-                  <div className="text-2xl sm:text-3xl font-black text-sky-700 dark:text-sky-300 mt-2 tabular-nums">
+                  <div className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white mt-2 tabular-nums">
                     {kpiOverallSummary.prevMonthPct}%
                   </div>
-                  <p className="text-[11px] font-semibold text-sky-700/80 dark:text-sky-300/80 mt-1">
-                    Pencapaian rata-rata bulan sebelumnya
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    Rerata capaian bulan lalu
                   </p>
                 </div>
 
                 {/* Target Capaian KPI */}
-                <div className="p-4 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/80 dark:border-emerald-800/60">
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
-                      TARGET CAPAIAN KPI
+                    <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      Target Capaian KPI
                     </span>
-                    <Target className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <Target className="w-4 h-4 text-slate-400" />
                   </div>
-                  <div className="text-2xl sm:text-3xl font-black text-emerald-700 dark:text-emerald-300 mt-2 tabular-nums">
+                  <div className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white mt-2 tabular-nums">
                     {kpiOverallSummary.targetPct}%
                   </div>
-                  <p className="text-[11px] font-semibold text-emerald-700/80 dark:text-emerald-300/80 mt-1">
-                    Standar target penuh manajemen
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    Standar target penuh
                   </p>
                 </div>
 
-                {/* Aktual Bulan Ini (%) */}
-                <div className="p-4 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200/80 dark:border-indigo-800/60">
+                {/* Aktual Bulan Ini */}
+                <div className="p-4 rounded-xl bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-indigo-800 dark:text-indigo-300">
-                      AKTUAL BULAN INI ({selectedMonth.slice(0, 3).toUpperCase()})
+                    <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">
+                      Aktual ({selectedMonth.slice(0, 3)})
                     </span>
-                    <CheckCircle2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                    <CheckCircle2 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                   </div>
-                  <div className="text-2xl sm:text-3xl font-black text-indigo-700 dark:text-indigo-300 mt-2 tabular-nums">
+                  <div className="text-2xl sm:text-3xl font-bold text-blue-700 dark:text-blue-300 mt-2 tabular-nums">
                     {kpiOverallSummary.actualPct}%
                   </div>
-                  <p className="text-[11px] font-semibold text-indigo-700/80 dark:text-indigo-300/80 mt-1">
+                  <p className="text-xs font-medium text-blue-700/80 dark:text-blue-300/80 mt-1 tabular-nums">
                     {kpiOverallSummary.actualPct >= kpiOverallSummary.prevMonthPct
-                      ? `Naik +${(kpiOverallSummary.actualPct - kpiOverallSummary.prevMonthPct).toFixed(1)}% vs bulan lalu`
-                      : `Turun ${(kpiOverallSummary.actualPct - kpiOverallSummary.prevMonthPct).toFixed(1)}% vs bulan lalu`}
+                      ? `+${(kpiOverallSummary.actualPct - kpiOverallSummary.prevMonthPct).toFixed(1)}% vs bulan lalu`
+                      : `${(kpiOverallSummary.actualPct - kpiOverallSummary.prevMonthPct).toFixed(1)}% vs bulan lalu`}
                   </p>
                 </div>
 
                 {/* Selisih Gap */}
-                <div className="p-4 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/60">
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-800 dark:text-amber-300">
-                      SELISIH GAP
+                    <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      Selisih Gap
                     </span>
-                    <Activity className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                    <Activity className="w-4 h-4 text-amber-500" />
                   </div>
-                  <div className="text-2xl sm:text-3xl font-black text-amber-700 dark:text-amber-300 mt-2 tabular-nums">
+                  <div className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400 mt-2 tabular-nums">
                     {kpiOverallSummary.gapPct}%
                   </div>
-                  <p className="text-[11px] font-semibold text-amber-700/80 dark:text-amber-300/80 mt-1">
-                    Selisih terhadap target capaian
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    Selisih terhadap target 100%
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* Top Operational Summary Metric Cards (Strictly from Active Admins) */}
+            {/* 4 OPERATIONAL METRIC CARDS */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 flex items-center justify-between shadow-xs">
-                <div>
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                    ADMIN TERBAIK #1 ({selectedMonth.slice(0, 3).toUpperCase()})
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                    Admin Terbaik #1
                   </span>
-                  <div className="text-base sm:text-lg font-black text-slate-900 dark:text-white mt-1 truncate">
+                  <div className="text-lg font-bold text-slate-900 dark:text-white mt-1 truncate">
                     {activeDisplayedKpiList.some(r => r.avgMonthlyPct > 0)
                       ? activeDisplayedKpiList[0]?.adminName
                       : 'Belum Ada Data'}
                   </div>
-                  <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1 font-bold">
-                    Aktual: {activeDisplayedKpiList[0]?.avgMonthlyPct || 0}% &bull; Gap: {activeDisplayedKpiList[0]?.gapPct ?? 100}%
+                  <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-1 font-semibold tabular-nums">
+                    Aktual {activeDisplayedKpiList[0]?.avgMonthlyPct || 0}% &bull; Gap {activeDisplayedKpiList[0]?.gapPct ?? 100}%
                   </p>
                 </div>
-                <div className="p-3 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                <div className="p-2.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-amber-600 shrink-0">
                   <Trophy className="w-5 h-5" />
                 </div>
               </div>
 
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 flex items-center justify-between shadow-xs">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex items-center justify-between gap-3">
                 <div>
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                    RERATA VALIDASI SO &amp; WEB
+                  <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                    Rerata Validasi SO &amp; Web
                   </span>
-                  <div className="text-lg font-black text-blue-600 dark:text-blue-400 mt-1">
+                  <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1 tabular-nums">
                     {activeDisplayedKpiList.some(r => r.validasiSoWeb > 0)
                       ? (
                           activeDisplayedKpiList.reduce((s, r) => s + r.validasiSoWeb, 0) /
@@ -3398,21 +3414,19 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       : '0.0'}
                     %
                   </div>
-                  <p className="text-[11px] text-slate-500 mt-1 font-semibold">
-                    Validasi Sales Order &amp; Website
-                  </p>
+                  <p className="text-xs text-slate-500 mt-1">Ketepatan validasi SO &amp; Web</p>
                 </div>
-                <div className="p-3 rounded-xl bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                <div className="p-2.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-blue-600 shrink-0">
                   <CheckCircle className="w-5 h-5" />
                 </div>
               </div>
 
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 flex items-center justify-between shadow-xs">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex items-center justify-between gap-3">
                 <div>
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                    PEMBUATAN &amp; CEK FAKTUR
+                  <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                    Pembuatan &amp; Cek Faktur
                   </span>
-                  <div className="text-lg font-black text-emerald-600 dark:text-emerald-400 mt-1">
+                  <div className="text-2xl font-bold text-slate-900 dark:text-white mt-1 tabular-nums">
                     {activeDisplayedKpiList.some(r => r.pembuatanFaktur > 0 || r.pengecekanFaktur > 0)
                       ? (
                           activeDisplayedKpiList.reduce(
@@ -3423,45 +3437,41 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       : '0.0'}
                     %
                   </div>
-                  <p className="text-[11px] text-slate-500 mt-1 font-semibold">
-                    Pembuatan &amp; Pengecekan Faktur
-                  </p>
+                  <p className="text-xs text-slate-500 mt-1">Penyelesaian faktur penjualan</p>
                 </div>
-                <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                <div className="p-2.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-emerald-600 shrink-0">
                   <FileText className="w-5 h-5" />
                 </div>
               </div>
 
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 flex items-center justify-between shadow-xs">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex items-center justify-between gap-3">
                 <div>
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                    KESALAHAN INPUT DISKON
+                  <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                    Kesalahan Input Diskon
                   </span>
-                  <div className="text-lg font-black text-rose-600 dark:text-rose-400 mt-1">
+                  <div className="text-2xl font-bold text-rose-600 dark:text-rose-400 mt-1 tabular-nums">
                     {activeDisplayedKpiList.reduce((s, r) => s + r.discountErrorsCount, 0)} Kali
                   </div>
-                  <p className="text-[11px] text-slate-500 mt-1 font-semibold">
-                    Total temuan bulan {selectedMonth}
-                  </p>
+                  <p className="text-xs text-slate-500 mt-1">Temuan bulan {selectedMonth}</p>
                 </div>
-                <div className="p-3 rounded-xl bg-rose-500/10 text-rose-500 border border-rose-500/20">
+                <div className="p-2.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-rose-600 shrink-0">
                   <BadgePercent className="w-5 h-5" />
                 </div>
               </div>
             </div>
 
-            {/* CHART PERBANDINGAN METRIK KPI INDIVIDU ANTAR ADMIN (HANYA ADMIN AKTIF) */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
+            {/* GRAFIK EVALUASI KPI BULANAN ADMIN */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
-                  <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
                     Grafik Evaluasi KPI Bulanan Admin ({selectedMonth} {selectedYear})
                   </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Perbandingan Bulan Sebelumnya (%), Validasi SO &amp; Web, Pembuatan Faktur, Pengecekan Faktur, Aktual (%) &amp; Selisih Gap (Admin Aktif)
+                  <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+                    Perbandingan Bulan Sebelumnya, Validasi SO &amp; Web, Pembuatan Faktur, Pengecekan Faktur &amp; Aktual (Admin Aktif)
                   </p>
                 </div>
-                <span className="px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-xs font-bold">
+                <span className="px-3 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold self-start sm:self-auto">
                   Target Standar: 100%
                 </span>
               </div>
@@ -3470,32 +3480,33 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart
                     data={activeDisplayedKpiList}
-                    margin={{ top: 10, right: 15, left: -15, bottom: 10 }}
+                    margin={{ top: 10, right: 15, left: -10, bottom: 10 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                     <XAxis
                       dataKey="adminName"
-                      tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }}
-                      axisLine={false}
+                      tick={{ fill: '#475569', fontSize: 11, fontWeight: 600 }}
+                      axisLine={{ stroke: '#e2e8f0' }}
                       tickLine={false}
                     />
                     <YAxis
                       domain={[0, 100]}
-                      tick={{ fill: '#64748b', fontSize: 10 }}
+                      tick={{ fill: '#64748b', fontSize: 11 }}
                       axisLine={false}
                       tickLine={false}
                       unit="%"
                     />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: '#0f172a',
-                        borderColor: '#334155',
-                        borderRadius: '12px',
-                        color: '#fff',
-                        fontSize: '11px'
+                        backgroundColor: '#ffffff',
+                        borderColor: '#e2e8f0',
+                        borderRadius: '10px',
+                        color: '#0f172a',
+                        fontSize: '12px',
+                        boxShadow: '0 4px 12px rgba(15,23,42,0.08)'
                       }}
                     />
-                    <Legend wrapperStyle={{ fontSize: '11px', fontWeight: 700 }} />
+                    <Legend wrapperStyle={{ fontSize: '12px', fontWeight: 600 }} />
                     <Bar
                       dataKey="prevMonthPct"
                       name="Bulan Sebelumnya (%)"
@@ -3506,7 +3517,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     <Bar
                       dataKey="validasiSoWeb"
                       name="Validasi SO & Website (%)"
-                      fill="#3b82f6"
+                      fill="#2563eb"
                       radius={[4, 4, 0, 0]}
                       barSize={14}
                     />
@@ -3520,7 +3531,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     <Bar
                       dataKey="pengecekanFaktur"
                       name="Pengecekan Faktur (%)"
-                      fill="#8b5cf6"
+                      fill="#64748b"
                       radius={[4, 4, 0, 0]}
                       barSize={14}
                     />
@@ -3529,32 +3540,27 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       dataKey="avgMonthlyPct"
                       name="Aktual Bulan Ini (%)"
                       stroke="#f59e0b"
-                      strokeWidth={3}
-                      dot={{ fill: '#f59e0b', r: 5 }}
+                      strokeWidth={2.5}
+                      dot={{ fill: '#ffffff', stroke: '#f59e0b', strokeWidth: 2, r: 4 }}
                     />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
             </div>
 
-            {/* URUTAN ADMIN TERBAIK & RADAR PROFIL INDIVIDU */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Left: Urutan Admin Terbaik (Leaderboard) */}
-              <div className="lg:col-span-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-xs space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            {/* URUTAN ADMIN TERBAIK & RINCIAN CAPAIAN ADMIN TERPILIH */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+              {/* Left: Leaderboard */}
+              <div className="lg:col-span-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-200 dark:border-slate-800">
                   <div>
-                    <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">
-                      Urutan Admin Terbaik ({selectedMonth} {selectedYear})
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                      Peringkat Admin ({selectedMonth} {selectedYear})
                     </h3>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Klik nama admin untuk melihat rincian Bulan Sebelumnya, Target 100%, Aktual &amp; Selisih Gap
+                      Pilih nama admin untuk melihat rincian Bulan Lalu, Aktual &amp; Gap
                     </p>
                   </div>
-                  {canEditKpiStaff && (
-                    <span className="px-2.5 py-1 rounded-xl bg-slate-100 dark:bg-slate-800 text-[10px] font-extrabold text-slate-600 dark:text-slate-300 shrink-0">
-                      Hak Edit KPI: Dapat Set Admin Tidak Aktif
-                    </span>
-                  )}
                 </div>
 
                 <div className="space-y-2.5">
@@ -3565,28 +3571,24 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       <div
                         key={admin.adminName}
                         onClick={() => setFocusedAdminName(admin.adminName)}
-                        className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                        className={`p-3.5 rounded-xl border transition-colors cursor-pointer flex items-center justify-between gap-3 ${
                           isInactive
                             ? isFocused
-                              ? 'bg-rose-50/70 dark:bg-rose-950/30 border-rose-400 ring-1 ring-rose-500/20 opacity-85'
-                              : 'bg-slate-100/70 dark:bg-slate-950/60 border-dashed border-slate-300 dark:border-slate-800 opacity-75 hover:opacity-100'
+                              ? 'bg-rose-50/70 dark:bg-rose-950/30 border-rose-400'
+                              : 'bg-slate-50 dark:bg-slate-950 border-dashed border-slate-300 dark:border-slate-700 opacity-80'
                             : isFocused
-                            ? 'bg-indigo-50/70 dark:bg-indigo-950/30 border-indigo-500 ring-1 ring-indigo-500/20'
-                            : 'bg-slate-50/60 dark:bg-slate-950/40 border-slate-200/80 dark:border-slate-800 hover:border-indigo-300'
+                            ? 'bg-blue-50/70 dark:bg-blue-950/30 border-blue-600'
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300'
                         }`}
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           <div
-                            className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${
+                            className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 tabular-nums ${
                               isInactive
-                                ? 'bg-rose-100 dark:bg-rose-950/70 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800'
+                                ? 'bg-rose-100 text-rose-700'
                                 : admin.rank === 1
-                                ? 'bg-amber-400 text-slate-950 shadow-xs'
-                                : admin.rank === 2
-                                ? 'bg-slate-300 text-slate-900'
-                                : admin.rank === 3
-                                ? 'bg-amber-700 text-white'
-                                : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
                             }`}
                           >
                             {isInactive ? <UserX className="w-4 h-4" /> : `#${admin.rank}`}
@@ -3594,7 +3596,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
                               <span
-                                className={`text-xs font-black truncate ${
+                                className={`text-sm font-bold truncate ${
                                   isInactive
                                     ? 'line-through text-slate-500 dark:text-slate-400'
                                     : 'text-slate-900 dark:text-white'
@@ -3602,21 +3604,21 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                               >
                                 {admin.adminName}
                               </span>
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                                 {admin.branchId === 'cab-sidoarjo' ? 'SDA' : 'BWI'}
                               </span>
                               {isInactive && (
-                                <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
-                                  Admin Tidak Aktif &bull; Tidak Masuk Analisa
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-100 text-rose-700">
+                                  Tidak Aktif
                                 </span>
                               )}
                             </div>
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 flex flex-wrap items-center gap-2">
-                              <span>Bulan Lalu: <strong>{admin.prevMonthPct}%</strong></span>
+                            <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex flex-wrap items-center gap-2 tabular-nums">
+                              <span>Bln Lalu: <strong className="text-slate-700 dark:text-slate-200">{admin.prevMonthPct}%</strong></span>
                               <span>&bull;</span>
-                              <span>Target: <strong>100%</strong></span>
+                              <span>Target: <strong className="text-slate-700 dark:text-slate-200">100%</strong></span>
                               <span>&bull;</span>
-                              <span className="text-amber-600 dark:text-amber-400 font-bold">
+                              <span className="text-amber-700 dark:text-amber-400 font-semibold">
                                 Gap: {admin.gapPct}%
                               </span>
                             </div>
@@ -3624,28 +3626,28 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
-                          <div className="text-right">
+                          <div className="text-right tabular-nums">
                             <div
-                              className={`text-sm font-black ${
+                              className={`text-base font-bold ${
                                 isInactive
                                   ? 'text-slate-400 dark:text-slate-500'
-                                  : 'text-indigo-600 dark:text-indigo-400'
+                                  : 'text-blue-600 dark:text-blue-400'
                               }`}
                             >
-                              {isInactive ? 'Dikecualikan' : `Aktual: ${admin.avgMonthlyPct}%`}
+                              {isInactive ? 'Dikecualikan' : `${admin.avgMonthlyPct}%`}
                             </div>
                             <div
-                              className={`text-[10px] font-bold ${
+                              className={`text-xs font-semibold ${
                                 isInactive
-                                  ? 'text-rose-500 dark:text-rose-400'
+                                  ? 'text-rose-500'
                                   : admin.discountErrorsCount === 0
-                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  ? 'text-emerald-700 dark:text-emerald-400'
                                   : 'text-rose-600 dark:text-rose-400'
                               }`}
                             >
                               {isInactive
-                                ? `Input: ${admin.avgMonthlyPct}%`
-                                : `Salah Diskon: ${admin.discountErrorsCount}x`}
+                                ? `Input ${admin.avgMonthlyPct}%`
+                                : `Diskon: ${admin.discountErrorsCount}x`}
                             </div>
                           </div>
 
@@ -3656,15 +3658,15 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                                 ev.stopPropagation();
                                 handleToggleAdminActiveStatus(admin.adminName, admin.branchId);
                               }}
-                              className={`px-2.5 py-1.5 rounded-xl border text-[10px] font-extrabold flex items-center gap-1 transition cursor-pointer ${
+                              className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1 transition cursor-pointer ${
                                 isInactive
-                                  ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100'
-                                  : 'bg-rose-50/70 dark:bg-rose-950/40 border-rose-200/80 dark:border-rose-800/70 text-rose-600 dark:text-rose-300 hover:bg-rose-100'
+                                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+                                  : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200'
                               }`}
                               title={
                                 isInactive
-                                  ? 'Aktifkan kembali admin ini agar masuk analisa bulan ini'
-                                  : 'Tandai Admin Tidak Aktif agar data bulan ini tidak ikut masuk analisa'
+                                  ? 'Aktifkan kembali admin ini'
+                                  : 'Tandai Tidak Aktif pada bulan ini'
                               }
                             >
                               {isInactive ? (
@@ -3675,7 +3677,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                               ) : (
                                 <>
                                   <UserX className="w-3.5 h-3.5" />
-                                  <span className="hidden sm:inline">Tidak Aktif</span>
+                                  <span className="hidden sm:inline">Nonaktif</span>
                                 </>
                               )}
                             </button>
@@ -3695,7 +3697,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                                 setManualKpiIsInactive(Boolean(admin.isInactive));
                                 setIsManualKpiOpen(true);
                               }}
-                              className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 cursor-pointer"
+                              className="p-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-blue-600 dark:text-blue-400 hover:bg-blue-50 cursor-pointer"
                               title="Edit KPI Admin ini"
                             >
                               <Pencil className="w-3.5 h-3.5" />
@@ -3708,24 +3710,24 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                 </div>
               </div>
 
-              {/* Right: Radar & Breakdown Detail for Selected Admin */}
-              <div className="lg:col-span-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-xs space-y-5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
+              {/* Right: Detail Admin Terpilih */}
+              <div className="lg:col-span-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-5">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-200 dark:border-slate-800">
                   <div>
                     <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">
-                        Rincian Capaian KPI — {focusedAdminKpi.adminName}
+                      <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                        Rincian Capaian — {focusedAdminKpi.adminName}
                       </h3>
                       {focusedAdminKpi.isInactive && (
-                        <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
-                          Admin Tidak Aktif
+                        <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-rose-100 text-rose-700">
+                          Tidak Aktif
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                       {focusedAdminKpi.isInactive
-                        ? `Status Tidak Aktif pada ${selectedMonth} ${selectedYear} (Data tidak ikut masuk pada analisa cabang)`
-                        : `Peringkat #${focusedAdminKpi.rank} • Target 100% • Aktual ${focusedAdminKpi.avgMonthlyPct}% • Gap ${focusedAdminKpi.gapPct}%`}
+                        ? `Status Tidak Aktif pada ${selectedMonth} ${selectedYear}`
+                        : `Peringkat #${focusedAdminKpi.rank} • Aktual ${focusedAdminKpi.avgMonthlyPct}% • Gap ${focusedAdminKpi.gapPct}%`}
                     </p>
                   </div>
 
@@ -3736,56 +3738,54 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                         onClick={() =>
                           handleToggleAdminActiveStatus(focusedAdminKpi.adminName, focusedAdminKpi.branchId)
                         }
-                        className={`px-3 py-1.5 rounded-xl border text-xs font-extrabold flex items-center gap-1.5 transition cursor-pointer ${
+                        className={`px-3 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
                           focusedAdminKpi.isInactive
-                            ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-600'
-                            : 'bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800'
+                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600'
+                            : 'bg-white dark:bg-slate-800 hover:bg-rose-50 text-rose-600 dark:text-rose-300 border-slate-200 dark:border-slate-700'
                         }`}
                       >
                         {focusedAdminKpi.isInactive ? (
                           <>
                             <UserCheck className="w-3.5 h-3.5" />
-                            <span>Aktifkan di Analisa</span>
+                            <span>Aktifkan</span>
                           </>
                         ) : (
                           <>
                             <UserX className="w-3.5 h-3.5" />
-                            <span>Set Admin Tidak Aktif</span>
+                            <span>Set Tidak Aktif</span>
                           </>
                         )}
                       </button>
                     )}
-                    <span className="px-3 py-1 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 text-xs font-black">
+                    <span className="px-3 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-xs font-bold tabular-nums">
                       Aktual: {focusedAdminKpi.avgMonthlyPct}%
                     </span>
                   </div>
                 </div>
 
-                {/* 4 Kotak Perhitungan Individu: Bulan Lalu, Target 100%, Aktual, Selisih Gap */}
+                {/* 4 Kotak Perhitungan Individu */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                  <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800">
-                    <span className="text-[10px] font-black uppercase text-slate-400 block">Bulan Lalu</span>
-                    <span className="text-base font-black text-slate-900 dark:text-white mt-0.5 block">
+                  <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                    <span className="text-xs font-medium text-slate-500 block">Bulan Lalu</span>
+                    <span className="text-lg font-bold text-slate-900 dark:text-white mt-0.5 block tabular-nums">
                       {focusedAdminKpi.prevMonthPct}%
                     </span>
                   </div>
-                  <div className="p-3 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-800/60">
-                    <span className="text-[10px] font-black uppercase text-emerald-700 dark:text-emerald-400 block">Target</span>
-                    <span className="text-base font-black text-emerald-700 dark:text-emerald-300 mt-0.5 block">
+                  <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                    <span className="text-xs font-medium text-slate-500 block">Target</span>
+                    <span className="text-lg font-bold text-slate-900 dark:text-white mt-0.5 block tabular-nums">
                       100%
                     </span>
                   </div>
-                  <div className="p-3 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200/70 dark:border-indigo-800/60">
-                    <span className="text-[10px] font-black uppercase text-indigo-700 dark:text-indigo-400 block">Aktual</span>
-                    <span className="text-base font-black text-indigo-700 dark:text-indigo-300 mt-0.5 block">
+                  <div className="p-3 rounded-lg bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
+                    <span className="text-xs font-medium text-blue-700 dark:text-blue-400 block">Aktual</span>
+                    <span className="text-lg font-bold text-blue-700 dark:text-blue-300 mt-0.5 block tabular-nums">
                       {focusedAdminKpi.avgMonthlyPct}%
                     </span>
                   </div>
-                  <div className="p-3 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/70 dark:border-amber-800/60">
-                    <span className="text-[10px] font-black uppercase text-amber-700 dark:text-amber-400 block">
-                      Selisih Gap
-                    </span>
-                    <span className="text-base font-black text-amber-700 dark:text-amber-300 mt-0.5 block">
+                  <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                    <span className="text-xs font-medium text-slate-500 block">Selisih Gap</span>
+                    <span className="text-lg font-bold text-amber-600 dark:text-amber-400 mt-0.5 block tabular-nums">
                       {focusedAdminKpi.gapPct}%
                     </span>
                   </div>
@@ -3806,56 +3806,56 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                           { subject: 'Bulan Lalu', A: focusedAdminKpi.prevMonthPct, fullMark: 100 }
                         ]}
                       >
-                        <PolarGrid stroke="#cbd5e1" />
-                        <PolarAngleAxis dataKey="subject" tick={{ fill: '#475569', fontSize: 10, fontWeight: 700 }} />
-                        <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: '#94a3b8', fontSize: 8 }} />
+                        <PolarGrid stroke="#e2e8f0" />
+                        <PolarAngleAxis dataKey="subject" tick={{ fill: '#475569', fontSize: 10, fontWeight: 600 }} />
+                        <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: '#94a3b8', fontSize: 9 }} />
                         <Radar
                           name={focusedAdminKpi.adminName}
                           dataKey="A"
-                          stroke="#4f46e5"
-                          fill="#6366f1"
-                          fillOpacity={0.35}
+                          stroke="#2563eb"
+                          fill="#2563eb"
+                          fillOpacity={0.22}
                         />
                       </RadarChart>
                     </ResponsiveContainer>
                   </div>
 
                   <div className="space-y-3">
-                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800">
-                      <div className="flex justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
+                    <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <div className="flex justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
                         <span>Validasi Sales Order &amp; Website</span>
-                        <span className="text-blue-600 dark:text-blue-400 font-black">{focusedAdminKpi.validasiSoWeb}%</span>
+                        <span className="text-blue-600 dark:text-blue-400 font-bold tabular-nums">{focusedAdminKpi.validasiSoWeb}%</span>
                       </div>
                       <div className="w-full bg-slate-200 dark:bg-slate-800 h-2 rounded-full mt-1.5 overflow-hidden">
                         <div className="bg-blue-600 h-full rounded-full" style={{ width: `${focusedAdminKpi.validasiSoWeb}%` }} />
                       </div>
                     </div>
 
-                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800">
-                      <div className="flex justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
+                    <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <div className="flex justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
                         <span>Pembuatan Faktur Penjualan</span>
-                        <span className="text-emerald-600 dark:text-emerald-400 font-black">{focusedAdminKpi.pembuatanFaktur}%</span>
+                        <span className="text-emerald-600 dark:text-emerald-400 font-bold tabular-nums">{focusedAdminKpi.pembuatanFaktur}%</span>
                       </div>
                       <div className="w-full bg-slate-200 dark:bg-slate-800 h-2 rounded-full mt-1.5 overflow-hidden">
                         <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${focusedAdminKpi.pembuatanFaktur}%` }} />
                       </div>
                     </div>
 
-                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800">
-                      <div className="flex justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
+                    <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <div className="flex justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
                         <span>Pengecekan Faktur Penjualan</span>
-                        <span className="text-violet-600 dark:text-violet-400 font-black">{focusedAdminKpi.pengecekanFaktur}%</span>
+                        <span className="text-slate-700 dark:text-slate-200 font-bold tabular-nums">{focusedAdminKpi.pengecekanFaktur}%</span>
                       </div>
                       <div className="w-full bg-slate-200 dark:bg-slate-800 h-2 rounded-full mt-1.5 overflow-hidden">
-                        <div className="bg-violet-500 h-full rounded-full" style={{ width: `${focusedAdminKpi.pengecekanFaktur}%` }} />
+                        <div className="bg-slate-600 h-full rounded-full" style={{ width: `${focusedAdminKpi.pengecekanFaktur}%` }} />
                       </div>
                     </div>
 
-                    <div className="p-3 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 flex items-center justify-between">
-                      <span className="text-xs font-black text-amber-900 dark:text-amber-300">
-                        Selisih Gap
+                    <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                        Selisih Gap terhadap Target
                       </span>
-                      <span className="text-sm font-black text-amber-600 dark:text-amber-400">
+                      <span className="text-sm font-bold text-amber-600 dark:text-amber-400 tabular-nums">
                         {focusedAdminKpi.gapPct}%
                       </span>
                     </div>
@@ -3864,328 +3864,23 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
               </div>
             </div>
 
-            {/* FITUR KESALAHAN PENGINPUTAN DISKON */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-xs space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2.5 rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
-                    <BadgePercent className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-tight">
-                      Monitoring Kesalahan Penginputan Diskon
-                    </h3>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Pencatatan &amp; audit kesalahan input diskon pada Sales Order / Faktur Penjualan oleh Admin
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (isAddDiscountErrOpen) {
-                      setIsAddDiscountErrOpen(false);
-                      setEditingDiscountId(null);
-                    } else {
-                      setEditingDiscountId(null);
-                      setDscDate(new Date().toISOString().slice(0, 10));
-                      setDscAdmin(activeBranchAdminNames[0] || '');
-                      setDscNoFaktur('');
-                      setDscCustomer('');
-                      setDscExpected('');
-                      setDscInput('');
-                      setDscSelisihRp('');
-                      setDscKeterangan('');
-                      setIsAddDiscountErrOpen(true);
-                    }
-                  }}
-                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>{isAddDiscountErrOpen ? 'Tutup Form' : 'Catat Kesalahan Diskon'}</span>
-                </button>
-              </div>
-
-              {isAddDiscountErrOpen && (
-                <form
-                  onSubmit={e => {
-                    e.preventDefault();
-                    const targetAdmin = (dscAdmin || activeBranchAdminNames[0] || '').trim().toUpperCase();
-                    if (!targetAdmin || !dscNoFaktur.trim() || !dscCustomer.trim()) {
-                      showToast('Mohon isi Nama Admin, No Faktur/SO, dan Nama Pelanggan.');
-                      return;
-                    }
-                    const targetBr = sidoarjoAdminNames.includes(targetAdmin)
-                      ? 'cab-sidoarjo'
-                      : selectedBranchId === 'ALL'
-                      ? 'cab-banyuwangi'
-                      : selectedBranchId;
-
-                    if (editingDiscountId) {
-                      const nextLogs = discountErrorLogs.map(item =>
-                        item.id === editingDiscountId
-                          ? {
-                              ...item,
-                              date: dscDate || item.date,
-                              branchId: targetBr,
-                              adminName: targetAdmin,
-                              noFakturOrSo: dscNoFaktur.trim().toUpperCase(),
-                              customerName: dscCustomer.trim().toUpperCase(),
-                              expectedDiscount: parseNum(dscExpected),
-                              inputDiscount: parseNum(dscInput),
-                              selisihNominal: parseNum(dscSelisihRp),
-                              keterangan: dscKeterangan.trim() || 'Kesalahan penginputan diskon penjualan'
-                            }
-                          : item
-                      );
-                      setDiscountErrorLogs(nextLogs);
-                      void persistSalesKpiToMysql({ discountErrorLogs: nextLogs });
-                      setEditingDiscountId(null);
-                      setDscNoFaktur('');
-                      setDscCustomer('');
-                      setDscExpected('');
-                      setDscInput('');
-                      setDscSelisihRp('');
-                      setDscKeterangan('');
-                      setIsAddDiscountErrOpen(false);
-                      showToast(`Data kesalahan diskon untuk ${targetAdmin} berhasil diperbarui.`);
-                      return;
-                    }
-
-                    const newLog: DiscountErrorLogItem = {
-                      id: `dsc-${Date.now()}`,
-                      date: dscDate || new Date().toISOString().slice(0, 10),
-                      branchId: targetBr,
-                      month: selectedMonth,
-                      year: selectedYear,
-                      adminName: targetAdmin,
-                      noFakturOrSo: dscNoFaktur.trim().toUpperCase(),
-                      customerName: dscCustomer.trim().toUpperCase(),
-                      expectedDiscount: parseNum(dscExpected),
-                      inputDiscount: parseNum(dscInput),
-                      selisihNominal: parseNum(dscSelisihRp),
-                      keterangan: dscKeterangan.trim() || 'Kesalahan penginputan diskon penjualan'
-                    };
-
-                    const nextLogs = [newLog, ...discountErrorLogs];
-                    setDiscountErrorLogs(nextLogs);
-                    void persistSalesKpiToMysql({ discountErrorLogs: nextLogs });
-                    setDscNoFaktur('');
-                    setDscCustomer('');
-                    setDscExpected('');
-                    setDscInput('');
-                    setDscSelisihRp('');
-                    setDscKeterangan('');
-                    setIsAddDiscountErrOpen(false);
-                    showToast(`Kesalahan input diskon untuk ${targetAdmin} berhasil disimpan.`);
-                  }}
-                  className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3"
-                >
-                  <div className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider border-b border-slate-200 dark:border-slate-800 pb-2">
-                    {editingDiscountId ? 'Edit Catatan Kesalahan Penginputan Diskon' : 'Tambah Catatan Kesalahan Penginputan Diskon'}
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Tanggal</label>
-                      <input
-                        type="date"
-                        value={dscDate || new Date().toISOString().slice(0, 10)}
-                        onChange={e => setDscDate(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Nama Admin</label>
-                      <ModernKpiDropdown
-                        value={dscAdmin}
-                        onChange={val => setDscAdmin(val)}
-                        icon={<UserCheck className="w-3.5 h-3.5" />}
-                        searchable
-                        searchPlaceholder="Cari nama admin..."
-                        options={activeBranchAdminNames.map(a => ({
-                          value: a,
-                          label: a,
-                          badge: sidoarjoAdminNames.includes(a) ? 'SDA' : 'BWI',
-                          badgeTone: sidoarjoAdminNames.includes(a) ? 'emerald' : 'indigo'
-                        }))}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">No. Faktur / SO</label>
-                      <input
-                        type="text"
-                        value={dscNoFaktur}
-                        onChange={e => setDscNoFaktur(e.target.value)}
-                        placeholder="Contoh: FJ02-1126-0912"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Nama Pelanggan</label>
-                      <input
-                        type="text"
-                        value={dscCustomer}
-                        onChange={e => setDscCustomer(e.target.value)}
-                        placeholder="Contoh: TK SINAR BARU"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Diskon Seharusnya (%)</label>
-                      <input
-                        type="number"
-                        step="0.1"
-                        value={dscExpected}
-                        onChange={e => setDscExpected(e.target.value)}
-                        placeholder="Contoh: 2.5"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Diskon Terinput (%)</label>
-                      <input
-                        type="number"
-                        step="0.1"
-                        value={dscInput}
-                        onChange={e => setDscInput(e.target.value)}
-                        placeholder="Contoh: 5"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Nominal Selisih Diskon (Rp)</label>
-                      <input
-                        type="number"
-                        value={dscSelisihRp}
-                        onChange={e => setDscSelisihRp(e.target.value)}
-                        placeholder="Contoh: 75000"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Keterangan Kesalahan Diskon</label>
-                      <input
-                        type="text"
-                        value={dscKeterangan}
-                        onChange={e => setDscKeterangan(e.target.value)}
-                        placeholder="Rincian penyebab kesalahan input diskon..."
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
-                      />
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-end gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsAddDiscountErrOpen(false);
-                        setEditingDiscountId(null);
-                      }}
-                      className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold cursor-pointer"
-                    >
-                      Batal
-                    </button>
-                    <button
-                      type="submit"
-                      className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold cursor-pointer"
-                    >
-                      {editingDiscountId ? 'Simpan Perubahan' : 'Simpan Catatan'}
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
-                <table className="w-full text-left text-xs divide-y divide-slate-200 dark:divide-slate-800">
-                  <thead className="bg-slate-50 dark:bg-slate-950 text-slate-500 dark:text-slate-400 text-[10px] font-black uppercase">
-                    <tr>
-                      <th className="py-3 px-3">No</th>
-                      <th className="py-3 px-3">Tanggal</th>
-                      <th className="py-3 px-3">Nama Admin</th>
-                      <th className="py-3 px-3">No. Faktur / SO</th>
-                      <th className="py-3 px-3">Nama Pelanggan</th>
-                      <th className="py-3 px-3 text-center">Diskon Seharusnya</th>
-                      <th className="py-3 px-3 text-center">Diskon Terinput</th>
-                      <th className="py-3 px-3 text-right">Selisih Diskon</th>
-                      <th className="py-3 px-3">Keterangan</th>
-                      <th className="py-3 px-3 text-center">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                    {discountErrorLogs.filter(
-                      d =>
-                        (selectedBranchId === 'ALL' || d.branchId === selectedBranchId) &&
-                        (selectedAdminFilter === 'SEMUA ADMIN' ||
-                          d.adminName.toUpperCase() === selectedAdminFilter.toUpperCase())
-                    ).length === 0 ? (
-                      <tr>
-                        <td colSpan={10} className="py-8 text-center text-slate-400 italic">
-                          Belum ada catatan kesalahan penginputan diskon untuk periode ini.
-                        </td>
-                      </tr>
-                    ) : (
-                      discountErrorLogs
-                        .filter(
-                          d =>
-                            (selectedBranchId === 'ALL' || d.branchId === selectedBranchId) &&
-                            (selectedAdminFilter === 'SEMUA ADMIN' ||
-                              d.adminName.toUpperCase() === selectedAdminFilter.toUpperCase())
-                        )
-                        .map((log, i) => (
-                          <tr key={log.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
-                            <td className="py-2.5 px-3 font-semibold">{i + 1}</td>
-                            <td className="py-2.5 px-3">{log.date}</td>
-                            <td className="py-2.5 px-3 font-black text-slate-900 dark:text-white">{log.adminName}</td>
-                            <td className="py-2.5 px-3 font-mono font-semibold">{log.noFakturOrSo}</td>
-                            <td className="py-2.5 px-3 font-semibold">{log.customerName}</td>
-                            <td className="py-2.5 px-3 text-center text-emerald-600 font-bold">{log.expectedDiscount}%</td>
-                            <td className="py-2.5 px-3 text-center text-rose-600 font-bold">{log.inputDiscount}%</td>
-                            <td className="py-2.5 px-3 text-right font-bold text-rose-600">
-                              Rp {formatRp(log.selisihNominal)}
-                            </td>
-                            <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300">{log.keterangan}</td>
-                            <td className="py-2.5 px-3 text-center">
-                              <div className="inline-flex items-center justify-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setEditingDiscountId(log.id);
-                                    setDscDate(log.date);
-                                    setDscAdmin(log.adminName);
-                                    setDscNoFaktur(log.noFakturOrSo);
-                                    setDscCustomer(log.customerName);
-                                    setDscExpected(String(log.expectedDiscount));
-                                    setDscInput(String(log.inputDiscount));
-                                    setDscSelisihRp(String(log.selisihNominal));
-                                    setDscKeterangan(log.keterangan);
-                                    setIsAddDiscountErrOpen(true);
-                                  }}
-                                  className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/60 cursor-pointer transition"
-                                  title="Edit catatan kesalahan diskon"
-                                >
-                                  <Pencil className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const nextLogs = discountErrorLogs.filter(x => x.id !== log.id);
-                                    setDiscountErrorLogs(nextLogs);
-                                    void persistSalesKpiToMysql({ discountErrorLogs: nextLogs });
-                                  }}
-                                  className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/60 cursor-pointer transition"
-                                  title="Hapus catatan"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            {/* MONITORING KESALAHAN PENGINPUTAN DISKON + UPLOAD FILE TEMPLATE */}
+            <DiscountErrorMonitoringSection
+              discountErrorLogs={discountErrorLogs}
+              onSaveDiscountErrorLogs={handleSaveDiscountErrorLogs}
+              selectedBranchId={selectedBranchId}
+              selectedMonth={selectedMonth}
+              selectedYear={selectedYear}
+              selectedAdminFilter={selectedAdminFilter}
+              activeBranchAdminNames={activeBranchAdminNames}
+              sidoarjoAdminNames={sidoarjoAdminNames}
+              showToast={showToast}
+              DropdownComponent={ModernKpiDropdown}
+              onSelectPeriod={(month, year) => {
+                setSelectedMonth(month);
+                setSelectedYear(year);
+              }}
+            />
           </div>
         )}
 

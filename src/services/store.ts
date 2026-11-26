@@ -688,7 +688,21 @@ class LogisticsStore {
       });
       this.users = mergedUsers;
     }
-    this.users = (this.users || []).map(u => ({ ...u, password: undefined } as UserProfile));
+    const isObsoleteMuhammadShoim = (u: Partial<UserProfile> | null | undefined): boolean => {
+      if (!u) return false;
+      const cleanId = String(u.id || '').trim().toLowerCase();
+      const cleanEmail = String(u.email || '').trim().toLowerCase();
+      const cleanName = String(u.fullName || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      return (
+        cleanId === 'usr-sales' ||
+        cleanEmail === 'shoim.sales@gmail.com' ||
+        cleanName === 'muhammad shoim'
+      );
+    };
+
+    this.users = (this.users || [])
+      .filter(u => !isObsoleteMuhammadShoim(u))
+      .map(u => ({ ...u, password: undefined } as UserProfile));
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
 
     // Initial authentication session from sessionStorage or localStorage
@@ -3125,7 +3139,16 @@ class LogisticsStore {
         }
       }
 
-      this.users = this.deduplicateSuperAdmins(mappedUsers);
+      this.users = this.deduplicateSuperAdmins(mappedUsers).filter(u => {
+        const cleanId = String(u.id || '').trim().toLowerCase();
+        const cleanEmail = String(u.email || '').trim().toLowerCase();
+        const cleanName = String(u.fullName || '').trim().toLowerCase().replace(/\s+/g, ' ');
+        return (
+          cleanId !== 'usr-sales' &&
+          cleanEmail !== 'shoim.sales@gmail.com' &&
+          cleanName !== 'muhammad shoim'
+        );
+      });
       this.saveToStorage(STORAGE_KEYS.USERS, this.users);
       branchStore.hydrateUserBranchPermissionsFromUsers(this.users);
 
@@ -4854,6 +4877,26 @@ class LogisticsStore {
 
     this.persistSchedulesSnapshotToBackend('update_schedule');
     this.notify();
+  }
+
+  public updateScheduleOdometer(id: string, kmStart?: number, kmEnd?: number): boolean {
+    const target = this.schedules.find(s => s.id === id);
+    if (!target) return false;
+    const patch: Partial<Omit<Schedule, 'id' | 'createdAt'>> = {
+      isManuallyEdited: true
+    };
+    if (kmStart !== undefined && Number.isFinite(kmStart) && kmStart > 0) {
+      patch.crewOdometerStart = String(Math.round(kmStart));
+    }
+    if (kmEnd !== undefined && Number.isFinite(kmEnd) && kmEnd > 0) {
+      patch.crewOdometerEnd = String(Math.round(kmEnd));
+      patch.crewOdometerEndAt = new Date().toISOString();
+    } else if (kmEnd === undefined) {
+      patch.crewOdometerEnd = undefined;
+      patch.crewOdometerEndAt = undefined;
+    }
+    this.updateSchedule(id, patch);
+    return true;
   }
 
   public deleteSchedule(id: string) {

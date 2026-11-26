@@ -132,6 +132,8 @@ export interface FieldTrip {
   departedAt?: string;
   returnedAt?: string;
   odometerStart?: string;
+  odometerEnd?: string;
+  odometerEndAt?: string;
   inspectionDone?: boolean;
   inspectionChecklist?: InspectionChecklistEntry[];
   waybillValidated?: boolean;
@@ -178,7 +180,8 @@ export function readQaTrips(): FieldTrip[] {
         driver: t.driver || null, helper: t.helper || null,
         phase: t.phase === 'returned' || t.phase === 'going' ? t.phase : 'waiting',
         createdAt: t.createdAt || '', departedAt: t.departedAt, returnedAt: t.returnedAt,
-        odometerStart: t.odometerStart, inspectionDone: t.inspectionDone, waybillValidated: t.waybillValidated,
+        odometerStart: t.odometerStart, odometerEnd: t.odometerEnd, odometerEndAt: t.odometerEndAt,
+        inspectionDone: t.inspectionDone, waybillValidated: t.waybillValidated,
         departureValidation: t.departureValidation || undefined,
         reports: Array.isArray(t.reports) ? t.reports : [], source: 'qa' as const
       }));
@@ -269,6 +272,8 @@ export function normalizeLiveSchedule(s: Schedule): FieldTrip | null {
     trackingNumber: s.trackingNumber, driver, helper, phase,
     createdAt: s.createdAt, departedAt: s.actualDeparture, returnedAt: s.actualArrival,
     odometerStart: String((s as any).crewOdometerStart || ''),
+    odometerEnd: (s as any).crewOdometerEnd ? String((s as any).crewOdometerEnd) : undefined,
+    odometerEndAt: (s as any).crewOdometerEndAt ? String((s as any).crewOdometerEndAt) : undefined,
     inspectionDone: Boolean((s as any).crewInspectionDone),
     inspectionChecklist: Array.isArray((s as any).crewInspectionChecklist) ? (s as any).crewInspectionChecklist : undefined,
     waybillValidated: Boolean((s as any).crewWaybillValidated),
@@ -293,6 +298,7 @@ export async function fetchQaTrips(): Promise<FieldTrip[]> {
     driver:t.driver || null, helper:t.helper || null, createdAt:t.createdAt || '',
     phase:t.phase === 'going' || t.phase === 'returned' ? t.phase : 'waiting',
     departedAt:t.departedAt, returnedAt:t.returnedAt, odometerStart:t.odometerStart,
+    odometerEnd:t.odometerEnd, odometerEndAt:t.odometerEndAt,
     inspectionDone:!!t.inspectionDone,
     inspectionChecklist:Array.isArray(t.inspectionChecklist)?t.inspectionChecklist:undefined,
     waybillValidated:!!t.waybillValidated,

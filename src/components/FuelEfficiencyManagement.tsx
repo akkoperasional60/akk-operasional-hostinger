@@ -1,38 +1,25 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  Fuel,
-  TrendingUp,
   AlertTriangle,
-  Award,
-  Calendar,
-  Search,
-  Download,
-  Plus,
-  Truck,
-  User,
-  MapPin,
-  CheckCircle2,
-  DollarSign,
-  Gauge,
-  FileText,
-  Calculator,
-  ArrowRight,
-  Info,
-  RefreshCw,
-  X,
-  Printer,
-  ChevronRight,
-  Settings,
   ArrowDown,
   ArrowUp,
-  ArrowUpDown,
-  Activity,
-  FileSpreadsheet,
+  Award,
+  Calculator,
+  Calendar,
+  Check,
   ChevronDown,
   ChevronLeft,
-  Check,
-  Building2,
-  Edit
+  ChevronRight,
+  Download,
+  Edit,
+  FileSpreadsheet,
+  FileText,
+  Plus,
+  Printer,
+  RefreshCw,
+  Search,
+  Trash2,
+  X
 } from 'lucide-react';
 import {
   BarChart,
@@ -56,7 +43,8 @@ import {
   VehicleType,
   FleetFuelSummary,
   DriverFuelScore,
-  UserProfile
+  UserProfile,
+  Schedule
 } from '../types';
 import { logisticsStore } from '../services/store';
 import { branchStore } from '../services/branchStore';
@@ -68,10 +56,26 @@ import { getCanonicalFleetOrderIndex, sortFleetsByCanonicalOrder } from '../data
 import { OFFICIAL_DESTINATION_AREAS } from '../utils/areaNormalizer';
 import { FuelConsumptionReportModal } from './FuelConsumptionReportModal';
 import { FuelWeeklyReportView } from './FuelWeeklyReportView';
+import { KmRecapManagement } from './KmRecapManagement';
 
 interface FuelEfficiencyManagementProps {
   onNavigateToFleets?: () => void;
+  onNavigateToKmRecap?: () => void;
 }
+
+type ReconciledFuelLog = FuelLog & {
+  distanceSource: 'portal' | 'manual';
+  portalKmStart?: number;
+  portalKmEnd?: number;
+  portalTripCount?: number;
+  originalDistanceKm: number;
+};
+
+const FUEL_TYPES: FuelType[] = ['BioSolar', 'Dexlite', 'Pertamina Dex', 'Pertalite', 'Pertamax'];
+const MONTHS_FULL_ID = [
+  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+];
 
 const compactPersonKey = (raw?: string): string =>
   (raw || '')
@@ -79,52 +83,79 @@ const compactPersonKey = (raw?: string): string =>
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '');
 
-export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> = () => {
-  const [fuelLogs, setFuelLogs] = useState<FuelLog[]>(logisticsStore.getFuelLogs());
-  const [fleets, setFleets] = useState<Fleet[]>(logisticsStore.getFleets());
-  const [crews, setCrews] = useState<Crew[]>(logisticsStore.getCrews());
-  const [users, setUsers] = useState<UserProfile[]>(logisticsStore.getUsers());
-  const [activeTab, setActiveTab] = useState<'overview' | 'liter_km' | 'weekly_report' | 'leaderboard' | 'logs'>('overview');
+const normalizePlateKey = (raw?: string): string =>
+  String(raw || '').replace(/\s+/g, '').toUpperCase();
+
+const normalizeCodeKey = (raw?: string): string =>
+  String(raw || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+
+const normalizeIsoDate = (raw?: string): string => {
+  if (!raw) return '';
+  const match = String(raw).match(/^\d{4}-\d{2}-\d{2}/);
+  return match ? match[0] : '';
+};
+
+const evaluateEfficiencyStatus = (ratioKmPerLiter: number, targetRatio: number): EfficiencyStatus => {
+  if (ratioKmPerLiter <= 0 || targetRatio <= 0) return 'Efisien / Normal';
+  const pct = (ratioKmPerLiter / targetRatio) * 100;
+  if (pct >= 105) return 'Sangat Efisien';
+  if (pct >= 90) return 'Efisien / Normal';
+  if (pct >= 75) return 'Boros';
+  return 'Kritis / Potensi Anomali';
+};
+
+export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> = ({
+  onNavigateToKmRecap
+}) => {
+  const [fuelLogs, setFuelLogs] = useState<FuelLog[]>(() => logisticsStore.getFuelLogs());
+  const [fleets, setFleets] = useState<Fleet[]>(() => logisticsStore.getFleets());
+  const [crews, setCrews] = useState<Crew[]>(() => logisticsStore.getCrews());
+  const [users, setUsers] = useState<UserProfile[]>(() => logisticsStore.getUsers());
+  const [schedules, setSchedules] = useState<Schedule[]>(() => logisticsStore.getSchedules());
+
+  const [activeTab, setActiveTab] = useState<
+    'overview' | 'liter_km' | 'km_recap' | 'weekly_report' | 'leaderboard' | 'logs'
+  >('overview');
   const [selectedBranchFilter, setSelectedBranchFilter] = useState<'all' | 'cab-banyuwangi' | 'cab-sidoarjo'>('all');
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isCalculatorModalOpen, setIsCalculatorModalOpen] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Liter per KM Unit Analysis Filter States
-  const [lKmSortBy, setLKmSortBy] = useState<'canonical_order' | 'lKm_asc' | 'lKm_desc' | 'efficiency_desc' | 'distance_desc'>('canonical_order');
+  // L/KM Unit Analysis filters
+  const [lKmSortBy, setLKmSortBy] = useState<
+    'canonical_order' | 'lKm_asc' | 'lKm_desc' | 'efficiency_desc' | 'distance_desc'
+  >('canonical_order');
   const [lKmFilterFleetId, setLKmFilterFleetId] = useState<string>('all');
   const [comparisonSelectedFleetId, setComparisonSelectedFleetId] = useState<string>('all');
 
-  // Interactive Converter Calculator
-  const [simKmL, setSimKmL] = useState<number>(0);
-
-  // Search & Filters for logs table
+  // Audit logs filters & pagination
   const [searchQuery, setSearchQuery] = useState('');
   const [filterFleetId, setFilterFleetId] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterFuelType, setFilterFuelType] = useState<string>('all');
   const [filterSpbu, setFilterSpbu] = useState<'all' | 'Farly' | 'Gajah Mada' | 'SPBU Lain'>('all');
-  const [logSortBy, setLogSortBy] = useState<'date_asc' | 'date_desc' | 'efficient_asc' | 'wasteful_desc'>('date_asc');
+  const [logSortBy, setLogSortBy] = useState<'date_desc' | 'date_asc' | 'efficient_asc' | 'wasteful_desc'>('date_desc');
   const [logsCurrentPage, setLogsCurrentPage] = useState<number>(1);
   const LOGS_PER_PAGE = 10;
 
-  // Custom Filter Dropdowns for Audit Riwayat BBM
-  const [activeAuditFilterDropdown, setActiveAuditFilterDropdown] = useState<'fleet' | 'spbu' | 'status' | 'fuel' | 'sort' | null>(null);
-  const [auditFleetSearchFilter, setAuditFleetSearchFilter] = useState<string>('');
-  const auditFilterContainerRef = useRef<HTMLDivElement | null>(null);
+  // Inline delete confirm & error state
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingLogId, setDeletingLogId] = useState<string | null>(null);
+  const [fuelActionError, setFuelActionError] = useState<string>('');
 
   // Modal states
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingLogId, setEditingLogId] = useState<string | null>(null);
-  const [selectedLogForDetail, setSelectedLogForDetail] = useState<FuelLog | null>(null);
+  const [selectedLogForDetail, setSelectedLogForDetail] = useState<ReconciledFuelLog | null>(null);
 
-  // Form states for new / edit fuel log
+  // Add/Edit form states
   const [formBranchId, setFormBranchId] = useState<'cab-banyuwangi' | 'cab-sidoarjo'>('cab-banyuwangi');
   const [formFleetId, setFormFleetId] = useState<string>('');
   const [formDriverName, setFormDriverName] = useState<string>('');
   const [formDriverId, setFormDriverId] = useState<string>('');
   const [formHelperName, setFormHelperName] = useState<string>('');
   const [formHelperId, setFormHelperId] = useState<string>('');
-  const [formDate, setFormDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [formDate, setFormDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [formFuelType, setFormFuelType] = useState<FuelType>('BioSolar');
   const [formLiters, setFormLiters] = useState<string>('');
   const [formCostPerLiter, setFormCostPerLiter] = useState<string>('6800');
@@ -137,20 +168,79 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
   const [formNotes, setFormNotes] = useState<string>('');
   const [formError, setFormError] = useState<string>('');
   const [isSavingFuelLog, setIsSavingFuelLog] = useState<boolean>(false);
-  const [deletingLogId, setDeletingLogId] = useState<string | null>(null);
-  const [fuelActionError, setFuelActionError] = useState<string>('');
 
-  // Modern Custom Popover Dropdown & Calendar States
-  const [activeModalDropdown, setActiveModalDropdown] = useState<'fleet' | 'driver' | 'helper' | 'area' | 'date' | 'fuel' | 'chart_fleet' | null>(null);
-  const [dropdownHighlightIdx, setDropdownHighlightIdx] = useState<number>(0);
+  // Dropdown popovers inside modal / overview
+  const [activeModalDropdown, setActiveModalDropdown] = useState<
+    'fleet' | 'driver' | 'helper' | 'area' | 'date' | 'fuel' | null
+  >(null);
   const [fleetSearchFilter, setFleetSearchFilter] = useState<string>('');
   const [driverSearchFilter, setDriverSearchFilter] = useState<string>('');
   const [helperSearchFilter, setHelperSearchFilter] = useState<string>('');
   const [areaSearchFilter, setAreaSearchFilter] = useState<string>('');
   const [calendarViewMonth, setCalendarViewMonth] = useState<Date>(() => new Date());
 
-  const normalizePlateKey = (raw?: string) => String(raw || '').replace(/\s+/g, '').toUpperCase();
-  const normalizeCodeKey = (raw?: string) => String(raw || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  // Calculator modal states
+  const [calcFleetType, setCalcFleetType] = useState<VehicleType>('Engkel Long');
+  const [calcDistanceKm, setCalcDistanceKm] = useState<number>(620);
+  const [calcSelectedRoute, setCalcSelectedRoute] = useState<string>('bwi-sby-pp');
+  const [calcFuelType, setCalcFuelType] = useState<FuelType>('BioSolar');
+  const [calcCustomPrice, setCalcCustomPrice] = useState<number>(STANDARD_FUEL_PRICES['BioSolar'] || 6800);
+  const [calcCargoBoxes, setCalcCargoBoxes] = useState<number>(12000);
+
+  const modalDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    logisticsStore.refreshUsersFromHostinger?.().catch(() => {});
+    logisticsStore.refreshFuelLogsFromServer?.().catch(() => {});
+    return logisticsStore.subscribe(() => {
+      setFuelLogs([...logisticsStore.getFuelLogs()]);
+      setFleets([...logisticsStore.getFleets()]);
+      setCrews([...logisticsStore.getCrews()]);
+      setUsers([...logisticsStore.getUsers()]);
+      setSchedules([...logisticsStore.getSchedules()]);
+    });
+  }, []);
+
+  useEffect(() => {
+    setLogsCurrentPage(1);
+  }, [searchQuery, filterFleetId, filterSpbu, filterStatus, filterFuelType, logSortBy, selectedBranchFilter]);
+
+  useEffect(() => {
+    if (!activeModalDropdown && !isGasStationDropdownOpen) return;
+    const handlePointerDown = (e: MouseEvent) => {
+      if (modalDropdownRef.current && !modalDropdownRef.current.contains(e.target as Node)) {
+        setActiveModalDropdown(null);
+        setIsGasStationDropdownOpen(false);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setActiveModalDropdown(null);
+        setIsGasStationDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [activeModalDropdown, isGasStationDropdownOpen]);
+
+  const handleRefreshAll = async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        logisticsStore.refreshFuelLogsFromServer?.(),
+        logisticsStore.hydrateOperationalDataFromHostinger?.(true)
+      ]);
+      setFuelLogs([...logisticsStore.getFuelLogs()]);
+      setSchedules([...logisticsStore.getSchedules()]);
+      setFleets([...logisticsStore.getFleets()]);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const resolveFleetBranchId = (fleet: Fleet): 'cab-banyuwangi' | 'cab-sidoarjo' => {
     const resolved = branchStore.getFleetBranchId(fleet.id, fleet.plateNumber, fleet.initialCode);
@@ -162,7 +252,16 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     return resolved === 'cab-sidoarjo' ? 'cab-sidoarjo' : 'cab-banyuwangi';
   };
 
-  // Branch-scoped Fleets & Fuel Logs for Dashboard & Analytics (deduped & excluding phantom FLT-*)
+  const resolveScheduleBranchId = (s: Schedule): 'cab-banyuwangi' | 'cab-sidoarjo' => {
+    const extra = s as Schedule & { originBranchId?: string; branchId?: string };
+    if (extra.originBranchId === 'cab-sidoarjo' || extra.branchId === 'cab-sidoarjo') return 'cab-sidoarjo';
+    if (extra.originBranchId === 'cab-banyuwangi' || extra.branchId === 'cab-banyuwangi') return 'cab-banyuwangi';
+    const explicit = branchStore.getExplicitScheduleBranchId(s.id);
+    if (explicit === 'cab-sidoarjo') return 'cab-sidoarjo';
+    const fleetBranch = s.fleet?.branchId || branchStore.getFleetBranchId(s.fleetId, s.fleet?.plateNumber, s.fleet?.initialCode);
+    return fleetBranch === 'cab-sidoarjo' ? 'cab-sidoarjo' : 'cab-banyuwangi';
+  };
+
   const cleanCanonicalFleets = useMemo(() => {
     const seenPlates = new Set<string>();
     const valid = fleets.filter(f => {
@@ -180,7 +279,6 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     log: Partial<FuelLog> & { fleetId?: string; plateNumber?: string; initialCode?: string }
   ): Fleet | undefined => {
     const pool = cleanCanonicalFleets.length > 0 ? cleanCanonicalFleets : fleets;
-    // 1. Exact ID match in canonical/active fleets (re-mapped by plate if duplicate ID)
     if (log.fleetId) {
       const byId = pool.find(fl => fl.id === log.fleetId) || fleets.find(fl => fl.id === log.fleetId);
       if (byId) {
@@ -189,13 +287,11 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
         return canonicalByPlate || byId;
       }
     }
-    // 2. Normalized plateNumber match
     const targetPlate = normalizePlateKey(log.plateNumber);
     if (targetPlate && !/^FLT\d+$/i.test(targetPlate)) {
       const byPlate = pool.find(fl => normalizePlateKey(fl.plateNumber) === targetPlate);
       if (byPlate) return byPlate;
     }
-    // 3. InitialCode / slash-token match (e.g. "S5 / DS3", "S5", "DS3")
     const candidates = [log.initialCode, log.fleetId]
       .filter(Boolean)
       .flatMap(val => [String(val), ...String(val).split('/')])
@@ -209,468 +305,190 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       });
       if (byCode) return byCode;
     }
-    // 4. Fallback via store resolver
     return logisticsStore.findFleetByCodeOrPlate(log.initialCode || log.plateNumber || log.fleetId);
   };
 
-  const editingLogObj = useMemo(
-    () => (editingLogId ? fuelLogs.find(l => l.id === editingLogId) || null : null),
-    [editingLogId, fuelLogs]
-  );
-
-  const selectedFormFleet = useMemo(() => {
-    if (!formFleetId && !editingLogObj) return undefined;
-    const direct =
-      cleanCanonicalFleets.find(fl => fl.id === formFleetId) ||
-      fleets.find(fl => fl.id === formFleetId);
-    if (direct) return direct;
-    if (editingLogObj) {
-      const resolved = resolveFleetForLog(editingLogObj);
-      if (resolved) return resolved;
-      if (editingLogObj.plateNumber || editingLogObj.initialCode) {
-        return {
-          id: editingLogObj.fleetId || formFleetId || 'legacy-fleet',
-          plateNumber: editingLogObj.plateNumber || '-',
-          initialCode: editingLogObj.initialCode || editingLogObj.plateNumber || 'Armada',
-          vehicleType: editingLogObj.vehicleType || 'Double STD'
-        } as Fleet;
+  // Build map of Driver Portal completed KM trips indexed by `${canonicalFleetKey}|${dateIso}`
+  const portalKmByFleetDate = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        fleetKey: string;
+        dateIso: string;
+        totalDistanceKm: number;
+        minStartKm: number;
+        maxEndKm: number;
+        tripCount: number;
       }
-    }
-    return undefined;
-  }, [formFleetId, cleanCanonicalFleets, fleets, editingLogObj]);
+    >();
+
+    schedules.forEach(s => {
+      if (selectedBranchFilter !== 'all' && resolveScheduleBranchId(s) !== selectedBranchFilter) return;
+      const kmStart = Number(s.crewOdometerStart || 0);
+      const kmEnd = Number(s.crewOdometerEnd || 0);
+      if (!(kmStart > 0 && kmEnd > kmStart)) return;
+      const dist = kmEnd - kmStart;
+      if (dist <= 0 || dist > 1500) return;
+
+      const dateIso = normalizeIsoDate(s.deliveryDate || s.departureDate || s.createdAt);
+      if (!dateIso) return;
+
+      const matchedFleet =
+        s.fleet ||
+        fleets.find(f => f.id === s.fleetId) ||
+        logisticsStore.findFleetByCodeOrPlate(s.armada || s.fleetId);
+      const plateKey = normalizePlateKey(matchedFleet?.plateNumber);
+      const fleetKey = plateKey || matchedFleet?.id || normalizeCodeKey(s.armada || s.fleetId);
+      if (!fleetKey) return;
+
+      const bucketKey = `${fleetKey}|${dateIso}`;
+      const existing = map.get(bucketKey);
+      if (!existing) {
+        map.set(bucketKey, {
+          fleetKey,
+          dateIso,
+          totalDistanceKm: dist,
+          minStartKm: kmStart,
+          maxEndKm: kmEnd,
+          tripCount: 1
+        });
+      } else {
+        existing.totalDistanceKm += dist;
+        existing.minStartKm = Math.min(existing.minStartKm, kmStart);
+        existing.maxEndKm = Math.max(existing.maxEndKm, kmEnd);
+        existing.tripCount += 1;
+      }
+    });
+
+    return map;
+  }, [schedules, fleets, selectedBranchFilter]);
+
+  const portalGlobalStats = useMemo(() => {
+    let completedTrips = 0;
+    let waitingEndTrips = 0;
+    let totalPortalDistanceKm = 0;
+    const dailyPortalDistance = new Map<string, number>();
+
+    schedules.forEach(s => {
+      if (selectedBranchFilter !== 'all' && resolveScheduleBranchId(s) !== selectedBranchFilter) return;
+      const kmStart = Number(s.crewOdometerStart || 0);
+      const kmEnd = Number(s.crewOdometerEnd || 0);
+      if (kmStart > 0 && kmEnd > kmStart && (kmEnd - kmStart) <= 1500) {
+        const dist = kmEnd - kmStart;
+        completedTrips += 1;
+        totalPortalDistanceKm += dist;
+        const dateIso = normalizeIsoDate(s.deliveryDate || s.departureDate || s.createdAt);
+        if (dateIso) {
+          dailyPortalDistance.set(dateIso, (dailyPortalDistance.get(dateIso) || 0) + dist);
+        }
+      } else if (kmStart > 0) {
+        waitingEndTrips += 1;
+      }
+    });
+
+    return { completedTrips, waitingEndTrips, totalPortalDistanceKm, dailyPortalDistance };
+  }, [schedules, selectedBranchFilter]);
 
   const branchScopedFleets = useMemo(() => {
     if (selectedBranchFilter === 'all') return cleanCanonicalFleets;
     return cleanCanonicalFleets.filter(f => resolveFleetBranchId(f) === selectedBranchFilter);
   }, [cleanCanonicalFleets, selectedBranchFilter]);
 
-  const branchScopedLogs = useMemo(() => {
-    if (selectedBranchFilter === 'all') return fuelLogs;
-    return fuelLogs.filter(l => resolveLogBranchId(l) === selectedBranchFilter);
-  }, [fuelLogs, selectedBranchFilter]);
+  // Reconcile FuelLogs with Driver Portal KM Awal & KM Akhir automatically
+  const reconciledLogs = useMemo<ReconciledFuelLog[]>(() => {
+    const rawScoped =
+      selectedBranchFilter === 'all'
+        ? fuelLogs
+        : fuelLogs.filter(l => resolveLogBranchId(l) === selectedBranchFilter);
 
-  // Modal Branch-scoped Fleets
-  const modalBranchFleets = useMemo(() => {
-    return cleanCanonicalFleets.filter(f => resolveFleetBranchId(f) === formBranchId);
-  }, [cleanCanonicalFleets, formBranchId]);
-
-  const filteredModalFleets = useMemo(() => {
-    const q = fleetSearchFilter.trim().toLowerCase();
-    if (!q) return modalBranchFleets;
-    return modalBranchFleets.filter(f =>
-      (f.initialCode || '').toLowerCase().includes(q) ||
-      (f.plateNumber || '').toLowerCase().includes(q) ||
-      (f.vehicleType || '').toLowerCase().includes(q) ||
-      (f.brand || '').toLowerCase().includes(q)
-    );
-  }, [modalBranchFleets, fleetSearchFilter]);
-
-  // Tersinkronisasi 100% dengan daftar Area Tujuan pada Jadwal & Penugasan
-  const deliveryAreaOptions = useMemo(() => {
-    const set = new Set<string>(OFFICIAL_DESTINATION_AREAS);
-    try {
-      const schedules = logisticsStore.getSchedules?.() || [];
-      schedules.forEach((s: any) => {
-        if (s?.destination && typeof s.destination === 'string' && s.destination.trim()) {
-          set.add(s.destination.trim());
-        }
-      });
-    } catch {
-      // ignore
-    }
-    return Array.from(set);
-  }, []);
-
-  const filteredAreaOptions = useMemo(() => {
-    const q = areaSearchFilter.trim().toLowerCase();
-    if (!q) return deliveryAreaOptions;
-    return deliveryAreaOptions.filter(a => a.toLowerCase().includes(q));
-  }, [deliveryAreaOptions, areaSearchFilter]);
-
-  // Daftar Kru (Driver & Helper) HANYA diambil dari akun user yang sudah terdaftar & disetujui sesuai cabang
-  const crewOptionsForModal = useMemo(() => {
-    const map = new Map<string, { id: string; name: string; role: string }>();
-    const registeredUsers = users && users.length > 0
-      ? users
-      : (logisticsStore.getUsers ? logisticsStore.getUsers() : []);
-
-    registeredUsers.forEach(u => {
-      const normalizedStatus = String(u?.status || '').trim().toLowerCase();
-      if (
-        u &&
-        normalizedStatus === 'approved' &&
-        (u as any).isActive !== false &&
-        logisticsStore.isActiveDeliveryCrewUser(u, formBranchId) &&
-        u.fullName?.trim()
-      ) {
-        const cleanName = u.fullName.trim();
-        const cKey = compactPersonKey(cleanName);
-        if (cKey && !map.has(cKey)) {
-          map.set(cKey, {
-            id: u.id,
-            name: cleanName,
-            role: u.role === 'crew_helper' ? 'Helper' : 'Driver'
-          });
-        }
-      }
+    // Count how many fuel logs share the same (fleetKey, dateIso) so multiple fills on 1 day don't double-count portal trip km
+    const bucketLogCounts = new Map<string, number>();
+    const resolvedFleetKeys = rawScoped.map(log => {
+      const flt = resolveFleetForLog(log);
+      const fleetKey =
+        normalizePlateKey(flt?.plateNumber || log.plateNumber) ||
+        flt?.id ||
+        normalizeCodeKey(log.initialCode || log.fleetId);
+      const dateIso = normalizeIsoDate(log.date);
+      const bKey = `${fleetKey}|${dateIso}`;
+      bucketLogCounts.set(bKey, (bucketLogCounts.get(bKey) || 0) + 1);
+      return { log, flt, bKey };
     });
 
-    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'id'));
-  }, [users, formBranchId]);
+    const consumedPortalBuckets = new Set<string>();
 
-  const filteredDriverOptions = useMemo(() => {
-    const q = driverSearchFilter.trim().toLowerCase();
-    const list = [...crewOptionsForModal].sort((a, b) => {
-      const aIsDrv = a.role.toLowerCase().includes('driver') ? 0 : 1;
-      const bIsDrv = b.role.toLowerCase().includes('driver') ? 0 : 1;
-      if (aIsDrv !== bIsDrv) return aIsDrv - bIsDrv;
-      return a.name.localeCompare(b.name);
+    return resolvedFleetKeys.map(({ log, flt, bKey }) => {
+      const portalMatch = portalKmByFleetDate.get(bKey);
+      const targetRatio =
+        FUEL_TARGET_RATIOS[flt?.vehicleType || log.vehicleType]?.target || log.targetRatio || 7.5;
+
+      if (portalMatch && !consumedPortalBuckets.has(bKey)) {
+        consumedPortalBuckets.add(bKey);
+        const distanceKm = portalMatch.totalDistanceKm;
+        const ratioKmPerLiter =
+          log.liters > 0 ? Number((distanceKm / log.liters).toFixed(2)) : log.ratioKmPerLiter;
+        const efficiencyStatus = evaluateEfficiencyStatus(ratioKmPerLiter, targetRatio);
+
+        return {
+          ...log,
+          distanceKm,
+          startOdometerKm: portalMatch.minStartKm,
+          endOdometerKm: portalMatch.maxEndKm,
+          ratioKmPerLiter,
+          targetRatio,
+          efficiencyStatus,
+          distanceSource: 'portal',
+          portalKmStart: portalMatch.minStartKm,
+          portalKmEnd: portalMatch.maxEndKm,
+          portalTripCount: portalMatch.tripCount,
+          originalDistanceKm: log.distanceKm
+        };
+      }
+
+      return {
+        ...log,
+        distanceSource: 'manual',
+        originalDistanceKm: log.distanceKm
+      };
     });
-    if (!q) return list;
-    return list.filter(d => d.name.toLowerCase().includes(q));
-  }, [crewOptionsForModal, driverSearchFilter]);
+  }, [fuelLogs, selectedBranchFilter, portalKmByFleetDate, cleanCanonicalFleets, fleets]);
 
-  const filteredHelperOptions = useMemo(() => {
-    const q = helperSearchFilter.trim().toLowerCase();
-    const list = [...crewOptionsForModal].sort((a, b) => {
-      const aIsHlp = a.role.toLowerCase().includes('helper') ? 0 : 1;
-      const bIsHlp = b.role.toLowerCase().includes('helper') ? 0 : 1;
-      if (aIsHlp !== bIsHlp) return aIsHlp - bIsHlp;
-      return a.name.localeCompare(b.name);
-    });
-    if (!q) return list;
-    return list.filter(d => d.name.toLowerCase().includes(q));
-  }, [crewOptionsForModal, helperSearchFilter]);
-
-  // Trip route calculator state
-  const [calcFleetType, setCalcFleetType] = useState<VehicleType>('Engkel Long');
-  const [calcDistanceKm, setCalcDistanceKm] = useState<number>(620);
-  const [calcSelectedRoute, setCalcSelectedRoute] = useState<string>('bwi-sby-pp');
-  const [calcFuelType, setCalcFuelType] = useState<FuelType>('BioSolar');
-  const [calcCustomPrice, setCalcCustomPrice] = useState<number>(STANDARD_FUEL_PRICES['BioSolar'] || 6800);
-  const [calcCargoBoxes, setCalcCargoBoxes] = useState<number>(12000);
-
-  useEffect(() => {
-    logisticsStore.refreshUsersFromHostinger?.().catch(() => {});
-    logisticsStore.refreshFuelLogsFromServer?.().catch(() => {});
-    return logisticsStore.subscribe(() => {
-      setFuelLogs([...logisticsStore.getFuelLogs()]);
-      setFleets([...logisticsStore.getFleets()]);
-      setCrews([...logisticsStore.getCrews()]);
-      setUsers([...logisticsStore.getUsers()]);
-    });
-  }, []);
-
-  // Reset logs pagination to page 1 when filters or branch change
-  useEffect(() => {
-    setLogsCurrentPage(1);
-  }, [searchQuery, filterFleetId, filterSpbu, filterStatus, filterFuelType, logSortBy, selectedBranchFilter]);
-
-  // Close custom Audit Filter dropdown popover on outside click or Escape
-  useEffect(() => {
-    if (!activeAuditFilterDropdown) return;
-    const handlePointerDown = (e: MouseEvent) => {
-      if (auditFilterContainerRef.current && !auditFilterContainerRef.current.contains(e.target as Node)) {
-        setActiveAuditFilterDropdown(null);
-      }
-    };
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setActiveAuditFilterDropdown(null);
-    };
-    document.addEventListener('mousedown', handlePointerDown);
-    document.addEventListener('keydown', handleKey);
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-      document.removeEventListener('keydown', handleKey);
-    };
-  }, [activeAuditFilterDropdown]);
-
-  // Auto-scroll highlighted keyboard option inside active modal dropdown
-  useEffect(() => {
-    if (!activeModalDropdown) return;
-    const el = document.querySelector('[data-modal-dropdown-active="true"]');
-    if (el && typeof (el as HTMLElement).scrollIntoView === 'function') {
-      (el as HTMLElement).scrollIntoView({ block: 'nearest' });
-    }
-  }, [dropdownHighlightIdx, activeModalDropdown]);
-
-  // Reset all fields cleanly before opening Add Fuel modal
-  const openAddFuelModal = () => {
-    logisticsStore.refreshUsersFromHostinger?.().catch(() => {});
-    const todayIso = new Date().toISOString().split('T')[0];
-    setEditingLogId(null);
-    setFormBranchId(selectedBranchFilter === 'cab-sidoarjo' ? 'cab-sidoarjo' : 'cab-banyuwangi');
-    setFormFleetId('');
-    setFormDriverId('');
-    setFormDriverName('');
-    setFormHelperId('');
-    setFormHelperName('');
-    setFormRouteTrip('');
-    setFormDate(todayIso);
-    setFormFuelType('BioSolar');
-    setFormCostPerLiter('6800');
-    setFormLiters('');
-    setFormStartOdo('');
-    setFormEndOdo('');
-    setFormGasStation('SPBU Farly');
-    setFormCargoLoadTon('');
-    setFormNotes('');
-    setFleetSearchFilter('');
-    setDriverSearchFilter('');
-    setHelperSearchFilter('');
-    setAreaSearchFilter('');
-    setActiveModalDropdown(null);
-    setIsGasStationDropdownOpen(false);
-    setFormError('');
-    setIsAddModalOpen(true);
-  };
-
-  // Populate modal fields for Editing an existing FuelLog
-  const openEditFuelModal = (log: FuelLog) => {
-    logisticsStore.refreshUsersFromHostinger?.().catch(() => {});
-    const matchedFleet = resolveFleetForLog(log);
-    setEditingLogId(log.id);
-    setFormBranchId(matchedFleet ? resolveFleetBranchId(matchedFleet) : resolveLogBranchId(log));
-    setFormFleetId(matchedFleet?.id || log.fleetId || log.plateNumber || log.initialCode || '');
-    setFormDriverId(log.driverId || '');
-    setFormDriverName(log.driverName || '');
-    setFormHelperId(log.helperId || '');
-    setFormHelperName(log.helperName || '');
-    setFormRouteTrip(log.routeTrip || '');
-    setFormDate(log.date || new Date().toISOString().split('T')[0]);
-    setFormFuelType(log.fuelType || 'BioSolar');
-    setFormCostPerLiter(log.costPerLiter !== undefined ? String(log.costPerLiter) : '6800');
-    setFormLiters(String(log.liters || ''));
-    setFormStartOdo(String(log.startOdometerKm || ''));
-    setFormEndOdo(String(log.endOdometerKm || ''));
-    setFormGasStation(log.gasStation || 'SPBU Farly');
-    setFormCargoLoadTon(log.cargoLoadTon ? String(log.cargoLoadTon) : '');
-    setFormNotes(log.notes || '');
-    setFleetSearchFilter('');
-    setDriverSearchFilter('');
-    setHelperSearchFilter('');
-    setAreaSearchFilter('');
-    setActiveModalDropdown(null);
-    setIsGasStationDropdownOpen(false);
-    setFormError('');
-    setIsAddModalOpen(true);
-  };
-
-  // Autofill Kilometer Awal (KM) from the latest Kilometer Isi (endOdometerKm) of the fleet across ANY SPBU
-  const handleFleetSelection = (fleetId: string) => {
-    setFormFleetId(fleetId);
-    const flt = fleets.find(f => f.id === fleetId);
-    if (flt) {
-      const targetPlateClean = (flt.plateNumber || '').replace(/\s+/g, '').toUpperCase();
-      const matchingLogs = fuelLogs
-        .filter(l => {
-          if (editingLogId && l.id === editingLogId) return false;
-          const logPlateClean = (l.plateNumber || '').replace(/\s+/g, '').toUpperCase();
-          return l.fleetId === flt.id || (targetPlateClean && logPlateClean === targetPlateClean);
-        })
-        .sort((a, b) => {
-          const dateDiff = (b.date || '').localeCompare(a.date || '');
-          if (dateDiff !== 0) return dateDiff;
-          const createdDiff = (b.createdAt || '').localeCompare(a.createdAt || '');
-          if (createdDiff !== 0) return createdDiff;
-          return (b.endOdometerKm || 0) - (a.endOdometerKm || 0);
-        });
-
-      const latestFleetLog = matchingLogs[0];
-      if (!editingLogId) {
-        if (latestFleetLog && latestFleetLog.endOdometerKm > 0) {
-          setFormStartOdo(String(latestFleetLog.endOdometerKm));
-        } else {
-          setFormStartOdo('');
-        }
-      }
-
-      if (!formDriverName) {
-        const assignedCrew = crews.find(
-          c => c.currentFleetId === flt.id && branchStore.getCrewBranchId(c.id, c.name) === formBranchId
-        );
-        if (assignedCrew) {
-          const activeValidCrew = crewOptionsForModal.find(
-            opt => compactPersonKey(opt.name) === compactPersonKey(assignedCrew.name)
-          );
-          if (activeValidCrew) {
-            setFormDriverName(activeValidCrew.name);
-            setFormDriverId(activeValidCrew.id);
-          }
-        }
-      }
-    }
-  };
-
-  // When fuel type changes in form (BioSolar fixed default 6800, others update if still empty or default)
-  const handleFuelTypeChange = (type: FuelType) => {
-    setFormFuelType(type);
-    if (!formCostPerLiter.trim()) {
-      setFormCostPerLiter(String(STANDARD_FUEL_PRICES[type] || 6800));
-    }
-  };
-
-  // Live calculation for Add Form
-  const liveFormDistance = useMemo(() => {
-    const s = Number(formStartOdo) || 0;
-    const e = Number(formEndOdo) || 0;
-    return Math.max(0, e - s);
-  }, [formStartOdo, formEndOdo]);
-
-  const liveFormTotalCost = useMemo(() => {
-    const l = Number(formLiters) || 0;
-    const price = Number(formCostPerLiter) || 0;
-    return Math.round(l * price);
-  }, [formLiters, formCostPerLiter]);
-
-  const liveFormRatio = useMemo(() => {
-    const l = Number(formLiters) || 0;
-    if (l <= 0 || liveFormDistance <= 0) return 0;
-    return Number((liveFormDistance / l).toFixed(2));
-  }, [formLiters, liveFormDistance]);
-
-  const liveFormEfficiency = useMemo(() => {
-    const flt = selectedFormFleet;
-    const target = flt ? (FUEL_TARGET_RATIOS[flt.vehicleType]?.target || 7.5) : 7.5;
-    if (liveFormRatio <= 0) return { status: 'Menunggu input' as const, color: 'text-slate-400' };
-    if (liveFormRatio >= target * 1.05) {
-      return { status: 'Sangat Efisien (Irit)', color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' };
-    }
-    if (liveFormRatio >= target * 0.90) {
-      return { status: 'Normal / Efisien', color: 'text-blue-400 bg-blue-500/10 border-blue-500/30' };
-    }
-    if (liveFormRatio >= target * 0.75) {
-      return { status: 'Boros (Perlu Evaluasi)', color: 'text-amber-400 bg-amber-500/10 border-amber-500/30' };
-    }
-    return { status: 'Kritis / Potensi Anomali', color: 'text-rose-400 bg-rose-500/10 border-rose-500/30' };
-  }, [liveFormRatio, selectedFormFleet]);
-
-  const handleSaveFuelLog = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (isSavingFuelLog) return;
-    setFormError('');
-    setFuelActionError('');
-    if (!formFleetId && !selectedFormFleet) {
-      setFormError('Silakan pilih Armada Truk terlebih dahulu.');
-      return;
-    }
-    if (!formDriverName) {
-      setFormError('Silakan pilih Nama Driver terlebih dahulu.');
-      return;
-    }
-    if (!editingLogId) {
-      const driverActive = crewOptionsForModal.some(
-        opt => compactPersonKey(opt.name) === compactPersonKey(formDriverName)
-      );
-      if (!driverActive) {
-        setFormError('Akun driver yang dipilih sudah nonaktif atau tidak aktif di cabang ini. Silakan pilih driver aktif.');
-        return;
-      }
-      if (formHelperName) {
-        const helperActive = crewOptionsForModal.some(
-          opt => compactPersonKey(opt.name) === compactPersonKey(formHelperName)
-        );
-        if (!helperActive) {
-          setFormError('Akun helper yang dipilih sudah nonaktif atau tidak aktif di cabang ini. Silakan pilih helper aktif.');
-          return;
-        }
-      }
-    }
-    if (!formLiters || Number(formLiters) <= 0) {
-      setFormError('Volume BBM (Liter) harus lebih dari 0.');
-      return;
-    }
-    if (formStartOdo === '' || formEndOdo === '') {
-      setFormError('Kilometer Awal dan Kilometer Isi wajib diisi.');
-      return;
-    }
-
-    const flt = selectedFormFleet;
-    if (!flt) {
-      setFormError('Data armada tidak ditemukan.');
-      return;
-    }
-
-    const startKm = Number(formStartOdo);
-    const endKm = Number(formEndOdo);
-    if (endKm <= startKm) {
-      setFormError('Kilometer Isi (KM) harus lebih besar dari Kilometer Awal (KM).');
-      return;
-    }
-
-    const payload = {
-      fleetId: flt.id,
-      plateNumber: flt.plateNumber,
-      initialCode: flt.initialCode,
-      vehicleType: flt.vehicleType,
-      branchId: formBranchId,
-      driverId: formDriverId || undefined,
-      driverName: formDriverName,
-      helperId: formHelperId || undefined,
-      helperName: formHelperName || undefined,
-      date: formDate,
-      fuelType: formFuelType,
-      liters: Number(formLiters),
-      costPerLiter: Number(formCostPerLiter) || 6800,
-      startOdometerKm: startKm,
-      endOdometerKm: endKm,
-      gasStation: formGasStation,
-      routeTrip: formRouteTrip || undefined,
-      cargoLoadTon: formCargoLoadTon ? Number(formCargoLoadTon) : undefined,
-      notes: formNotes || undefined
-    };
-
-    setIsSavingFuelLog(true);
-    try {
-      if (editingLogId) {
-        await logisticsStore.updateFuelLogAsync(editingLogId, payload);
-      } else {
-        await logisticsStore.addFuelLogAsync(payload);
-      }
-
-      setIsAddModalOpen(false);
-      setEditingLogId(null);
-      setFormError('');
-      setFormLiters('');
-      setFormCostPerLiter('6800');
-      setFormStartOdo('');
-      setFormEndOdo('');
-      setFormDriverId('');
-      setFormDriverName('');
-      setFormHelperId('');
-      setFormHelperName('');
-      setFormNotes('');
-      setFormRouteTrip('');
-      setFormCargoLoadTon('');
-    } catch (err: any) {
-      setFormError(err?.message || 'Gagal menyimpan catatan BBM ke database MySQL. Periksa koneksi atau data armada.');
-    } finally {
-      setIsSavingFuelLog(false);
-    }
-  };
+  const portalSyncedLogCount = useMemo(
+    () => reconciledLogs.filter(l => l.distanceSource === 'portal').length,
+    [reconciledLogs]
+  );
 
   // Branch-scoped Fleet Summaries
   const fleetSummaries: FleetFuelSummary[] = useMemo(() => {
     return branchScopedFleets.map(fleet => {
-      const logs = branchScopedLogs.filter(
-        l => l.fleetId === fleet.id || (l.plateNumber && l.plateNumber.toUpperCase() === fleet.plateNumber.toUpperCase())
+      const logs = reconciledLogs.filter(
+        l =>
+          l.fleetId === fleet.id ||
+          (l.plateNumber && normalizePlateKey(l.plateNumber) === normalizePlateKey(fleet.plateNumber))
       );
       const totalLogs = logs.length;
       const totalLiters = logs.reduce((acc, l) => acc + l.liters, 0);
       const totalCost = logs.reduce((acc, l) => acc + l.totalCost, 0);
       const totalDistanceKm = logs.reduce((acc, l) => acc + l.distanceKm, 0);
 
-      const targetConfig = FUEL_TARGET_RATIOS[fleet.vehicleType] || { target: 7.5, minAcceptable: 6.4, label: '7.5 KM / L' };
+      const targetConfig =
+        FUEL_TARGET_RATIOS[fleet.vehicleType] || { target: 7.5, minAcceptable: 6.4, label: '7.5 KM / L' };
       const targetRatio = targetConfig.target;
-      const avgKmPerLiter = totalLiters > 0 && totalDistanceKm > 0 ? Number((totalDistanceKm / totalLiters).toFixed(2)) : 0;
-      const avgLiterPerKm = totalDistanceKm > 0 && totalLiters > 0 ? Number((totalLiters / totalDistanceKm).toFixed(4)) : 0;
-      const avgLiterPer100Km = totalDistanceKm > 0 && totalLiters > 0 ? Number(((totalLiters / totalDistanceKm) * 100).toFixed(2)) : 0;
+      const avgKmPerLiter =
+        totalLiters > 0 && totalDistanceKm > 0 ? Number((totalDistanceKm / totalLiters).toFixed(2)) : 0;
+      const avgLiterPerKm =
+        totalDistanceKm > 0 && totalLiters > 0 ? Number((totalLiters / totalDistanceKm).toFixed(4)) : 0;
+      const avgLiterPer100Km =
+        totalDistanceKm > 0 && totalLiters > 0 ? Number(((totalLiters / totalDistanceKm) * 100).toFixed(2)) : 0;
       const targetLiterPerKm = targetRatio > 0 ? Number((1 / targetRatio).toFixed(4)) : 0;
       const targetLiterPer100Km = targetRatio > 0 ? Number((100 / targetRatio).toFixed(2)) : 0;
 
       const avgCostPerKm = totalDistanceKm > 0 ? Math.round(totalCost / totalDistanceKm) : 0;
-      const efficiencyScore = totalDistanceKm > 0 && targetRatio > 0 ? Math.round((avgKmPerLiter / targetRatio) * 100) : 0;
-      const anomaliesCount = logs.filter(l => l.efficiencyStatus === 'Boros' || l.efficiencyStatus === 'Kritis / Potensi Anomali').length;
+      const efficiencyScore =
+        totalDistanceKm > 0 && targetRatio > 0 ? Math.round((avgKmPerLiter / targetRatio) * 100) : 0;
+      const anomaliesCount = logs.filter(
+        l => l.efficiencyStatus === 'Boros' || l.efficiencyStatus === 'Kritis / Potensi Anomali'
+      ).length;
 
       let status: EfficiencyStatus = 'Efisien / Normal';
       if (totalLogs === 0 || totalDistanceKm === 0) {
@@ -706,12 +524,12 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
         anomaliesCount
       };
     });
-  }, [branchScopedFleets, branchScopedLogs]);
+  }, [branchScopedFleets, reconciledLogs]);
 
-  // Branch-scoped Driver Eco Scores (deduplicated by space-collapsed key so Arif Bagus never splits)
+  // Driver Eco Scores
   const driverScores: DriverFuelScore[] = useMemo(() => {
-    const driverMap = new Map<string, { driverId: string; driverName: string; logs: FuelLog[] }>();
-    branchScopedLogs.forEach(log => {
+    const driverMap = new Map<string, { driverId: string; driverName: string; logs: ReconciledFuelLog[] }>();
+    reconciledLogs.forEach(log => {
       const displayName = (log.driverName || 'Driver Tidak Terdaftar').trim();
       const key = compactPersonKey(displayName) || displayName.toLowerCase();
       if (!driverMap.has(key)) {
@@ -732,7 +550,8 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       const totalLiters = item.logs.reduce((acc, l) => acc + l.liters, 0);
       const avgKmPerLiter = totalLiters > 0 ? Number((totalDistanceKm / totalLiters).toFixed(2)) : 0;
 
-      const avgEfficiencyRatio = item.logs.reduce((acc, l) => acc + (l.ratioKmPerLiter / (l.targetRatio || 7.5)), 0) / (totalTrips || 1);
+      const avgEfficiencyRatio =
+        item.logs.reduce((acc, l) => acc + l.ratioKmPerLiter / (l.targetRatio || 7.5), 0) / (totalTrips || 1);
       const ecoDrivingScore = Math.min(100, Math.max(40, Math.round(avgEfficiencyRatio * 90)));
 
       let badge: 'Master Eco-Driver' | 'Driver Efisien' | 'Perlu Pembinaan' = 'Driver Efisien';
@@ -740,10 +559,10 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
       if (ecoDrivingScore >= 90) {
         badge = 'Master Eco-Driver';
-        recommendation = 'Pengemudi teladan dengan akselerasi halus, pengereman terencana, dan efisiensi BBM prima.';
+        recommendation = 'Pengemudi teladan dengan akselerasi halus dan efisiensi BBM stabil.';
       } else if (ecoDrivingScore < 75) {
         badge = 'Perlu Pembinaan';
-        recommendation = 'Perlu evaluasi pola idling berlebih saat antre muat dan hindari akselerasi agresif di tanjakan.';
+        recommendation = 'Evaluasi durasi idling saat antre muat dan hindari akselerasi berlebih.';
       }
 
       return {
@@ -765,18 +584,19 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       s.ranking = idx + 1;
     });
     return scores;
-  }, [branchScopedLogs]);
+  }, [reconciledLogs]);
 
   // Branch-scoped KPI Summary
   const kpiSummary = useMemo(() => {
-    const totalLiters = branchScopedLogs.reduce((acc, l) => acc + l.liters, 0);
-    const totalCost = branchScopedLogs.reduce((acc, l) => acc + l.totalCost, 0);
-    const totalDistanceKm = branchScopedLogs.reduce((acc, l) => acc + l.distanceKm, 0);
+    const totalLiters = Number(reconciledLogs.reduce((acc, l) => acc + l.liters, 0).toFixed(1));
+    const totalCost = reconciledLogs.reduce((acc, l) => acc + l.totalCost, 0);
+    const totalDistanceKm = reconciledLogs.reduce((acc, l) => acc + l.distanceKm, 0);
     const overallAvgKmPerLiter = totalLiters > 0 ? Number((totalDistanceKm / totalLiters).toFixed(2)) : 0;
     const overallAvgLiterPerKm = totalDistanceKm > 0 ? Number((totalLiters / totalDistanceKm).toFixed(4)) : 0;
-    const overallAvgLiterPer100Km = totalDistanceKm > 0 ? Number(((totalLiters / totalDistanceKm) * 100).toFixed(2)) : 0;
+    const overallAvgLiterPer100Km =
+      totalDistanceKm > 0 ? Number(((totalLiters / totalDistanceKm) * 100).toFixed(2)) : 0;
     const overallAvgCostPerKm = totalDistanceKm > 0 ? Math.round(totalCost / totalDistanceKm) : 0;
-    const totalAnomalies = branchScopedLogs.filter(
+    const totalAnomalies = reconciledLogs.filter(
       l => l.efficiencyStatus === 'Boros' || l.efficiencyStatus === 'Kritis / Potensi Anomali'
     ).length;
 
@@ -786,7 +606,6 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     );
     const topFleet = sortedFleets[0];
     const leastFleet = sortedFleets[sortedFleets.length - 1];
-    const topDriver = driverScores[0];
 
     return {
       totalLiters,
@@ -799,102 +618,107 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       totalAnomalies,
       topFleet,
       leastFleet,
-      topDriver,
-      totalRecords: branchScopedLogs.length
+      totalRecords: reconciledLogs.length
     };
-  }, [branchScopedLogs, fleetSummaries, driverScores]);
+  }, [reconciledLogs, fleetSummaries]);
 
-  // Chart Data: Timeline fuel consumption
+  // Chart Data: Timeline fuel consumption & distance (merging portal KM dates)
   const timelineChartData = useMemo(() => {
-    const map = new Map<string, { date: string; liters: number; distance: number }>();
-    const sorted = [...branchScopedLogs].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    sorted.forEach(l => {
-      if (!map.has(l.date)) {
-        map.set(l.date, { date: l.date.substring(5), liters: 0, distance: 0 });
+    const map = new Map<string, { fullDate: string; date: string; liters: number; distance: number }>();
+    reconciledLogs.forEach(l => {
+      const iso = normalizeIsoDate(l.date);
+      if (!iso) return;
+      if (!map.has(iso)) {
+        map.set(iso, { fullDate: iso, date: iso.slice(5), liters: 0, distance: 0 });
       }
-      const item = map.get(l.date)!;
-      item.liters += l.liters;
+      const item = map.get(iso)!;
+      item.liters = Number((item.liters + l.liters).toFixed(1));
       item.distance += l.distanceKm;
     });
-    return Array.from(map.values()).slice(-7);
-  }, [branchScopedLogs]);
 
-  // Unit Vehicles L/KM Calculation and In-depth Analysis
+    // Include portal distance dates that don't have refuels yet
+    portalGlobalStats.dailyPortalDistance.forEach((dist, iso) => {
+      if (!map.has(iso)) {
+        map.set(iso, { fullDate: iso, date: iso.slice(5), liters: 0, distance: dist });
+      }
+    });
+
+    return Array.from(map.values())
+      .sort((a, b) => a.fullDate.localeCompare(b.fullDate))
+      .slice(-10);
+  }, [reconciledLogs, portalGlobalStats]);
+
+  // Unit Vehicles L/KM analysis
   const unitLKmAnalysis = useMemo(() => {
     const orderedSummaries = [...fleetSummaries].sort(
-      (a, b) => getCanonicalFleetOrderIndex(a.initialCode || a.plateNumber) - getCanonicalFleetOrderIndex(b.initialCode || b.plateNumber)
+      (a, b) =>
+        getCanonicalFleetOrderIndex(a.initialCode || a.plateNumber) -
+        getCanonicalFleetOrderIndex(b.initialCode || b.plateNumber)
     );
 
     const list = orderedSummaries.map(fs => {
       const hasData = fs.totalDistanceKm > 0 && fs.totalLiters > 0;
       const avgLKm = hasData ? Number((fs.totalLiters / fs.totalDistanceKm).toFixed(4)) : 0;
       const avgL100Km = hasData ? Number(((fs.totalLiters / fs.totalDistanceKm) * 100).toFixed(2)) : 0;
-      const targetLKm = hasData && fs.targetRatio > 0 ? Number((1 / fs.targetRatio).toFixed(4)) : 0;
-      const targetL100Km = hasData && fs.targetRatio > 0 ? Number((100 / fs.targetRatio).toFixed(2)) : 0;
+      const targetLKm = fs.targetRatio > 0 ? Number((1 / fs.targetRatio).toFixed(4)) : 0;
+      const targetL100Km = fs.targetRatio > 0 ? Number((100 / fs.targetRatio).toFixed(2)) : 0;
 
       const savingPct = hasData && targetLKm > 0 ? Number((((targetLKm - avgLKm) / targetLKm) * 100).toFixed(1)) : 0;
       const isSaving = savingPct >= 0;
-
       const avgCostPerKm = hasData ? Math.round(fs.totalCost / fs.totalDistanceKm) : 0;
-      let statusColor = 'text-slate-400 bg-slate-800/60 border-slate-700';
-      if (hasData) {
-        if (fs.status === 'Sangat Efisien') statusColor = 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30';
-        else if (fs.status === 'Efisien / Normal') statusColor = 'text-blue-400 bg-blue-500/10 border-blue-500/30';
-        else if (fs.status === 'Boros') statusColor = 'text-amber-400 bg-amber-500/10 border-amber-500/30';
-        else if (fs.status === 'Kritis / Potensi Anomali') statusColor = 'text-rose-400 bg-rose-500/10 border-rose-500/30';
-      }
 
-      const unitLogs = branchScopedLogs.filter(
-        l => l.fleetId === fs.fleetId || (l.plateNumber && l.plateNumber.toUpperCase() === fs.plateNumber.toUpperCase())
+      const unitLogs = reconciledLogs.filter(
+        l =>
+          l.fleetId === fs.fleetId ||
+          (l.plateNumber && normalizePlateKey(l.plateNumber) === normalizePlateKey(fs.plateNumber))
       );
-      const latestLog = unitLogs[0];
-      const driverName = latestLog?.driverName || '-';
-      const areaKirim = latestLog?.routeTrip || '-';
+      const latestLog = [...unitLogs].sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
+      const hasPortalKm = unitLogs.some(l => l.distanceSource === 'portal');
 
       return {
         ...fs,
         hasData,
+        hasPortalKm,
         avgLKm,
         avgL100Km,
         targetLKm,
         targetL100Km,
         avgCostPerKm,
-        statusColor,
         savingPct,
         isSaving,
-        driverName,
-        areaKirim
+        driverName: latestLog?.driverName || '-',
+        areaKirim: latestLog?.routeTrip || '-'
       };
     });
 
-    const filtered = list.filter(item => {
-      if (lKmFilterFleetId === 'all') return true;
-      return item.fleetId === lKmFilterFleetId;
-    });
+    const filtered = list.filter(item => lKmFilterFleetId === 'all' || item.fleetId === lKmFilterFleetId);
 
     return filtered.sort((a, b) => {
-      if (lKmSortBy === 'canonical_order') {
-        return getCanonicalFleetOrderIndex(a.initialCode || a.plateNumber) - getCanonicalFleetOrderIndex(b.initialCode || b.plateNumber);
-      }
       if (lKmSortBy === 'lKm_asc') return a.avgLKm - b.avgLKm;
       if (lKmSortBy === 'lKm_desc') return b.avgLKm - a.avgLKm;
       if (lKmSortBy === 'efficiency_desc') return b.efficiencyScore - a.efficiencyScore;
       if (lKmSortBy === 'distance_desc') return b.totalDistanceKm - a.totalDistanceKm;
-      return getCanonicalFleetOrderIndex(a.initialCode || a.plateNumber) - getCanonicalFleetOrderIndex(b.initialCode || b.plateNumber);
+      return (
+        getCanonicalFleetOrderIndex(a.initialCode || a.plateNumber) -
+        getCanonicalFleetOrderIndex(b.initialCode || b.plateNumber)
+      );
     });
-  }, [fleetSummaries, branchScopedLogs, lKmFilterFleetId, lKmSortBy]);
+  }, [fleetSummaries, reconciledLogs, lKmFilterFleetId, lKmSortBy]);
 
-  // Chart data for comparing Liter per KM vs Target L/KM
   const lKmComparisonChartData = useMemo(() => {
     const orderedSummaries = [...fleetSummaries].sort(
-      (a, b) => getCanonicalFleetOrderIndex(a.initialCode || a.plateNumber) - getCanonicalFleetOrderIndex(b.initialCode || b.plateNumber)
+      (a, b) =>
+        getCanonicalFleetOrderIndex(a.initialCode || a.plateNumber) -
+        getCanonicalFleetOrderIndex(b.initialCode || b.plateNumber)
     );
     const mapped = orderedSummaries.map(fs => {
       const hasData = fs.totalDistanceKm > 0 && fs.totalLiters > 0;
       const avgLKm = hasData ? Number((fs.totalLiters / fs.totalDistanceKm).toFixed(4)) : 0;
-      const targetLKm = hasData && fs.targetRatio > 0 ? Number((1 / fs.targetRatio).toFixed(4)) : 0;
-      const unitLogs = branchScopedLogs.filter(
-        l => l.fleetId === fs.fleetId || (l.plateNumber && l.plateNumber.toUpperCase() === fs.plateNumber.toUpperCase())
+      const targetLKm = fs.targetRatio > 0 ? Number((1 / fs.targetRatio).toFixed(4)) : 0;
+      const unitLogs = reconciledLogs.filter(
+        l =>
+          l.fleetId === fs.fleetId ||
+          (l.plateNumber && normalizePlateKey(l.plateNumber) === normalizePlateKey(fs.plateNumber))
       );
       const latestLog = unitLogs[0];
       return {
@@ -905,25 +729,394 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
         driverName: latestLog?.driverName || '-',
         areaKirim: latestLog?.routeTrip || '-',
         aktualLKm: avgLKm,
-        targetLKm: targetLKm,
-        aktualL100Km: Number((avgLKm * 100).toFixed(2)),
-        targetL100Km: Number((targetLKm * 100).toFixed(2)),
+        targetLKm: hasData ? targetLKm : 0,
         aktualKmL: hasData ? fs.avgKmPerLiter : 0,
-        targetKmL: hasData ? fs.targetRatio : 0
+        targetKmL: fs.targetRatio
       };
     });
     if (comparisonSelectedFleetId !== 'all') {
       return mapped.filter(m => m.fleetId === comparisonSelectedFleetId);
     }
     return mapped;
-  }, [fleetSummaries, branchScopedLogs, comparisonSelectedFleetId]);
+  }, [fleetSummaries, reconciledLogs, comparisonSelectedFleetId]);
 
-  // Filtered & Sorted Fuel Logs
+  // Modal helpers & data
+  const editingLogObj = useMemo(
+    () => (editingLogId ? fuelLogs.find(l => l.id === editingLogId) || null : null),
+    [editingLogId, fuelLogs]
+  );
+
+  const selectedFormFleet = useMemo(() => {
+    if (!formFleetId && !editingLogObj) return undefined;
+    const direct =
+      cleanCanonicalFleets.find(fl => fl.id === formFleetId) ||
+      fleets.find(fl => fl.id === formFleetId);
+    if (direct) return direct;
+    if (editingLogObj) {
+      const resolved = resolveFleetForLog(editingLogObj);
+      if (resolved) return resolved;
+      if (editingLogObj.plateNumber || editingLogObj.initialCode) {
+        return {
+          id: editingLogObj.fleetId || formFleetId || 'legacy-fleet',
+          plateNumber: editingLogObj.plateNumber || '-',
+          initialCode: editingLogObj.initialCode || editingLogObj.plateNumber || 'Armada',
+          vehicleType: editingLogObj.vehicleType || 'Double STD'
+        } as Fleet;
+      }
+    }
+    return undefined;
+  }, [formFleetId, cleanCanonicalFleets, fleets, editingLogObj]);
+
+  const modalBranchFleets = useMemo(
+    () => cleanCanonicalFleets.filter(f => resolveFleetBranchId(f) === formBranchId),
+    [cleanCanonicalFleets, formBranchId]
+  );
+
+  const filteredModalFleets = useMemo(() => {
+    const q = fleetSearchFilter.trim().toLowerCase();
+    if (!q) return modalBranchFleets;
+    return modalBranchFleets.filter(
+      f =>
+        (f.initialCode || '').toLowerCase().includes(q) ||
+        (f.plateNumber || '').toLowerCase().includes(q) ||
+        (f.vehicleType || '').toLowerCase().includes(q) ||
+        (f.brand || '').toLowerCase().includes(q)
+    );
+  }, [modalBranchFleets, fleetSearchFilter]);
+
+  const deliveryAreaOptions = useMemo(() => {
+    const set = new Set<string>(OFFICIAL_DESTINATION_AREAS);
+    schedules.forEach(s => {
+      const legacyDest = (s as Schedule & { destination?: string }).destination;
+      if (legacyDest && typeof legacyDest === 'string' && legacyDest.trim()) {
+        set.add(legacyDest.trim());
+      }
+      if (s?.areaName && typeof s.areaName === 'string' && s.areaName.trim()) {
+        set.add(s.areaName.trim());
+      }
+    });
+    return Array.from(set);
+  }, [schedules]);
+
+  const filteredAreaOptions = useMemo(() => {
+    const q = areaSearchFilter.trim().toLowerCase();
+    if (!q) return deliveryAreaOptions;
+    return deliveryAreaOptions.filter(a => a.toLowerCase().includes(q));
+  }, [deliveryAreaOptions, areaSearchFilter]);
+
+  const crewOptionsForModal = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; role: string }>();
+    const registeredUsers = users && users.length > 0 ? users : logisticsStore.getUsers();
+    registeredUsers.forEach(u => {
+      const normalizedStatus = String(u?.status || '').trim().toLowerCase();
+      if (
+        u &&
+        normalizedStatus === 'approved' &&
+        (u as UserProfile & { isActive?: boolean }).isActive !== false &&
+        logisticsStore.isActiveDeliveryCrewUser(u, formBranchId) &&
+        u.fullName?.trim()
+      ) {
+        const cleanName = u.fullName.trim();
+        const cKey = compactPersonKey(cleanName);
+        if (cKey && !map.has(cKey)) {
+          map.set(cKey, {
+            id: u.id,
+            name: cleanName,
+            role: u.role === 'crew_helper' ? 'Helper' : 'Driver'
+          });
+        }
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'id'));
+  }, [users, formBranchId]);
+
+  const filteredDriverOptions = useMemo(() => {
+    const q = driverSearchFilter.trim().toLowerCase();
+    const list = [...crewOptionsForModal].sort((a, b) => {
+      const aIsDrv = a.role.toLowerCase().includes('driver') ? 0 : 1;
+      const bIsDrv = b.role.toLowerCase().includes('driver') ? 0 : 1;
+      if (aIsDrv !== bIsDrv) return aIsDrv - bIsDrv;
+      return a.name.localeCompare(b.name);
+    });
+    if (!q) return list;
+    return list.filter(d => d.name.toLowerCase().includes(q));
+  }, [crewOptionsForModal, driverSearchFilter]);
+
+  const filteredHelperOptions = useMemo(() => {
+    const q = helperSearchFilter.trim().toLowerCase();
+    const list = [...crewOptionsForModal].sort((a, b) => {
+      const aIsHlp = a.role.toLowerCase().includes('helper') ? 0 : 1;
+      const bIsHlp = b.role.toLowerCase().includes('helper') ? 0 : 1;
+      if (aIsHlp !== bIsHlp) return aIsHlp - bIsHlp;
+      return a.name.localeCompare(b.name);
+    });
+    if (!q) return list;
+    return list.filter(d => d.name.toLowerCase().includes(q));
+  }, [crewOptionsForModal, helperSearchFilter]);
+
+  const liveFormDistance = useMemo(() => {
+    const s = Number(formStartOdo) || 0;
+    const e = Number(formEndOdo) || 0;
+    return Math.max(0, e - s);
+  }, [formStartOdo, formEndOdo]);
+
+  const liveFormTotalCost = useMemo(() => {
+    const l = Number(formLiters) || 0;
+    const price = Number(formCostPerLiter) || 0;
+    return Math.round(l * price);
+  }, [formLiters, formCostPerLiter]);
+
+  const liveFormRatio = useMemo(() => {
+    const l = Number(formLiters) || 0;
+    if (l <= 0 || liveFormDistance <= 0) return 0;
+    return Number((liveFormDistance / l).toFixed(2));
+  }, [formLiters, liveFormDistance]);
+
+  const liveFormEfficiency = useMemo(() => {
+    const flt = selectedFormFleet;
+    const target = flt ? FUEL_TARGET_RATIOS[flt.vehicleType]?.target || 7.5 : 7.5;
+    if (liveFormRatio <= 0) return { status: 'Menunggu input', tone: 'text-slate-500 bg-slate-100 border-slate-200' };
+    if (liveFormRatio >= target * 1.05) {
+      return { status: 'Sangat Efisien', tone: 'text-emerald-700 bg-emerald-50 border-emerald-200' };
+    }
+    if (liveFormRatio >= target * 0.9) {
+      return { status: 'Normal / Efisien', tone: 'text-blue-700 bg-blue-50 border-blue-200' };
+    }
+    if (liveFormRatio >= target * 0.75) {
+      return { status: 'Boros', tone: 'text-amber-700 bg-amber-50 border-amber-200' };
+    }
+    return { status: 'Anomali / Kritis', tone: 'text-red-700 bg-red-50 border-red-200' };
+  }, [liveFormRatio, selectedFormFleet]);
+
+  const openAddFuelModal = () => {
+    logisticsStore.refreshUsersFromHostinger?.().catch(() => {});
+    const todayIso = new Date().toISOString().split('T')[0];
+    setEditingLogId(null);
+    setFormBranchId(selectedBranchFilter === 'cab-sidoarjo' ? 'cab-sidoarjo' : 'cab-banyuwangi');
+    setFormFleetId('');
+    setFormDriverId('');
+    setFormDriverName('');
+    setFormHelperId('');
+    setFormHelperName('');
+    setFormRouteTrip('');
+    setFormDate(todayIso);
+    setFormFuelType('BioSolar');
+    setFormCostPerLiter('6800');
+    setFormLiters('');
+    setFormStartOdo('');
+    setFormEndOdo('');
+    setFormGasStation('SPBU Farly');
+    setFormCargoLoadTon('');
+    setFormNotes('');
+    setFleetSearchFilter('');
+    setDriverSearchFilter('');
+    setHelperSearchFilter('');
+    setAreaSearchFilter('');
+    setActiveModalDropdown(null);
+    setIsGasStationDropdownOpen(false);
+    setFormError('');
+    setIsAddModalOpen(true);
+  };
+
+  const openEditFuelModal = (log: FuelLog) => {
+    logisticsStore.refreshUsersFromHostinger?.().catch(() => {});
+    const matchedFleet = resolveFleetForLog(log);
+    setEditingLogId(log.id);
+    setFormBranchId(matchedFleet ? resolveFleetBranchId(matchedFleet) : resolveLogBranchId(log));
+    setFormFleetId(matchedFleet?.id || log.fleetId || log.plateNumber || log.initialCode || '');
+    setFormDriverId(log.driverId || '');
+    setFormDriverName(log.driverName || '');
+    setFormHelperId(log.helperId || '');
+    setFormHelperName(log.helperName || '');
+    setFormRouteTrip(log.routeTrip || '');
+    setFormDate(log.date || new Date().toISOString().split('T')[0]);
+    setFormFuelType(log.fuelType || 'BioSolar');
+    setFormCostPerLiter(log.costPerLiter !== undefined ? String(log.costPerLiter) : '6800');
+    setFormLiters(String(log.liters || ''));
+    setFormStartOdo(String(log.startOdometerKm || ''));
+    setFormEndOdo(String(log.endOdometerKm || ''));
+    setFormGasStation(log.gasStation || 'SPBU Farly');
+    setFormCargoLoadTon(log.cargoLoadTon ? String(log.cargoLoadTon) : '');
+    setFormNotes(log.notes || '');
+    setFleetSearchFilter('');
+    setDriverSearchFilter('');
+    setHelperSearchFilter('');
+    setAreaSearchFilter('');
+    setActiveModalDropdown(null);
+    setIsGasStationDropdownOpen(false);
+    setFormError('');
+    setIsAddModalOpen(true);
+  };
+
+  // Autofill KM Awal & KM Akhir from Driver Portal schedules if available on selected date/fleet, otherwise latest FuelLog endOdometerKm
+  const handleFleetSelection = (fleetId: string) => {
+    setFormFleetId(fleetId);
+    const flt = fleets.find(f => f.id === fleetId);
+    if (!flt) return;
+    const targetPlateClean = normalizePlateKey(flt.plateNumber);
+
+    if (!editingLogId) {
+      // Check Driver Portal KM first for selected date
+      const portalMatch = portalKmByFleetDate.get(`${targetPlateClean || flt.id}|${formDate}`);
+      if (portalMatch) {
+        setFormStartOdo(String(portalMatch.minStartKm));
+        setFormEndOdo(String(portalMatch.maxEndKm));
+      } else {
+        const matchingLogs = fuelLogs
+          .filter(l => {
+            const logPlateClean = normalizePlateKey(l.plateNumber);
+            return l.fleetId === flt.id || (targetPlateClean && logPlateClean === targetPlateClean);
+          })
+          .sort((a, b) => {
+            const dateDiff = (b.date || '').localeCompare(a.date || '');
+            if (dateDiff !== 0) return dateDiff;
+            return (b.endOdometerKm || 0) - (a.endOdometerKm || 0);
+          });
+
+        const latestFleetLog = matchingLogs[0];
+        if (latestFleetLog && latestFleetLog.endOdometerKm > 0) {
+          setFormStartOdo(String(latestFleetLog.endOdometerKm));
+        } else {
+          setFormStartOdo('');
+        }
+      }
+    }
+
+    if (!formDriverName) {
+      const assignedCrew = crews.find(
+        c => c.currentFleetId === flt.id && branchStore.getCrewBranchId(c.id, c.name) === formBranchId
+      );
+      if (assignedCrew) {
+        const activeValidCrew = crewOptionsForModal.find(
+          opt => compactPersonKey(opt.name) === compactPersonKey(assignedCrew.name)
+        );
+        if (activeValidCrew) {
+          setFormDriverName(activeValidCrew.name);
+          setFormDriverId(activeValidCrew.id);
+        }
+      }
+    }
+  };
+
+  const handleFuelTypeChange = (type: FuelType) => {
+    setFormFuelType(type);
+    setFormCostPerLiter(String(STANDARD_FUEL_PRICES[type] || 6800));
+  };
+
+  const handleSaveFuelLog = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSavingFuelLog) return;
+    setFormError('');
+    setFuelActionError('');
+
+    if (!formFleetId && !selectedFormFleet) {
+      setFormError('Silakan pilih armada terlebih dahulu.');
+      return;
+    }
+    if (!formDriverName) {
+      setFormError('Silakan pilih nama driver terlebih dahulu.');
+      return;
+    }
+    if (!editingLogId) {
+      const driverActive = crewOptionsForModal.some(
+        opt => compactPersonKey(opt.name) === compactPersonKey(formDriverName)
+      );
+      if (!driverActive) {
+        setFormError('Akun driver yang dipilih sudah nonaktif di cabang ini.');
+        return;
+      }
+      if (formHelperName) {
+        const helperActive = crewOptionsForModal.some(
+          opt => compactPersonKey(opt.name) === compactPersonKey(formHelperName)
+        );
+        if (!helperActive) {
+          setFormError('Akun helper yang dipilih sudah nonaktif di cabang ini.');
+          return;
+        }
+      }
+    }
+    if (!formLiters || Number(formLiters) <= 0) {
+      setFormError('Volume BBM (Liter) harus lebih dari 0.');
+      return;
+    }
+    if (formStartOdo === '' || formEndOdo === '') {
+      setFormError('KM Awal dan KM Isi / Akhir wajib diisi.');
+      return;
+    }
+
+    const flt = selectedFormFleet;
+    if (!flt) {
+      setFormError('Data armada tidak ditemukan.');
+      return;
+    }
+
+    const startKm = Number(formStartOdo);
+    const endKm = Number(formEndOdo);
+    if (endKm <= startKm) {
+      setFormError('KM Isi / Akhir harus lebih besar dari KM Awal.');
+      return;
+    }
+
+    const payload = {
+      fleetId: flt.id,
+      plateNumber: flt.plateNumber,
+      initialCode: flt.initialCode,
+      vehicleType: flt.vehicleType,
+      branchId: formBranchId,
+      driverId: formDriverId || undefined,
+      driverName: formDriverName,
+      helperId: formHelperId || undefined,
+      helperName: formHelperName || undefined,
+      date: formDate,
+      fuelType: formFuelType,
+      liters: Number(formLiters),
+      costPerLiter: Number(formCostPerLiter) || 6800,
+      startOdometerKm: startKm,
+      endOdometerKm: endKm,
+      gasStation: formGasStation,
+      routeTrip: formRouteTrip || undefined,
+      cargoLoadTon: formCargoLoadTon ? Number(formCargoLoadTon) : undefined,
+      notes: formNotes || undefined
+    };
+
+    setIsSavingFuelLog(true);
+    try {
+      if (editingLogId) {
+        await logisticsStore.updateFuelLogAsync(editingLogId, payload);
+      } else {
+        await logisticsStore.addFuelLogAsync(payload);
+      }
+      setIsAddModalOpen(false);
+      setEditingLogId(null);
+      setFormError('');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal menyimpan catatan BBM ke database MySQL.';
+      setFormError(msg);
+    } finally {
+      setIsSavingFuelLog(false);
+    }
+  };
+
+  const handleDeleteLog = async (logId: string) => {
+    setDeletingLogId(logId);
+    setFuelActionError('');
+    try {
+      await logisticsStore.deleteFuelLogAsync(logId);
+      setConfirmDeleteId(null);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal menghapus catatan BBM dari MySQL.';
+      setFuelActionError(msg);
+    } finally {
+      setDeletingLogId(null);
+    }
+  };
+
+  // Filtered & Sorted Logs for Audit Tab
   const filteredLogs = useMemo(() => {
-    const list = branchScopedLogs.filter(log => {
-      const q = searchQuery.toLowerCase();
+    const q = searchQuery.trim().toLowerCase();
+    const list = reconciledLogs.filter(log => {
       const matchQuery =
-        !searchQuery ||
+        !q ||
         log.plateNumber.toLowerCase().includes(q) ||
         (log.initialCode && log.initialCode.toLowerCase().includes(q)) ||
         log.driverName.toLowerCase().includes(q) ||
@@ -958,103 +1151,54 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     if (logSortBy === 'wasteful_desc') {
       return [...list].sort((a, b) => a.ratioKmPerLiter - b.ratioKmPerLiter);
     }
-    if (logSortBy === 'date_desc') {
-      return [...list].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || '').localeCompare(a.createdAt || ''));
+    if (logSortBy === 'date_asc') {
+      return [...list].sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.createdAt || '').localeCompare(b.createdAt || ''));
     }
-    return [...list].sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.createdAt || '').localeCompare(b.createdAt || ''));
-  }, [branchScopedLogs, searchQuery, filterFleetId, filterStatus, filterFuelType, filterSpbu, logSortBy]);
+    return [...list].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || '').localeCompare(a.createdAt || ''));
+  }, [reconciledLogs, searchQuery, filterFleetId, filterStatus, filterFuelType, filterSpbu, logSortBy, cleanCanonicalFleets, fleets]);
 
   const totalLogsPages = useMemo(
     () => Math.max(1, Math.ceil(filteredLogs.length / LOGS_PER_PAGE)),
     [filteredLogs.length]
   );
-
   const safeLogsPage = Math.min(logsCurrentPage, totalLogsPages);
-
   const paginatedLogs = useMemo(() => {
     const start = (safeLogsPage - 1) * LOGS_PER_PAGE;
     return filteredLogs.slice(start, start + LOGS_PER_PAGE);
   }, [filteredLogs, safeLogsPage]);
 
-  const filteredAuditFleetOptions = useMemo(() => {
-    const q = auditFleetSearchFilter.trim().toLowerCase();
-    if (!q) return branchScopedFleets;
-    return branchScopedFleets.filter(f =>
-      (f.initialCode || '').toLowerCase().includes(q) ||
-      (f.plateNumber || '').toLowerCase().includes(q) ||
-      (f.vehicleType || '').toLowerCase().includes(q)
-    );
-  }, [branchScopedFleets, auditFleetSearchFilter]);
-
-  // Route Preset Selection Handler for Calculator
+  // Calculator handlers
   const handlePresetRouteChange = (routeKey: string) => {
     setCalcSelectedRoute(routeKey);
-    switch (routeKey) {
-      case 'bwi-sby-pp':
-        setCalcDistanceKm(620);
-        break;
-      case 'bwi-mlg-pp':
-        setCalcDistanceKm(560);
-        break;
-      case 'bwi-jbr-pp':
-        setCalcDistanceKm(210);
-        break;
-      case 'bwi-dps-pp':
-        setCalcDistanceKm(340);
-        break;
-      case 'bwi-solo-pp':
-        setCalcDistanceKm(820);
-        break;
-      case 'custom':
-        break;
-    }
+    const distances: Record<string, number> = {
+      'bwi-sby-pp': 620,
+      'bwi-mlg-pp': 560,
+      'bwi-jbr-pp': 210,
+      'bwi-dps-pp': 340,
+      'bwi-solo-pp': 820
+    };
+    if (distances[routeKey]) setCalcDistanceKm(distances[routeKey]);
   };
 
-  // Calculator Outputs
   const calcOutput = useMemo(() => {
     const target = FUEL_TARGET_RATIOS[calcFleetType]?.target || 7.5;
     const estLiters = Number((calcDistanceKm / target).toFixed(1));
     const estTotalCost = Math.round(estLiters * calcCustomPrice);
     const costPerKm = calcDistanceKm > 0 ? Math.round(estTotalCost / calcDistanceKm) : 0;
     const costPerBox = calcCargoBoxes > 0 ? Math.round(estTotalCost / calcCargoBoxes) : 0;
-
-    return {
-      target,
-      estLiters,
-      estTotalCost,
-      costPerKm,
-      costPerBox
-    };
+    return { target, estLiters, estTotalCost, costPerKm, costPerBox };
   }, [calcFleetType, calcDistanceKm, calcCustomPrice, calcCargoBoxes]);
 
-  // Export to CSV
   const handleExportCSV = () => {
     const headers = [
-      'ID Log',
-      'Tanggal',
-      'Cabang',
-      'Plat Nomor',
-      'Inisial',
-      'Tipe Kendaraan',
-      'Driver',
-      'Helper',
-      'Jenis BBM',
-      'Liter',
-      'Harga/L',
-      'Total Biaya (Rp)',
-      'KM Awal',
-      'KM Isi',
-      'Jarak (KM)',
-      'Rasio (KM/L)',
-      'Standar Target',
-      'Status Efisiensi',
-      'SPBU',
-      'Rute Perjalanan',
-      'Catatan'
+      'ID Log', 'Tanggal', 'Cabang', 'Plat Nomor', 'Inisial', 'Tipe Kendaraan',
+      'Driver', 'Helper', 'Jenis BBM', 'Liter', 'Harga/L', 'Total Biaya (Rp)',
+      'KM Awal', 'KM Akhir', 'Jarak (KM)', 'Sumber Jarak', 'Rasio (KM/L)',
+      'Standar Target', 'Status Efisiensi', 'SPBU', 'Rute Perjalanan', 'Catatan'
     ];
 
     const rows = filteredLogs.map(l => {
-      const bId = l.branchId || branchStore.getFleetBranchId(l.fleetId, l.plateNumber, l.initialCode);
+      const bId = resolveLogBranchId(l);
       const bLabel = bId === 'cab-sidoarjo' ? 'Cabang Sidoarjo' : 'Cabang Nusantara';
       return [
         l.id,
@@ -1072,6 +1216,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
         l.startOdometerKm,
         l.endOdometerKm,
         l.distanceKm,
+        l.distanceSource === 'portal' ? 'Portal Driver' : 'Input BBM',
         l.ratioKmPerLiter,
         l.targetRatio,
         l.efficiencyStatus,
@@ -1082,40 +1227,40 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     });
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `rekap_efisiensi_bbm_akk_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('href', encodeURI(csvContent));
+    link.setAttribute('download', `efisiensi_bbm_akk_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  return (
-    <div className="space-y-4">
-      {/* ========================================================================= */}
-      {/* 1. TOP HEADER, CABANG SWITCHER & COMPACT KPI SUMMARY                      */}
-      {/* ========================================================================= */}
-      <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-3.5 shadow-sm">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 shrink-0">
-                <Fuel className="w-5 h-5" />
-              </div>
-              <div>
-                <h1 className="text-base sm:text-lg font-bold text-white tracking-tight">
-                  Efisiensi BBM Armada
-                </h1>
-                <p className="text-[11px] text-slate-400">
-                  Rasio KM/L, L/KM &amp; audit BBM terbagi per cabang
-                </p>
-              </div>
-            </div>
+  // Calendar grid helper for modal date picker
+  const calYear = calendarViewMonth.getFullYear();
+  const calMonthIdx = calendarViewMonth.getMonth();
+  const firstDayOffset = new Date(calYear, calMonthIdx, 1).getDay();
+  const daysInCalMonth = new Date(calYear, calMonthIdx + 1, 0).getDate();
+  const calendarCells: (number | null)[] = [];
+  for (let i = 0; i < firstDayOffset; i++) calendarCells.push(null);
+  for (let d = 1; d <= daysInCalMonth; d++) calendarCells.push(d);
 
-            {/* Pembagian Cabang (Nusantara vs Sidoarjo) */}
-            <div className="inline-flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
-              <Building2 className="w-3.5 h-3.5 text-amber-400 ml-1.5 mr-0.5 shrink-0" />
+  return (
+    <div className="akk-flat-fuel bg-slate-50 min-h-full p-4 sm:p-6 space-y-5 text-slate-900">
+      {/* 1. HEADER & ACTION BAR */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-5">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+              Efisiensi BBM Armada
+            </h1>
+            <p className="text-sm text-slate-500 mt-0.5">
+              Pantau rasio L/KM, konsumsi solar per unit, serta sinkronisasi jarak tempuh otomatis dari Portal Driver.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* Branch Filter Segmented */}
+            <div className="inline-flex items-center p-1 bg-slate-100 rounded-lg border border-slate-200">
               {([
                 { id: 'all', label: 'Semua Cabang' },
                 { id: 'cab-banyuwangi', label: 'Nusantara' },
@@ -1130,261 +1275,190 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     setFilterFleetId('all');
                     setLKmFilterFleetId('all');
                   }}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
                     selectedBranchFilter === br.id
-                      ? 'bg-amber-500 text-slate-950 shadow-xs'
-                      : 'text-slate-400 hover:text-white'
+                      ? 'bg-white text-slate-900 border border-slate-200'
+                      : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
                   {br.label}
                 </button>
               ))}
             </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={openAddFuelModal}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Catat BBM</span>
-            </button>
 
             <button
               type="button"
-              onClick={() => setIsExportModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition cursor-pointer"
-              title="Export Laporan Konsumsi BBM (PDF / Excel)"
+              onClick={handleRefreshAll}
+              disabled={isRefreshing}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition cursor-pointer whitespace-nowrap"
+              title="Segarkan data BBM & Portal KM"
             >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>Export Laporan</span>
+              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span>Segarkan</span>
             </button>
 
             <button
               type="button"
               onClick={() => setIsCalculatorModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition cursor-pointer whitespace-nowrap"
             >
-              <Calculator className="w-3.5 h-3.5 text-amber-400" />
+              <Calculator className="w-3.5 h-3.5 text-slate-500" />
               <span>Kalkulator</span>
             </button>
 
             <button
               type="button"
-              onClick={handleExportCSV}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition cursor-pointer"
-              title="Ekspor Data Rekap ke CSV"
+              onClick={() => setIsExportModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition cursor-pointer whitespace-nowrap"
             >
-              <Download className="w-3.5 h-3.5 text-emerald-400" />
+              <FileSpreadsheet className="w-3.5 h-3.5 text-slate-500" />
+              <span>Export Laporan</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportCSV}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition cursor-pointer whitespace-nowrap"
+            >
+              <Download className="w-3.5 h-3.5 text-slate-500" />
               <span>CSV</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={openAddFuelModal}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition cursor-pointer whitespace-nowrap"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Catat BBM</span>
             </button>
           </div>
         </div>
 
-        {/* 5 PRIMARY METRICS ROW (COMPACT) */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5 pt-3.5 mt-3.5 border-t border-slate-800/70">
-          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-            <div className="flex items-center justify-between text-slate-400 text-[11px] mb-0.5">
-              <span className="font-semibold">Rata-rata Rasio</span>
-              <Gauge className="w-3.5 h-3.5 text-blue-400" />
+        {/* 4 CLEAN KPI CARDS */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t border-slate-100">
+          <div className="p-4 rounded-xl border border-slate-200 bg-white">
+            <div className="text-xs font-semibold text-slate-500">Total Konsumsi &amp; Biaya BBM</div>
+            <div className="text-2xl font-bold text-slate-900 font-mono tabular-nums mt-1">
+              {kpiSummary.totalLiters.toLocaleString('id-ID')} <span className="text-sm font-medium text-slate-500">Liter</span>
             </div>
-            <div className="flex items-baseline gap-1">
-              <span className="text-xl font-black text-white font-mono">
-                {kpiSummary.overallAvgKmPerLiter}
-              </span>
-              <span className="text-[11px] text-slate-400 font-bold">KM / L</span>
-            </div>
-            <div className="text-[10px] text-emerald-400 mt-0.5 flex items-center gap-1 font-medium">
-              <CheckCircle2 className="w-3 h-3" />
-              <span>Target: 7.5 KM/L</span>
+            <div className="text-xs text-slate-500 mt-1 tabular-nums">
+              Rp {(kpiSummary.totalCost / 1000000).toFixed(2)} Juta · Rp {kpiSummary.overallAvgCostPerKm.toLocaleString('id-ID')}/KM
             </div>
           </div>
 
-          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 ring-1 ring-amber-500/20">
-            <div className="flex items-center justify-between text-slate-400 text-[11px] mb-0.5">
-              <span className="font-semibold text-amber-300">Rata-rata Liter / KM</span>
-              <Activity className="w-3.5 h-3.5 text-amber-400" />
+          <div className="p-4 rounded-xl border border-slate-200 bg-white">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-slate-500">Jarak Tempuh &amp; Portal Driver</span>
+              {portalSyncedLogCount > 0 && (
+                <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
+                  {portalSyncedLogCount} tersinkron
+                </span>
+              )}
             </div>
-            <div className="flex items-baseline gap-1">
-              <span className="text-xl font-black text-amber-400 font-mono">
-                {kpiSummary.overallAvgLiterPerKm || 0}
-              </span>
-              <span className="text-[11px] text-amber-300/80 font-bold">L / KM</span>
+            <div className="text-2xl font-bold text-blue-600 font-mono tabular-nums mt-1">
+              {kpiSummary.totalDistanceKm.toLocaleString('id-ID')} <span className="text-sm font-medium text-slate-500">KM</span>
             </div>
-            <div className="text-[10px] text-slate-300 mt-0.5 font-mono">
-              {kpiSummary.overallAvgLiterPer100Km || 0} L/100 KM
-            </div>
-          </div>
-
-          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-            <div className="flex items-center justify-between text-slate-400 text-[11px] mb-0.5">
-              <span className="font-semibold">Total BBM Terdata</span>
-              <Fuel className="w-3.5 h-3.5 text-amber-400" />
-            </div>
-            <div className="flex items-baseline gap-1">
-              <span className="text-xl font-black text-white font-mono">
-                {kpiSummary.totalLiters.toLocaleString('id-ID')}
-              </span>
-              <span className="text-[11px] text-slate-400 font-bold">Liter</span>
-            </div>
-            <div className="text-[10px] text-slate-400 mt-0.5">
-              Jarak: <span className="font-bold text-slate-300">{kpiSummary.totalDistanceKm.toLocaleString('id-ID')} KM</span>
+            <div className="text-xs text-slate-500 mt-1 tabular-nums">
+              Portal: {portalGlobalStats.totalPortalDistanceKm.toLocaleString('id-ID')} KM ({portalGlobalStats.completedTrips} rit selesai)
             </div>
           </div>
 
-          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-            <div className="flex items-center justify-between text-slate-400 text-[11px] mb-0.5">
-              <span className="font-semibold">Total Pengeluaran</span>
-              <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+          <div className="p-4 rounded-xl border border-slate-200 bg-white">
+            <div className="text-xs font-semibold text-slate-500">Rata-Rata L/KM &amp; KM/L</div>
+            <div className="text-2xl font-bold text-slate-900 font-mono tabular-nums mt-1">
+              {kpiSummary.overallAvgLiterPerKm || 0} <span className="text-sm font-medium text-slate-500">L/KM</span>
             </div>
-            <div className="text-xl font-black text-white font-mono">
-              Rp {(kpiSummary.totalCost / 1000000).toFixed(2)} <span className="text-[11px] font-normal text-slate-400">Juta</span>
-            </div>
-            <div className="text-[10px] text-slate-400 mt-0.5">
-              Rata-rata: <span className="font-bold text-emerald-400">Rp {kpiSummary.overallAvgCostPerKm.toLocaleString('id-ID')}/KM</span>
+            <div className="text-xs text-slate-500 mt-1 tabular-nums">
+              Rasio {kpiSummary.overallAvgKmPerLiter} KM/L · {kpiSummary.overallAvgLiterPer100Km} L/100KM
             </div>
           </div>
 
-          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-            <div className="flex items-center justify-between text-slate-400 text-[11px] mb-0.5">
-              <span className="font-semibold">Anomali / Perlu Cek</span>
-              <AlertTriangle className={`w-3.5 h-3.5 ${kpiSummary.totalAnomalies > 0 ? 'text-rose-400' : 'text-emerald-400'}`} />
+          <div className="p-4 rounded-xl border border-slate-200 bg-white">
+            <div className="text-xs font-semibold text-slate-500">Status Efisiensi &amp; Anomali</div>
+            <div
+              className={`text-2xl font-bold font-mono tabular-nums mt-1 ${
+                kpiSummary.totalAnomalies > 0 ? 'text-red-600' : 'text-emerald-600'
+              }`}
+            >
+              {kpiSummary.totalAnomalies} <span className="text-sm font-medium text-slate-500">Log Boros/Anomali</span>
             </div>
-            <div className="flex items-baseline gap-1">
-              <span className={`text-xl font-black font-mono ${kpiSummary.totalAnomalies > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                {kpiSummary.totalAnomalies}
-              </span>
-              <span className="text-[11px] text-slate-400 font-bold">Log</span>
-            </div>
-            <div className="text-[10px] text-rose-300 mt-0.5 truncate">
-              {kpiSummary.leastFleet ? (
-                <span>Truk {kpiSummary.leastFleet.initialCode || kpiSummary.leastFleet.plateNumber} ({kpiSummary.leastFleet.avgKmPerLiter} KM/L)</span>
-              ) : 'Semua armada efisien'}
+            <div className="text-xs text-slate-500 mt-1 truncate">
+              {kpiSummary.leastFleet && kpiSummary.leastFleet.totalLogs > 0
+                ? `Perlu cek: ${kpiSummary.leastFleet.initialCode || kpiSummary.leastFleet.plateNumber} (${kpiSummary.leastFleet.avgKmPerLiter} KM/L)`
+                : 'Semua unit dalam batas target'}
             </div>
           </div>
         </div>
       </div>
 
       {fuelActionError && (
-        <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-semibold flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
-            <span>{fuelActionError}</span>
-          </div>
+        <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold flex items-center justify-between gap-2">
+          <span className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            {fuelActionError}
+          </span>
           <button
             type="button"
             onClick={() => setFuelActionError('')}
-            className="p-1 text-rose-300 hover:text-white rounded cursor-pointer"
+            className="p-1 text-red-500 hover:text-red-700 cursor-pointer"
           >
-            <X className="w-3.5 h-3.5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* 2. TAB CONTROLS (WRAP RINGKAS, TANPA DAILY & CALCULATOR TAB)              */}
-      {/* ========================================================================= */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-2.5">
-        <button
-          type="button"
-          onClick={() => setActiveTab('overview')}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
-            activeTab === 'overview'
-              ? 'bg-amber-500 text-slate-950 shadow-md'
-              : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-          }`}
-        >
-          <TrendingUp className="w-3.5 h-3.5" />
-          <span>Analisis Efisiensi</span>
-        </button>
+      {/* 2. NAVIGATION TABS */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex flex-wrap items-center gap-1 p-1 bg-white border border-slate-200 rounded-xl">
+          {[
+            { id: 'overview', label: 'Analisis Efisiensi' },
+            { id: 'liter_km', label: `L/KM Unit (${fleetSummaries.length})` },
+            { id: 'km_recap', label: 'Rekap KM Berangkat & Pulang' },
+            { id: 'weekly_report', label: 'Rekapitulasi Mingguan' },
+            { id: 'leaderboard', label: `Eco-Driver (${driverScores.length})` },
+            { id: 'logs', label: `Audit Riwayat BBM (${reconciledLogs.length})` }
+          ].map(tab => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id as typeof activeTab)}
+              className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition cursor-pointer whitespace-nowrap ${
+                activeTab === tab.id
+                  ? 'bg-blue-600 text-white'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
 
-        <button
-          type="button"
-          onClick={() => setActiveTab('liter_km')}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
-            activeTab === 'liter_km'
-              ? 'bg-amber-500 text-slate-950 shadow-md'
-              : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-          }`}
-        >
-          <Gauge className="w-3.5 h-3.5" />
-          <span>Liter/KM Kendaraan</span>
-          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-950/40 text-current">
-            {fleetSummaries.length} Unit
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('weekly_report')}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
-            activeTab === 'weekly_report'
-              ? 'bg-amber-500 text-slate-950 shadow-md'
-              : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-          }`}
-        >
-          <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Rekapitulasi Armada</span>
-          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-            PDF/Excel
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('leaderboard')}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
-            activeTab === 'leaderboard'
-              ? 'bg-amber-500 text-slate-950 shadow-md'
-              : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-          }`}
-        >
-          <Award className="w-3.5 h-3.5" />
-          <span>Eco-Driver</span>
-          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-950/40 text-current">
-            {driverScores.length}
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('logs')}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer whitespace-nowrap ${
-            activeTab === 'logs'
-              ? 'bg-amber-500 text-slate-950 shadow-md'
-              : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
-          }`}
-        >
-          <FileText className="w-3.5 h-3.5" />
-          <span>Audit Riwayat BBM</span>
-          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-950/40 text-current">
-            {branchScopedLogs.length}
-          </span>
-        </button>
+        {onNavigateToKmRecap && activeTab !== 'km_recap' && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('km_recap')}
+            className="text-xs font-semibold text-blue-600 hover:text-blue-700 cursor-pointer whitespace-nowrap"
+          >
+            Buka Halaman Rekap KM Penuh &rarr;
+          </button>
+        )}
       </div>
 
-      {/* ========================================================================= */}
-      {/* 3. TAB 1: OVERVIEW & CHARTS                                               */}
-      {/* ========================================================================= */}
+      {/* =================================================================== */}
+      {/* TAB 1: ANALISIS EFISIENSI (IMPROVED CHARTS + CLEAN UNIT OVERVIEW)    */}
+      {/* =================================================================== */}
       {activeTab === 'overview' && (
-        <div className="space-y-4">
-          {/* ANOMALY ALERT BANNER IF APPLICABLE */}
+        <div className="space-y-5">
           {kpiSummary.totalAnomalies > 0 && (
-            <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3">
-              <div className="flex items-start gap-2.5">
-                <div className="p-2 bg-rose-500/20 text-rose-400 rounded-xl mt-0.5">
-                  <AlertTriangle className="w-4 h-4" />
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-bold text-amber-900">
+                  Terdeteksi {kpiSummary.totalAnomalies} catatan konsumsi melebihi batas target
                 </div>
-                <div>
-                  <h4 className="text-xs font-bold text-rose-300">
-                    Peringatan Anomali Konsumsi BBM Terdeteksi ({kpiSummary.totalAnomalies} Catatan)
-                  </h4>
-                  <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
-                    Terdapat armada dengan rasio konsumsi jauh di bawah target efisiensi pabrik. Mohon periksa kondisi nozzle injektor, filter solar, atau durasi idling mesin.
-                  </p>
-                </div>
+                <p className="text-xs text-amber-800 mt-0.5">
+                  Periksa catatan KM Awal/Akhir, filter solar, atau durasi mesin menyala saat antre bongkar.
+                </p>
               </div>
               <button
                 type="button"
@@ -1392,2212 +1466,934 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   setFilterStatus('Kritis / Potensi Anomali');
                   setActiveTab('logs');
                 }}
-                className="shrink-0 px-3 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold transition cursor-pointer"
+                className="shrink-0 px-3.5 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold transition cursor-pointer"
               >
-                Lihat Rincian Anomali &rarr;
+                Tinjau Catatan Anomali
               </button>
             </div>
           )}
 
-          {/* STANDAR EFISIENSI PER JENIS KENDARAAN BANNER */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+          {/* TARGET STANDAR PER TIPE KENDARAAN */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {Object.entries(FUEL_TARGET_RATIOS).map(([vType, cfg]) => (
-              <div key={vType} className="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
-                <div className="text-[11px] text-slate-400 font-semibold">{vType}</div>
-                <div className="text-base font-black text-amber-400 font-mono">{cfg.label}</div>
-                <div className="text-[10px] text-slate-400">Batas Wajar Min: {cfg.minAcceptable} KM/L</div>
+              <div key={vType} className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-medium text-slate-500">{vType}</div>
+                  <div className="text-base font-bold text-slate-900 font-mono tabular-nums mt-0.5">{cfg.label}</div>
+                </div>
+                <div className="text-xs text-slate-500 text-right tabular-nums">
+                  Min {cfg.minAcceptable} KM/L
+                </div>
               </div>
             ))}
           </div>
 
-          {/* ========================================================================= */}
-          {/* SECTION B: ANALISIS RATA-RATA KONSUMSI LITER PER KM TIAP UNIT KENDARAAN    */}
-          {/* ========================================================================= */}
-          <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 shadow-sm space-y-4">
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <div className="p-2 rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                    <Gauge className="w-5 h-5" />
-                  </div>
-                  <h3 className="text-base font-bold text-white tracking-tight">
-                    Rata-rata Konsumsi Liter per Kilometer (L/KM) Tiap Unit Kendaraan
-                  </h3>
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                    Metrik Standar L/KM
-                  </span>
-                </div>
-                <p className="text-xs text-slate-400 mt-1">
-                  Perhitungan matematis volume bahan bakar yang dihabiskan untuk menempuh setiap 1 kilometer jarak tempuh (L/KM) dan 100 kilometer (L/100 KM) pada setiap armada.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setActiveTab('liter_km')}
-                  className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 border border-slate-700 text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
-                >
-                  <span>Buka Tabel & Kalkulator L/KM Lengkap</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-
-            {/* FORMULA CALLOUT BANNER */}
-            <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-blue-500/15 text-blue-400 border border-blue-500/30 font-mono font-bold text-xs shrink-0">
-                  L/KM
-                </div>
+          {/* CHARTS ROW: BAR COMPARISON + AREA TREND */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            {/* Bar Chart: Aktual L/KM vs Target Pabrikan */}
+            <div className="lg:col-span-6 bg-white border border-slate-200 rounded-xl p-5 flex flex-col gap-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
                 <div>
-                  <span className="font-bold text-white">Rumus Konsumsi: </span>
-                  <span className="font-mono text-amber-400 font-bold bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
-                    Liter / KM = Total Liter &divide; Total Jarak (KM)
-                  </span>
-                  <span className="text-slate-400 ml-2">
-                    &bull; Semakin <strong className="text-emerald-400">rendah</strong> angka L/KM, armada semakin hemat!
-                  </span>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Komparasi Aktual L/KM vs Target
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Angka lebih rendah berarti konsumsi solar per kilometer lebih hemat.
+                  </p>
                 </div>
+
+                <select
+                  value={comparisonSelectedFleetId}
+                  onChange={e => setComparisonSelectedFleetId(e.target.value)}
+                  aria-label="Filter unit grafik L/KM"
+                  className="px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-600 cursor-pointer"
+                >
+                  <option value="all">Semua Armada ({unitLKmAnalysis.length})</option>
+                  {unitLKmAnalysis.map(u => (
+                    <option key={u.fleetId} value={u.fleetId}>
+                      {u.initialCode || u.plateNumber} ({u.plateNumber})
+                    </option>
+                  ))}
+                </select>
               </div>
-              <div className="text-[11px] font-mono text-slate-400">
-                Rata-rata Seluruh Truk: <strong className="text-amber-400">{kpiSummary.overallAvgLiterPerKm || 0} L/KM</strong> ({kpiSummary.overallAvgLiterPer100Km || 0} L/100 KM)
-              </div>
-            </div>
 
-            {/* SIDE-BY-SIDE: BAR CHART L/KM VS TARGET & SUMMARY TABLE */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-              {/* L/KM Comparison Bar Chart (5 Cols) */}
-              <div className="lg:col-span-5 bg-slate-950/50 p-4 rounded-xl border border-slate-800/80 flex flex-col gap-4">
-                <div className="flex items-start justify-between gap-2 border-b border-slate-800/80 pb-3">
-                  <div>
-                    <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
-                      <BarChart className="w-4 h-4 text-emerald-400" />
-                      <span>Komparasi Aktual L/KM vs Target Pabrikan</span>
-                    </h4>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      Pilih armada dari daftar untuk membandingkan konsumsi BBM seluruh unit armada.
-                    </p>
+              <div className="h-80 w-full">
+                {lKmComparisonChartData.every(d => d.aktualLKm === 0) ? (
+                  <div className="h-full flex items-center justify-center text-sm text-slate-500 border border-dashed border-slate-200 rounded-lg">
+                    Belum ada data pengisian BBM pada cabang ini untuk ditampilkan di grafik.
                   </div>
-                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-[10px] font-bold text-emerald-400 shrink-0">
-                    {unitLKmAnalysis.filter(d => d.hasData && d.avgLKm <= d.targetLKm).length}/{unitLKmAnalysis.length} Unit Irit
-                  </span>
-                </div>
-
-                {/* Summary Pill Row + Modern List Armada Selector */}
-                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-stretch">
-                  <div className="sm:col-span-3 bg-slate-900/90 p-2.5 rounded-xl border border-slate-800 flex flex-col justify-center">
-                    <div className="text-[10px] text-slate-400">Rata-rata Aktual</div>
-                    <div className="text-sm font-black text-emerald-400 font-mono mt-0.5">
-                      {comparisonSelectedFleetId === 'all'
-                        ? (kpiSummary.overallAvgLiterPerKm || 0)
-                        : (unitLKmAnalysis.find(u => u.fleetId === comparisonSelectedFleetId)?.avgLKm || 0)}{' '}
-                      <span className="text-[10px] font-normal text-slate-400">L/KM</span>
-                    </div>
-                  </div>
-                  <div className="sm:col-span-3 bg-slate-900/90 p-2.5 rounded-xl border border-slate-800 flex flex-col justify-center">
-                    <div className="text-[10px] text-slate-400">Standar Pabrik</div>
-                    <div className="text-sm font-black text-slate-300 font-mono mt-0.5">
-                      {comparisonSelectedFleetId === 'all'
-                        ? (branchScopedLogs.length > 0 ? 0.1333 : 0)
-                        : (unitLKmAnalysis.find(u => u.fleetId === comparisonSelectedFleetId)?.targetLKm || 0)}{' '}
-                      <span className="text-[10px] font-normal text-slate-400">L/KM</span>
-                    </div>
-                  </div>
-                  <div className="sm:col-span-6 bg-slate-900/90 p-2 rounded-xl border border-slate-800 relative">
-                    <div className="text-[10px] text-slate-400 mb-1 flex items-center justify-between">
-                      <span>List Armada</span>
-                      <span className="text-[9px] text-amber-400/90 font-semibold">Komparasi Unit</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setActiveModalDropdown(activeModalDropdown === 'chart_fleet' ? null : 'chart_fleet')}
-                      className="w-full bg-slate-950 hover:bg-slate-900 border border-slate-700/80 hover:border-amber-500/60 rounded-lg px-2.5 py-1.5 text-xs font-bold text-amber-400 flex items-center justify-between gap-2 transition cursor-pointer"
-                    >
-                      <span className="truncate flex items-center gap-1.5">
-                        <Truck className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                        {comparisonSelectedFleetId === 'all'
-                          ? `Semua Armada (${unitLKmAnalysis.length} Unit)`
-                          : (() => {
-                              const found = unitLKmAnalysis.find(u => u.fleetId === comparisonSelectedFleetId);
-                              return found ? `${found.initialCode || found.plateNumber} (${found.plateNumber})` : 'Semua Armada';
-                            })()}
-                      </span>
-                      <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${activeModalDropdown === 'chart_fleet' ? 'rotate-180 text-amber-400' : ''}`} />
-                    </button>
-
-                    {activeModalDropdown === 'chart_fleet' && (
-                      <div className="absolute right-0 left-0 top-full mt-1.5 z-40 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-64 overflow-y-auto">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setComparisonSelectedFleetId('all');
-                            setActiveModalDropdown(null);
-                          }}
-                          className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between transition cursor-pointer ${
-                            comparisonSelectedFleetId === 'all'
-                              ? 'bg-amber-500/15 text-amber-300 font-bold border-l-2 border-l-amber-500'
-                              : 'text-slate-200 hover:bg-amber-500/10'
-                          }`}
-                        >
-                          <span>Semua Armada ({unitLKmAnalysis.length} Unit)</span>
-                          {comparisonSelectedFleetId === 'all' && <Check className="w-3.5 h-3.5 text-amber-400" />}
-                        </button>
-                        {unitLKmAnalysis.map(u => {
-                          const isSel = comparisonSelectedFleetId === u.fleetId;
-                          return (
-                            <button
-                              key={u.fleetId}
-                              type="button"
-                              onClick={() => {
-                                setComparisonSelectedFleetId(u.fleetId);
-                                setActiveModalDropdown(null);
-                              }}
-                              className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between border-t border-slate-800/60 transition cursor-pointer ${
-                                isSel ? 'bg-amber-500/15 text-amber-300 font-bold border-l-2 border-l-amber-500' : 'text-slate-200 hover:bg-amber-500/10'
-                              }`}
-                            >
-                              <div className="min-w-0 pr-2">
-                                <div className="font-mono font-bold truncate">
-                                  {u.initialCode || u.plateNumber} <span className="text-slate-400 font-normal">({u.plateNumber})</span>
-                                </div>
-                                <div className="text-[10px] text-slate-400 truncate">
-                                  {u.driverName} • {u.areaKirim}
-                                </div>
-                              </div>
-                              {isSel && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Horizontal Comparison Bars (All 12 Units Displayed in Order N1..DS5) */}
-                <div className="h-80 w-full">
+                ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                       data={lKmComparisonChartData}
                       layout="vertical"
-                      margin={{ top: 4, right: 18, left: 6, bottom: 4 }}
-                      barCategoryGap="18%"
+                      margin={{ top: 6, right: 20, left: 8, bottom: 6 }}
+                      barGap={3}
                     >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" horizontal={true} vertical={false} />
-                      <XAxis type="number" stroke="#94a3b8" fontSize={10} domain={[0, 0.22]} unit=" L" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={true} vertical={false} />
+                      <XAxis
+                        type="number"
+                        stroke="#64748b"
+                        tick={{ fontSize: 11, fill: '#475569' }}
+                        domain={[0, 'auto']}
+                        tickFormatter={v => `${v}`}
+                      />
                       <YAxis
                         type="category"
                         dataKey="unit"
                         interval={0}
-                        stroke="#94a3b8"
-                        fontSize={10}
-                        width={76}
-                        tick={{ fontWeight: 700 }}
+                        stroke="#64748b"
+                        width={82}
+                        tick={{ fontSize: 11, fill: '#0f172a', fontWeight: 600 }}
                       />
                       <Tooltip
                         contentStyle={{
-                          backgroundColor: '#0f172a',
-                          borderColor: '#334155',
-                          borderRadius: '10px',
-                          fontSize: '11px'
+                          backgroundColor: '#ffffff',
+                          borderColor: '#cbd5e1',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          color: '#0f172a',
+                          boxShadow: 'none'
                         }}
-                        formatter={(val: any, name: any, item: any) => [
-                          `${val} L/KM (${Number((val * 100).toFixed(2))} L/100KM • ${
-                            name === 'aktualLKm' ? item.payload.aktualKmL : item.payload.targetKmL
-                          } KM/L)`,
-                          name === 'aktualLKm' ? 'Realisasi Aktual' : 'Target Pabrikan'
-                        ]}
+                        formatter={(val: unknown, name: unknown, item: { payload?: { aktualKmL?: number; targetKmL?: number } }) => {
+                          const num = Number(val ?? 0) || 0;
+                          const isActual = String(name ?? '') === 'aktualLKm' || String(name ?? '').includes('Aktual');
+                          const ratio = isActual ? item?.payload?.aktualKmL : item?.payload?.targetKmL;
+                          return [
+                            `${num.toFixed(4)} L/KM (${ratio || 0} KM/L)`,
+                            isActual ? 'Aktual L/KM' : 'Target Maks L/KM'
+                          ];
+                        }}
                         labelFormatter={(label, payload) => {
                           const p = payload?.[0]?.payload;
-                          return p
-                            ? `Armada ${label} (${p.plate} • ${p.tipe}) | Driver: ${p.driverName} | Area: ${p.areaKirim}`
-                            : `Armada ${label}`;
+                          return p ? `${label} · ${p.plate} (${p.tipe})` : String(label);
                         }}
                       />
-                      <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '6px' }} />
-                      <Bar dataKey="aktualLKm" name="Realisasi L/KM" fill="#10b981" radius={[0, 4, 4, 0]} barSize={7}>
+                      <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }} />
+                      <Bar dataKey="aktualLKm" name="Aktual L/KM" fill="#2563eb" radius={[0, 4, 4, 0]} barSize={8}>
                         {lKmComparisonChartData.map((entry, idx) => (
                           <Cell
                             key={`cell-akt-${idx}`}
-                            fill={entry.aktualLKm <= entry.targetLKm ? '#10b981' : '#f59e0b'}
+                            fill={
+                              entry.aktualLKm <= 0
+                                ? '#cbd5e1'
+                                : entry.aktualLKm <= entry.targetLKm
+                                ? '#16a34a'
+                                : '#dc2626'
+                            }
                           />
                         ))}
                       </Bar>
-                      <Bar dataKey="targetLKm" name="Target Pabrikan L/KM" fill="#64748b" radius={[0, 4, 4, 0]} barSize={7} />
+                      <Bar dataKey="targetLKm" name="Target L/KM" fill="#94a3b8" radius={[0, 4, 4, 0]} barSize={8} />
                     </BarChart>
                   </ResponsiveContainer>
-                </div>
-
-                {/* Legend Status Guide */}
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-[10px] text-slate-400">
-                  <div className="flex items-center gap-3">
-                    <span className="flex items-center gap-1">
-                      <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500 inline-block" />
-                      <span>Hemat (&le; Target)</span>
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="w-2.5 h-2.5 rounded-xs bg-amber-500 inline-block" />
-                      <span>Melebihi Target</span>
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="w-2.5 h-2.5 rounded-xs bg-slate-500 inline-block" />
-                      <span>Batas Target</span>
-                    </span>
-                  </div>
-                  <span className="font-mono">Satuan: L/KM</span>
-                </div>
-              </div>
-
-              {/* L/KM Summary Table (7 Cols) */}
-              <div className="lg:col-span-7 bg-slate-950/50 rounded-xl border border-slate-800/80 overflow-hidden flex flex-col justify-between">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-900/90 text-slate-400 text-[11px] uppercase border-b border-slate-800 whitespace-nowrap">
-                      <tr>
-                        <th className="py-2 px-2.5">Unit Armada</th>
-                        <th className="py-2 px-2.5">Nama Driver</th>
-                        <th className="py-2 px-2.5">Area Kirim</th>
-                        <th className="py-2 px-2.5">Tipe Truk</th>
-                        <th className="py-2 px-2.5 text-right">Jarak (KM)</th>
-                        <th className="py-2 px-2.5 text-right font-bold text-amber-300">Rata-rata L/KM</th>
-                        <th className="py-2 px-2.5 text-right">L / 100 KM</th>
-                        <th className="py-2 px-2.5 text-center">Deviasi vs Target</th>
-                        <th className="py-2 px-2.5 text-center">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/60 font-mono">
-                      {unitLKmAnalysis.map((item) => (
-                        <tr
-                          key={item.fleetId}
-                          onClick={() => setComparisonSelectedFleetId(prev => prev === item.fleetId ? 'all' : item.fleetId)}
-                          className={`hover:bg-slate-900/40 transition cursor-pointer ${
-                            comparisonSelectedFleetId === item.fleetId ? 'bg-amber-500/10' : ''
-                          }`}
-                        >
-                          <td className="py-1.5 px-2.5 whitespace-nowrap">
-                            <div className="flex items-baseline gap-1.5">
-                              <span className="font-extrabold text-white font-sans text-sm">{item.initialCode || '-'}</span>
-                              <span className="text-[11px] text-slate-400 font-medium">{item.plateNumber}</span>
-                            </div>
-                          </td>
-                          <td className="py-1.5 px-2.5 font-sans text-slate-200 text-xs font-semibold whitespace-nowrap">
-                            {item.driverName}
-                          </td>
-                          <td className="py-1.5 px-2.5 font-sans text-slate-300 text-xs whitespace-nowrap">
-                            {item.areaKirim}
-                          </td>
-                          <td className="py-1.5 px-2.5 font-sans text-slate-300 text-xs whitespace-nowrap">
-                            {item.vehicleType}
-                          </td>
-                          <td className="py-1.5 px-2.5 text-right font-bold text-sm text-slate-200 whitespace-nowrap">
-                            {item.totalDistanceKm.toLocaleString('id-ID')}
-                          </td>
-                          <td className="py-1.5 px-2.5 text-right font-black text-base text-amber-400 whitespace-nowrap">
-                            {item.avgLKm} <span className="text-xs font-normal text-slate-400">L/KM</span>
-                          </td>
-                          <td className="py-1.5 px-2.5 text-right font-bold text-sm text-slate-200 whitespace-nowrap">
-                            {item.avgL100Km} <span className="text-xs font-normal text-slate-500">L</span>
-                          </td>
-                          <td className="py-1.5 px-2.5 text-center font-sans whitespace-nowrap">
-                            {!item.hasData ? (
-                              <span className="text-slate-500 text-xs font-semibold">0%</span>
-                            ) : item.isSaving ? (
-                              <span className="text-emerald-400 text-xs font-bold flex items-center justify-center gap-0.5">
-                                <ArrowDown className="w-3 h-3 text-emerald-400" />
-                                +{item.savingPct}% Irit
-                              </span>
-                            ) : (
-                              <span className="text-rose-400 text-xs font-bold flex items-center justify-center gap-0.5">
-                                <ArrowUp className="w-3 h-3 text-rose-400" />
-                                {item.savingPct}% Boros
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-1.5 px-2.5 text-center font-sans whitespace-nowrap">
-                            <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${item.statusColor}`}>
-                              {item.hasData ? item.status.split(' ')[0] : '-'}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="p-2.5 bg-slate-900/70 border-t border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
-                  <span>Total terhitung: {unitLKmAnalysis.length} unit kendaraan operasional PT AKK</span>
-                  <button
-                    onClick={() => setActiveTab('liter_km')}
-                    className="text-amber-400 hover:underline font-semibold cursor-pointer"
-                  >
-                    Buka Rincian Lengkap &rarr;
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* TIMELINE AREA CHART */}
-          <div className="bg-slate-900/80 p-5 rounded-2xl border border-slate-800">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2 mb-1">
-              <TrendingUp className="w-4 h-4 text-blue-400" />
-              <span>Tren Pengisian BBM & Jarak Tempuh Harian</span>
-            </h3>
-            <p className="text-xs text-slate-400 mb-4">Volume liter yang diisikan dan akumulasi jarak tempuh kendaraan.</p>
-
-            <div className="h-56 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={timelineChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="colorLiters" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="colorDistance" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} />
-                  <YAxis stroke="#94a3b8" fontSize={11} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px' }}
-                  />
-                  <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-                  <Area type="monotone" dataKey="liters" name="Volume BBM (Liter)" stroke="#f59e0b" fillOpacity={1} fill="url(#colorLiters)" />
-                  <Area type="monotone" dataKey="distance" name="Jarak Tempuh (KM)" stroke="#3b82f6" fillOpacity={1} fill="url(#colorDistance)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 4. TAB: RATA-RATA LITER PER KILOMETER (L/KM) TIAP UNIT KENDARAAN          */}
-      {activeTab === 'liter_km' && (
-        <div className="space-y-6">
-          <div className="bg-slate-900/80 p-5 rounded-2xl border border-slate-800 shadow-xl space-y-5">
-            {/* HEADER */}
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400">
-                    <Gauge className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h2 className="text-base font-bold text-white tracking-tight">
-                      Perhitungan Rata-rata Konsumsi Liter per Kilometer (L/KM) Tiap Unit Kendaraan
-                    </h2>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Standar metrik konsumsi bahan bakar logistik per 1 KM dan per 100 KM untuk seluruh unit armada PT Anugrah Kemasan Kreatif.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* ARMADA FILTER & SORT CONTROLS */}
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-1.5 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
-                  <Truck className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <select
-                    value={lKmFilterFleetId}
-                    onChange={(e) => setLKmFilterFleetId(e.target.value)}
-                    aria-label="Filter Armada"
-                    className="bg-transparent text-slate-200 text-xs focus:outline-none cursor-pointer font-semibold"
-                  >
-                    <option value="all" className="bg-slate-900">Semua Armada ({branchScopedFleets.length})</option>
-                    {branchScopedFleets.map(f => (
-                      <option key={f.id} value={f.id} className="bg-slate-900">
-                        {f.initialCode || f.plateNumber} ({f.plateNumber})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="flex items-center gap-1.5 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-xs">
-                  <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
-                  <select
-                    value={lKmSortBy}
-                    onChange={(e) => setLKmSortBy(e.target.value as any)}
-                    className="bg-transparent text-slate-200 text-xs focus:outline-none cursor-pointer font-semibold"
-                  >
-                    <option value="canonical_order" className="bg-slate-900">Urutan Standar (N1 - DS5)</option>
-                    <option value="lKm_asc" className="bg-slate-900">L/KM Terendah (Paling Irit)</option>
-                    <option value="lKm_desc" className="bg-slate-900">L/KM Tertinggi (Paling Boros)</option>
-                    <option value="efficiency_desc" className="bg-slate-900">Skor Efisiensi Tertinggi</option>
-                    <option value="distance_desc" className="bg-slate-900">Jarak Operasional Terjauh</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            {/* BENCHMARK EXPLANATION CARDS */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="bg-slate-950/70 p-3.5 rounded-xl border border-slate-800/80">
-                <div className="flex items-center gap-2 text-emerald-400 mb-1">
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span className="text-xs font-bold text-white">Interpretasi Angka L/KM</span>
-                </div>
-                <p className="text-[11px] text-slate-300 leading-relaxed">
-                  Semakin <strong>rendah</strong> nilai Liter/KM, kendaraan semakin hemat. Misalnya <strong>0.1250 L/KM</strong> berarti 1 liter solar dapat menempuh 8 kilometer (8 KM/L).
-                </p>
-              </div>
-
-              <div className="bg-slate-950/70 p-3.5 rounded-xl border border-slate-800/80">
-                <div className="flex items-center gap-2 text-blue-400 mb-1">
-                  <Calculator className="w-4 h-4" />
-                  <span className="text-xs font-bold text-white">Standar Industri (L / 100 KM)</span>
-                </div>
-                <p className="text-[11px] text-slate-300 leading-relaxed">
-                  Dihitung dari <code className="text-amber-300 font-mono">Liter/KM &times; 100</code>. Nilai standar truk engkel AKK muatan karton box berada di kisaran <strong>12.0 &ndash; 14.5 L/100 KM</strong>.
-                </p>
-              </div>
-
-              <div className="bg-slate-950/70 p-3.5 rounded-xl border border-slate-800/80">
-                <div className="flex items-center gap-2 text-amber-400 mb-1">
-                  <Award className="w-4 h-4" />
-                  <span className="text-xs font-bold text-white">Standar Pabrikan per Tipe</span>
-                </div>
-                <p className="text-[11px] text-slate-300 leading-relaxed">
-                  Engkel Long: <strong>0.1333 L/KM</strong> (7.5 KM/L) &bull; Double STD: <strong>0.1538 L/KM</strong> (6.5 KM/L) &bull; Pick Up: <strong>0.1053 L/KM</strong> (9.5 KM/L).
-                </p>
-              </div>
-            </div>
-
-            {/* COMPARISON BAR CHART: ACTUAL L/KM VS TARGET */}
-            <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800/80 space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-xs font-bold text-white flex items-center gap-2">
-                    <BarChart className="w-4 h-4 text-emerald-400" />
-                    <span>Grafik Batang Komparasi Rata-rata Konsumsi Liter/KM vs Target Standar Pabrik</span>
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    Nilai bar menunjukkan rata-rata konsumsi liter per kilometer (L/KM) aktual setiap unit kendaraan.
-                  </p>
-                </div>
-                <div className="text-[11px] font-mono text-slate-400">
-                  Satuan: <strong className="text-emerald-400">Liter / KM</strong>
-                </div>
-              </div>
-
-              <div className="h-64 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={lKmComparisonChartData}
-                    margin={{ top: 15, right: 15, left: -20, bottom: 5 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                    <XAxis dataKey="unit" stroke="#94a3b8" fontSize={11} />
-                    <YAxis stroke="#94a3b8" fontSize={11} domain={[0, 0.22]} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: '#0f172a',
-                        borderColor: '#334155',
-                        borderRadius: '10px',
-                        fontSize: '12px'
-                      }}
-                      formatter={(val: any, name: any, item: any) => [
-                        `${val} L / KM (${item.payload.aktualL100Km} L/100 KM • ${item.payload.aktualKmL} KM/L)`,
-                        name === 'aktualLKm' ? 'Realisasi Aktual' : 'Target Standar'
-                      ]}
-                    />
-                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
-                    <Bar dataKey="aktualLKm" name="Realisasi L/KM Armada" fill="#10b981" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="targetLKm" name="Target Standar Pabrikan L/KM" fill="#64748b" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* FULL DETAIL TABLE FOR EACH FLEET UNIT */}
-            <div className="bg-slate-950/60 rounded-xl border border-slate-800/80 overflow-hidden">
-              <div className="p-3 bg-slate-900/80 border-b border-slate-800 flex items-center justify-between">
-                <h3 className="text-xs font-bold text-white flex items-center gap-2">
-                  <Truck className="w-4 h-4 text-amber-400" />
-                  <span>Tabel Lengkap Perhitungan Konsumsi Liter per Kilometer Tiap Unit Kendaraan</span>
-                </h3>
-                <span className="text-[11px] text-slate-400">
-                  Total terdata: {unitLKmAnalysis.length} unit armada
-                </span>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-900 text-slate-400 text-[11px] uppercase border-b border-slate-800 whitespace-nowrap">
-                    <tr>
-                      <th className="py-2 px-2.5">Unit Armada</th>
-                      <th className="py-2 px-2.5">Nama Driver</th>
-                      <th className="py-2 px-2.5">Area Kirim</th>
-                      <th className="py-2 px-2.5">Tipe Kendaraan</th>
-                      <th className="py-2 px-2.5 text-right">Jarak (KM)</th>
-                      <th className="py-2 px-2.5 text-right">BBM (Liter)</th>
-                      <th className="py-2 px-3 text-right font-black text-amber-400 bg-amber-500/5">
-                        Rata-rata L/KM
-                      </th>
-                      <th className="py-2 px-2.5 text-right font-bold text-slate-300">
-                        L / 100 KM
-                      </th>
-                      <th className="py-2 px-2.5 text-right text-slate-400">
-                        Target Pabrikan
-                      </th>
-                      <th className="py-2 px-2.5 text-center">
-                        Deviasi / Penghematan
-                      </th>
-                      <th className="py-2 px-2.5 text-right text-slate-400">
-                        Biaya / KM
-                      </th>
-                      <th className="py-2 px-2.5 text-center">
-                        Status Efisiensi
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60 font-mono">
-                    {unitLKmAnalysis.map((item) => (
-                      <tr key={item.fleetId} className="hover:bg-slate-900/50 transition">
-                        <td className="py-1.5 px-2.5 whitespace-nowrap">
-                          <div className="font-sans flex items-baseline gap-1.5 leading-tight">
-                            <span className="font-extrabold text-white text-sm">{item.initialCode || item.plateNumber}</span>
-                            <span className="text-xs text-slate-400 font-semibold">({item.plateNumber})</span>
-                          </div>
-                          <div className="text-[11px] text-slate-500 font-sans leading-tight">{item.totalLogs}x isi BBM</div>
-                        </td>
-
-                        <td className="py-1.5 px-2.5 font-sans text-slate-200 text-[13px] font-semibold whitespace-nowrap">
-                          {item.driverName}
-                        </td>
-
-                        <td className="py-1.5 px-2.5 font-sans text-slate-300 text-xs font-medium whitespace-nowrap">
-                          {item.areaKirim}
-                        </td>
-
-                        <td className="py-1.5 px-2.5 font-sans text-slate-300 whitespace-nowrap">
-                          <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-xs font-semibold">
-                            {item.vehicleType}
-                          </span>
-                        </td>
-
-                        <td className="py-1.5 px-2.5 text-right font-bold text-sm text-slate-100 whitespace-nowrap">
-                          {item.totalDistanceKm.toLocaleString('id-ID')} <span className="text-xs font-normal text-slate-400">KM</span>
-                        </td>
-
-                        <td className="py-1.5 px-2.5 text-right font-bold text-sm text-slate-100 whitespace-nowrap">
-                          {item.totalLiters.toLocaleString('id-ID')} <span className="text-xs font-normal text-slate-400">L</span>
-                        </td>
-
-                        {/* RATA-RATA L/KM (PRIMARY REQUESTED METRIC) */}
-                        <td className="py-1.5 px-3 text-right font-black text-amber-400 bg-amber-500/5 text-base whitespace-nowrap">
-                          {item.avgLKm}{' '}
-                          <span className="text-xs font-semibold text-slate-400">L/KM</span>
-                        </td>
-
-                        <td className="py-1.5 px-2.5 text-right font-bold text-sm text-slate-100 whitespace-nowrap">
-                          {item.avgL100Km}{' '}
-                          <span className="text-xs font-normal text-slate-400">L</span>
-                        </td>
-
-                        <td className="py-1.5 px-2.5 text-right text-slate-300 whitespace-nowrap leading-tight">
-                          <div className="text-xs font-bold">{item.targetLKm} L/KM</div>
-                          <div className="text-[11px] text-slate-500 font-sans">({item.hasData ? item.targetRatio : 0} KM/L)</div>
-                        </td>
-
-                        <td className="py-1.5 px-2.5 text-center font-sans whitespace-nowrap">
-                          {!item.hasData ? (
-                            <span className="text-slate-500 text-sm font-bold">0%</span>
-                          ) : item.isSaving ? (
-                            <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-xs font-bold">
-                              <ArrowDown className="w-3.5 h-3.5" />
-                              <span>+{item.savingPct}% Irit</span>
-                            </div>
-                          ) : (
-                            <div className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-rose-500/15 text-rose-400 border border-rose-500/30 text-xs font-bold">
-                              <ArrowUp className="w-3.5 h-3.5" />
-                              <span>{item.savingPct}% Boros</span>
-                            </div>
-                          )}
-                        </td>
-
-                        <td className="py-1.5 px-2.5 text-right font-bold text-slate-100 text-sm whitespace-nowrap">
-                          Rp {item.avgCostPerKm.toLocaleString('id-ID')}
-                        </td>
-
-                        <td className="py-1.5 px-2.5 text-center font-sans whitespace-nowrap">
-                          <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${item.statusColor}`}>
-                            {item.hasData ? item.status : '-'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* QUICK TWO-WAY CONVERTER CALCULATOR */}
-            <div className="bg-slate-950/70 p-4 rounded-xl border border-slate-800 space-y-3">
-              <div className="flex items-center gap-2 text-amber-400">
-                <Calculator className="w-4 h-4" />
-                <h4 className="text-xs font-bold text-white">Kalkulator Konversi Cepat KM/L &harr; Liter/KM</h4>
-              </div>
-              <p className="text-xs text-slate-400">
-                Uji coba perbandingan angka kilometer per liter dengan konsumsi liter per kilometer:
-              </p>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-                <div className="space-y-1">
-                  <label className="text-slate-400 font-medium">Input KM per Liter (KM/L):</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={simKmL}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        setSimKmL(val);
-                      }}
-                      className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-white font-mono font-bold focus:outline-none focus:border-amber-500"
-                    />
-                    <span className="text-slate-400 font-bold shrink-0">KM/L</span>
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-slate-400 font-medium">Hasil Konversi Liter/KM:</label>
-                  <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 font-mono font-bold text-amber-400 text-sm flex items-center justify-between">
-                    <span>{simKmL > 0 ? (1 / simKmL).toFixed(4) : '0'}</span>
-                    <span className="text-xs text-slate-400">L / KM</span>
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-slate-400 font-medium">Hasil Standar Liter/100 KM:</label>
-                  <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 font-mono font-bold text-emerald-400 text-sm flex items-center justify-between">
-                    <span>{simKmL > 0 ? ((1 / simKmL) * 100).toFixed(2) : '0'}</span>
-                    <span className="text-xs text-slate-400">L / 100 KM</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 6. TAB 2: DRIVER ECO-LEADERBOARD                                          */}
-      {/* ========================================================================= */}
-      {activeTab === 'leaderboard' && (
-        <div className="space-y-6">
-          <div className="bg-slate-900/80 p-5 rounded-2xl border border-slate-800">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-              <div>
-                <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <Award className="w-5 h-5 text-amber-400" />
-                  <span>Papan Peringkat Eco-Driver PT Anugrah Kemasan Kreatif</span>
-                </h3>
-                <p className="text-xs text-slate-400">
-                  Evaluasi gaya mengemudi, konsistensi akselerasi halus, dan efisiensi BBM armada yang dikemudikan para driver.
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {driverScores.map((ds) => {
-                const isTop1 = ds.ranking === 1;
-                const isTop2 = ds.ranking === 2;
-                const isTop3 = ds.ranking === 3;
-
-                return (
-                  <div
-                    key={ds.driverName}
-                    className={`p-4 rounded-2xl border relative flex flex-col justify-between transition ${
-                      isTop1
-                        ? 'bg-amber-500/10 border-amber-500/40 shadow-lg'
-                        : isTop2
-                        ? 'bg-slate-900 border-slate-700'
-                        : isTop3
-                        ? 'bg-slate-900 border-slate-800'
-                        : 'bg-slate-950/60 border-slate-800/80'
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-2.5">
-                          <div
-                            className={`w-9 h-9 rounded-full flex items-center justify-center font-black text-sm ${
-                              isTop1
-                                ? 'bg-amber-400 text-slate-950 shadow-md'
-                                : isTop2
-                                ? 'bg-slate-300 text-slate-900'
-                                : isTop3
-                                ? 'bg-amber-700 text-amber-100'
-                                : 'bg-slate-800 text-slate-300'
-                            }`}
-                          >
-                            #{ds.ranking}
-                          </div>
-                          <div>
-                            <h4 className="font-bold text-white text-sm flex items-center gap-1.5">
-                              <span>{ds.driverName}</span>
-                            </h4>
-                            <span className="text-[11px] text-slate-400">{ds.totalTrips} Perjalanan BBM</span>
-                          </div>
-                        </div>
-
-                        <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                            ds.badge === 'Master Eco-Driver'
-                              ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                              : ds.badge === 'Driver Efisien'
-                              ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
-                              : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                          }`}
-                        >
-                          {ds.badge}
-                        </span>
-                      </div>
-
-                      {/* STATS MATRIX */}
-                      <div className="grid grid-cols-2 gap-2 bg-slate-950/60 p-2.5 rounded-xl border border-slate-800 text-xs my-3">
-                        <div>
-                          <div className="text-[10px] text-slate-400">Rata-rata Rasio</div>
-                          <div className="text-base font-black text-white font-mono">{ds.avgKmPerLiter} KM/L</div>
-                        </div>
-                        <div>
-                          <div className="text-[10px] text-slate-400">Skor Eco-Driving</div>
-                          <div className="text-base font-black text-amber-400 font-mono">{ds.ecoDrivingScore} / 100</div>
-                        </div>
-                        <div>
-                          <div className="text-[10px] text-slate-400">Total Jarak</div>
-                          <div className="font-bold text-slate-300">{ds.totalDistanceKm.toLocaleString('id-ID')} KM</div>
-                        </div>
-                        <div>
-                          <div className="text-[10px] text-slate-400">Total Solar/BBM</div>
-                          <div className="font-bold text-slate-300">{ds.totalLiters.toLocaleString('id-ID')} Liter</div>
-                        </div>
-                      </div>
-
-                      <p className="text-[11px] text-slate-300 italic bg-slate-900/70 p-2 rounded-lg border border-slate-800/80">
-                        &ldquo;{ds.recommendation}&rdquo;
-                      </p>
-                    </div>
-
-                    <div className="mt-3 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
-                      <span>Status Insentif:</span>
-                      <span className={`font-semibold ${ds.ecoDrivingScore >= 85 ? 'text-emerald-400' : 'text-slate-400'}`}>
-                        {ds.ecoDrivingScore >= 85 ? 'Memenuhi Syarat Bonus Eco' : 'Sesuai Standar Pokok'}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 5. TAB: AUDIT LOGS & TABLE (FILTER SPBU, SORT TEREFISIEN-BOROS, EDIT)     */}
-      {/* ========================================================================= */}
-      {activeTab === 'logs' && (
-        <div className="space-y-3">
-          {/* FILTER AND SEARCH CONTROLS - LOCKED GRID AT ALL ZOOM LEVELS + CUSTOM POPOVER DROPDOWNS */}
-          <div
-            ref={auditFilterContainerRef}
-            className="bg-slate-900/80 p-3 rounded-2xl border border-slate-800 shadow-sm relative z-20"
-          >
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-[minmax(170px,1.35fr)_repeat(5,minmax(0,1fr))_36px] gap-2 items-center">
-              {/* Search Box */}
-              <div className="relative col-span-2 sm:col-span-3 lg:col-span-1 min-w-0">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  type="text"
-                  placeholder="Cari inisial, driver, helper, SPBU..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full h-9 bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-xl pl-8 pr-7 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 transition"
-                />
-                {searchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchQuery('')}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
-                    title="Hapus pencarian"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
                 )}
               </div>
+            </div>
 
-              {/* 1. Custom Filter Dropdown: Armada */}
-              <div className="relative min-w-0">
-                {(() => {
-                  const selectedFleet = filterFleetId !== 'all' ? branchScopedFleets.find(f => f.id === filterFleetId) : undefined;
-                  const isActive = filterFleetId !== 'all';
-                  const isOpen = activeAuditFilterDropdown === 'fleet';
-                  return (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAuditFleetSearchFilter('');
-                          setActiveAuditFilterDropdown(isOpen ? null : 'fleet');
+            {/* Area Chart: Tren Konsumsi BBM & Jarak Tempuh */}
+            <div className="lg:col-span-6 bg-white border border-slate-200 rounded-xl p-5 flex flex-col gap-4">
+              <div className="pb-3 border-b border-slate-100">
+                <h3 className="text-base font-bold text-slate-900">
+                  Tren Volume BBM (L) &amp; Jarak Tempuh (KM)
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Perbandingan harian liter BBM dan akumulasi jarak KM dari Portal Driver &amp; odometer BBM.
+                </p>
+              </div>
+
+              <div className="h-80 w-full">
+                {timelineChartData.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-sm text-slate-500 border border-dashed border-slate-200 rounded-lg">
+                    Belum ada riwayat harian BBM maupun jarak trip driver.
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={timelineChartData} margin={{ top: 10, right: 16, left: 0, bottom: 6 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                      <XAxis dataKey="date" stroke="#64748b" tick={{ fontSize: 11, fill: '#475569' }} />
+                      <YAxis yAxisId="left" stroke="#2563eb" tick={{ fontSize: 11, fill: '#475569' }} />
+                      <YAxis yAxisId="right" orientation="right" stroke="#16a34a" tick={{ fontSize: 11, fill: '#475569' }} />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: '#ffffff',
+                          borderColor: '#cbd5e1',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          color: '#0f172a',
+                          boxShadow: 'none'
                         }}
-                        className={`w-full h-9 px-2.5 rounded-xl border text-xs flex items-center justify-between gap-1.5 transition cursor-pointer ${
-                          isOpen
-                            ? 'bg-slate-900 border-amber-500 ring-2 ring-amber-500/20 text-white'
-                            : isActive
-                            ? 'bg-amber-500/10 border-amber-500/40 text-amber-300 font-semibold'
-                            : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-200'
-                        }`}
-                      >
-                        <span className="flex items-center gap-1.5 min-w-0">
-                          <Truck className={`w-3.5 h-3.5 shrink-0 ${isActive || isOpen ? 'text-amber-400' : 'text-slate-400'}`} />
-                          <span className="truncate">
-                            {selectedFleet ? (selectedFleet.initialCode || selectedFleet.plateNumber) : `Semua Armada (${branchScopedFleets.length})`}
-                          </span>
-                        </span>
-                        <ChevronDown className={`w-3.5 h-3.5 shrink-0 text-slate-400 transition-transform duration-150 ${isOpen ? 'rotate-180 text-amber-400' : ''}`} />
-                      </button>
-
-                      {isOpen && (
-                        <div className="absolute left-0 top-full mt-1.5 z-50 w-64 bg-slate-900 border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-                          <div className="p-2 bg-slate-950/90 border-b border-slate-800">
-                            <div className="relative">
-                              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                              <input
-                                type="text"
-                                autoFocus
-                                value={auditFleetSearchFilter}
-                                onChange={(e) => setAuditFleetSearchFilter(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter' && filteredAuditFleetOptions.length > 0) {
-                                    e.preventDefault();
-                                    setFilterFleetId(filteredAuditFleetOptions[0].id);
-                                    setActiveAuditFilterDropdown(null);
-                                  } else if (e.key === 'Escape') {
-                                    setActiveAuditFilterDropdown(null);
-                                  }
-                                }}
-                                placeholder="Cari armada..."
-                                className="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
-                              />
-                            </div>
-                          </div>
-                          <div className="max-h-60 overflow-y-auto p-1.5 space-y-0.5">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setFilterFleetId('all');
-                                setActiveAuditFilterDropdown(null);
-                              }}
-                              className={`w-full px-2.5 py-1.5 rounded-lg text-left text-xs flex items-center justify-between gap-2 transition cursor-pointer ${
-                                filterFleetId === 'all'
-                                  ? 'bg-amber-500/20 text-amber-300 font-bold'
-                                  : 'hover:bg-slate-800/70 text-slate-200'
-                              }`}
-                            >
-                              <span>Semua Armada ({branchScopedFleets.length})</span>
-                              {filterFleetId === 'all' && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
-                            </button>
-                            {filteredAuditFleetOptions.map(f => {
-                              const selected = filterFleetId === f.id;
-                              return (
-                                <button
-                                  key={f.id}
-                                  type="button"
-                                  onClick={() => {
-                                    setFilterFleetId(f.id);
-                                    setActiveAuditFilterDropdown(null);
-                                  }}
-                                  className={`w-full px-2.5 py-1.5 rounded-lg text-left text-xs flex items-center justify-between gap-2 transition cursor-pointer ${
-                                    selected
-                                      ? 'bg-amber-500/20 text-amber-300 font-bold'
-                                      : 'hover:bg-slate-800/70 text-slate-200'
-                                  }`}
-                                >
-                                  <div className="min-w-0 flex items-center gap-2">
-                                    <span className="font-mono font-bold text-amber-400 shrink-0">
-                                      {f.initialCode || f.plateNumber}
-                                    </span>
-                                    <span className="text-[11px] text-slate-400 truncate">
-                                      {f.vehicleType}
-                                    </span>
-                                  </div>
-                                  {selected && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
-                                </button>
-                              );
-                            })}
-                            {filteredAuditFleetOptions.length === 0 && (
-                              <div className="py-3 text-center text-[11px] text-slate-400">Armada tidak ditemukan</div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-
-              {/* 2. Custom Filter Dropdown: SPBU */}
-              <div className="relative min-w-0">
-                {(() => {
-                  const spbuOptions: Array<{ value: 'all' | 'Farly' | 'Gajah Mada' | 'SPBU Lain'; label: string; desc: string }> = [
-                    { value: 'all', label: 'Semua SPBU', desc: 'Tampilkan seluruh lokasi pengisian' },
-                    { value: 'Farly', label: 'SPBU Farly', desc: 'Pengisian reguler di SPBU Farly' },
-                    { value: 'Gajah Mada', label: 'SPBU Gajah Mada', desc: 'Pengisian di SPBU Gajah Mada' },
-                    { value: 'SPBU Lain', label: 'SPBU Lain (Urgent)', desc: 'Pengisian darurat di luar SPBU rekanan' }
-                  ];
-                  const activeOpt = spbuOptions.find(o => o.value === filterSpbu) || spbuOptions[0];
-                  const isActive = filterSpbu !== 'all';
-                  const isOpen = activeAuditFilterDropdown === 'spbu';
-                  return (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => setActiveAuditFilterDropdown(isOpen ? null : 'spbu')}
-                        className={`w-full h-9 px-2.5 rounded-xl border text-xs flex items-center justify-between gap-1.5 transition cursor-pointer ${
-                          isOpen
-                            ? 'bg-slate-900 border-amber-500 ring-2 ring-amber-500/20 text-white'
-                            : isActive
-                            ? 'bg-blue-500/10 border-blue-500/40 text-blue-300 font-semibold'
-                            : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-200'
-                        }`}
-                      >
-                        <span className="flex items-center gap-1.5 min-w-0">
-                          <MapPin className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-blue-400' : 'text-slate-400'}`} />
-                          <span className="truncate">{activeOpt.label}</span>
-                        </span>
-                        <ChevronDown className={`w-3.5 h-3.5 shrink-0 text-slate-400 transition-transform duration-150 ${isOpen ? 'rotate-180 text-amber-400' : ''}`} />
-                      </button>
-                      {isOpen && (
-                        <div className="absolute left-0 top-full mt-1.5 z-50 w-60 bg-slate-900 border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden p-1.5 space-y-0.5 animate-in fade-in zoom-in-95 duration-150">
-                          {spbuOptions.map(opt => {
-                            const selected = filterSpbu === opt.value;
-                            return (
-                              <button
-                                key={opt.value}
-                                type="button"
-                                onClick={() => {
-                                  setFilterSpbu(opt.value);
-                                  setActiveAuditFilterDropdown(null);
-                                }}
-                                className={`w-full px-2.5 py-2 rounded-lg text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                                  selected
-                                    ? 'bg-blue-500/20 text-blue-300 font-bold'
-                                    : 'hover:bg-slate-800/70 text-slate-200'
-                                }`}
-                              >
-                                <div className="min-w-0">
-                                  <div className="text-xs truncate">{opt.label}</div>
-                                  <div className="text-[10px] text-slate-400 font-normal truncate">{opt.desc}</div>
-                                </div>
-                                {selected && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-
-              {/* 3. Custom Filter Dropdown: Status Efisiensi */}
-              <div className="relative min-w-0">
-                {(() => {
-                  const statusOptions = [
-                    { value: 'all', label: 'Semua Status', dot: 'bg-slate-400' },
-                    { value: 'Sangat Efisien', label: 'Sangat Efisien', dot: 'bg-emerald-400' },
-                    { value: 'Efisien / Normal', label: 'Efisien / Normal', dot: 'bg-blue-400' },
-                    { value: 'Boros', label: 'Boros', dot: 'bg-amber-400' },
-                    { value: 'Kritis / Potensi Anomali', label: 'Kritis / Potensi Anomali', dot: 'bg-rose-400' }
-                  ];
-                  const activeOpt = statusOptions.find(o => o.value === filterStatus) || statusOptions[0];
-                  const isActive = filterStatus !== 'all';
-                  const isOpen = activeAuditFilterDropdown === 'status';
-                  return (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => setActiveAuditFilterDropdown(isOpen ? null : 'status')}
-                        className={`w-full h-9 px-2.5 rounded-xl border text-xs flex items-center justify-between gap-1.5 transition cursor-pointer ${
-                          isOpen
-                            ? 'bg-slate-900 border-amber-500 ring-2 ring-amber-500/20 text-white'
-                            : isActive
-                            ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300 font-semibold'
-                            : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-200'
-                        }`}
-                      >
-                        <span className="flex items-center gap-1.5 min-w-0">
-                          <span className={`w-2 h-2 rounded-full shrink-0 ${activeOpt.dot}`} />
-                          <span className="truncate">{activeOpt.label}</span>
-                        </span>
-                        <ChevronDown className={`w-3.5 h-3.5 shrink-0 text-slate-400 transition-transform duration-150 ${isOpen ? 'rotate-180 text-amber-400' : ''}`} />
-                      </button>
-                      {isOpen && (
-                        <div className="absolute left-0 top-full mt-1.5 z-50 w-56 bg-slate-900 border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden p-1.5 space-y-0.5 animate-in fade-in zoom-in-95 duration-150">
-                          {statusOptions.map(opt => {
-                            const selected = filterStatus === opt.value;
-                            return (
-                              <button
-                                key={opt.value}
-                                type="button"
-                                onClick={() => {
-                                  setFilterStatus(opt.value);
-                                  setActiveAuditFilterDropdown(null);
-                                }}
-                                className={`w-full px-2.5 py-2 rounded-lg text-left text-xs flex items-center justify-between gap-2 transition cursor-pointer ${
-                                  selected
-                                    ? 'bg-emerald-500/20 text-emerald-300 font-bold'
-                                    : 'hover:bg-slate-800/70 text-slate-200'
-                                }`}
-                              >
-                                <span className="flex items-center gap-2 min-w-0">
-                                  <span className={`w-2 h-2 rounded-full shrink-0 ${opt.dot}`} />
-                                  <span className="truncate">{opt.label}</span>
-                                </span>
-                                {selected && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-
-              {/* 4. Custom Filter Dropdown: Jenis BBM */}
-              <div className="relative min-w-0">
-                {(() => {
-                  const fuelOptions = [
-                    { value: 'all', label: 'Semua BBM', sub: 'Seluruh jenis bahan bakar' },
-                    { value: 'BioSolar', label: 'BioSolar', sub: 'Solar subsidi armada niaga' },
-                    { value: 'Dexlite', label: 'Dexlite', sub: 'Cetane 51 diesel menengah' },
-                    { value: 'Pertamina Dex', label: 'Pertamina Dex', sub: 'Cetane 53 diesel premium' },
-                    { value: 'Pertalite', label: 'Pertalite', sub: 'Bensin RON 90' }
-                  ];
-                  const activeOpt = fuelOptions.find(o => o.value === filterFuelType) || fuelOptions[0];
-                  const isActive = filterFuelType !== 'all';
-                  const isOpen = activeAuditFilterDropdown === 'fuel';
-                  return (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => setActiveAuditFilterDropdown(isOpen ? null : 'fuel')}
-                        className={`w-full h-9 px-2.5 rounded-xl border text-xs flex items-center justify-between gap-1.5 transition cursor-pointer ${
-                          isOpen
-                            ? 'bg-slate-900 border-amber-500 ring-2 ring-amber-500/20 text-white'
-                            : isActive
-                            ? 'bg-purple-500/10 border-purple-500/40 text-purple-300 font-semibold'
-                            : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-200'
-                        }`}
-                      >
-                        <span className="flex items-center gap-1.5 min-w-0">
-                          <Fuel className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-purple-400' : 'text-slate-400'}`} />
-                          <span className="truncate">{activeOpt.label}</span>
-                        </span>
-                        <ChevronDown className={`w-3.5 h-3.5 shrink-0 text-slate-400 transition-transform duration-150 ${isOpen ? 'rotate-180 text-amber-400' : ''}`} />
-                      </button>
-                      {isOpen && (
-                        <div className="absolute right-0 lg:left-0 top-full mt-1.5 z-50 w-52 bg-slate-900 border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden p-1.5 space-y-0.5 animate-in fade-in zoom-in-95 duration-150">
-                          {fuelOptions.map(opt => {
-                            const selected = filterFuelType === opt.value;
-                            return (
-                              <button
-                                key={opt.value}
-                                type="button"
-                                onClick={() => {
-                                  setFilterFuelType(opt.value);
-                                  setActiveAuditFilterDropdown(null);
-                                }}
-                                className={`w-full px-2.5 py-2 rounded-lg text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                                  selected
-                                    ? 'bg-purple-500/20 text-purple-300 font-bold'
-                                    : 'hover:bg-slate-800/70 text-slate-200'
-                                }`}
-                              >
-                                <div className="min-w-0">
-                                  <div className="text-xs truncate">{opt.label}</div>
-                                  <div className="text-[10px] text-slate-400 font-normal truncate">{opt.sub}</div>
-                                </div>
-                                {selected && <Check className="w-3.5 h-3.5 text-purple-400 shrink-0" />}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-
-              {/* 5. Custom Filter Dropdown: Urutkan */}
-              <div className="relative min-w-0">
-                {(() => {
-                  const sortOptions: Array<{ value: 'date_asc' | 'date_desc' | 'efficient_asc' | 'wasteful_desc'; label: string; desc: string }> = [
-                    { value: 'date_asc', label: 'Tanggal Termuda', desc: 'Urut dari tanggal paling awal' },
-                    { value: 'date_desc', label: 'Tanggal Terbaru', desc: 'Urut dari pengisian terakhir' },
-                    { value: 'efficient_asc', label: 'Terefisien → Boros', desc: 'Rasio KM/L tertinggi lebih dulu' },
-                    { value: 'wasteful_desc', label: 'Boros → Terefisien', desc: 'Prioritaskan log paling boros' }
-                  ];
-                  const activeOpt = sortOptions.find(o => o.value === logSortBy) || sortOptions[0];
-                  const isOpen = activeAuditFilterDropdown === 'sort';
-                  return (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => setActiveAuditFilterDropdown(isOpen ? null : 'sort')}
-                        className={`w-full h-9 px-2.5 rounded-xl border text-xs flex items-center justify-between gap-1.5 transition cursor-pointer font-semibold ${
-                          isOpen
-                            ? 'bg-slate-900 border-amber-500 ring-2 ring-amber-500/20 text-amber-300'
-                            : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-amber-300'
-                        }`}
-                      >
-                        <span className="flex items-center gap-1.5 min-w-0">
-                          <ArrowUpDown className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                          <span className="truncate">{activeOpt.label}</span>
-                        </span>
-                        <ChevronDown className={`w-3.5 h-3.5 shrink-0 text-amber-400 transition-transform duration-150 ${isOpen ? 'rotate-180' : ''}`} />
-                      </button>
-                      {isOpen && (
-                        <div className="absolute right-0 top-full mt-1.5 z-50 w-56 bg-slate-900 border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden p-1.5 space-y-0.5 animate-in fade-in zoom-in-95 duration-150">
-                          {sortOptions.map(opt => {
-                            const selected = logSortBy === opt.value;
-                            return (
-                              <button
-                                key={opt.value}
-                                type="button"
-                                onClick={() => {
-                                  setLogSortBy(opt.value);
-                                  setActiveAuditFilterDropdown(null);
-                                }}
-                                className={`w-full px-2.5 py-2 rounded-lg text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                                  selected
-                                    ? 'bg-amber-500/20 text-amber-300 font-bold'
-                                    : 'hover:bg-slate-800/70 text-slate-200'
-                                }`}
-                              >
-                                <div className="min-w-0">
-                                  <div className="text-xs truncate">{opt.label}</div>
-                                  <div className="text-[10px] text-slate-400 font-normal truncate">{opt.desc}</div>
-                                </div>
-                                {selected && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-
-              {/* 6. Reserved Fixed Reset Slot (prevents bar wrap/shift at any zoom) */}
-              <div className="flex justify-end">
-                {(() => {
-                  const hasCustomFilter =
-                    Boolean(searchQuery) ||
-                    filterFleetId !== 'all' ||
-                    filterSpbu !== 'all' ||
-                    filterStatus !== 'all' ||
-                    filterFuelType !== 'all' ||
-                    logSortBy !== 'date_asc';
-                  return (
-                    <button
-                      type="button"
-                      disabled={!hasCustomFilter}
-                      onClick={() => {
-                        setSearchQuery('');
-                        setFilterFleetId('all');
-                        setFilterSpbu('all');
-                        setFilterStatus('all');
-                        setFilterFuelType('all');
-                        setLogSortBy('date_asc');
-                        setActiveAuditFilterDropdown(null);
-                      }}
-                      className={`w-9 h-9 rounded-xl border flex items-center justify-center transition ${
-                        hasCustomFilter
-                          ? 'bg-amber-500/15 border-amber-500/40 hover:bg-amber-500 hover:text-slate-950 text-amber-300 cursor-pointer'
-                          : 'bg-slate-950/60 border-slate-800/70 text-slate-500 opacity-50 cursor-default'
-                      }`}
-                      title="Reset Filter"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                    </button>
-                  );
-                })()}
+                      />
+                      <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }} />
+                      <Area
+                        yAxisId="left"
+                        type="monotone"
+                        dataKey="distance"
+                        name="Jarak Tempuh (KM)"
+                        stroke="#2563eb"
+                        strokeWidth={2}
+                        fill="#dbeafe"
+                        fillOpacity={0.55}
+                      />
+                      <Area
+                        yAxisId="right"
+                        type="monotone"
+                        dataKey="liters"
+                        name="Volume BBM (Liter)"
+                        stroke="#16a34a"
+                        strokeWidth={2}
+                        fill="#dcfce7"
+                        fillOpacity={0.55}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                )}
               </div>
             </div>
           </div>
 
-          {/* FUEL LOGS TABLE (COMPACT ROW HEIGHT + MAX 10 ROWS PER PAGE) */}
-          <div className="bg-slate-900/80 rounded-2xl border border-slate-800 overflow-hidden shadow-lg">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-950/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
-                  <tr>
-                    <th className="px-3 py-2">Tanggal &amp; Armada</th>
-                    <th className="px-3 py-2">Kru (Driver / Helper) &amp; Rute</th>
-                    <th className="px-3 py-2">BBM &amp; Biaya</th>
-                    <th className="px-3 py-2">KM Awal / Isi</th>
-                    <th className="px-3 py-2 text-center">Jarak</th>
-                    <th className="px-3 py-2 text-center">Rasio (KM/L)</th>
-                    <th className="px-3 py-2 text-center">Status Efisiensi</th>
-                    <th className="px-3 py-2 text-right">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {paginatedLogs.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
-                        Tidak ada catatan pengisian BBM yang sesuai filter.
-                      </td>
-                    </tr>
-                  ) : (
-                    paginatedLogs.map(log => {
-                      const isAnomaly = log.efficiencyStatus === 'Kritis / Potensi Anomali';
-                      const isHighEfficient = log.efficiencyStatus === 'Sangat Efisien';
-                      const isWaste = log.efficiencyStatus === 'Boros';
-                      const logBranchId = selectedBranchFilter === 'all' ? resolveLogBranchId(log) : selectedBranchFilter;
-
-                      return (
-                        <tr key={log.id} className="hover:bg-slate-800/40 transition">
-                          <td className="px-3 py-1.5 whitespace-nowrap leading-tight">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-semibold text-white text-xs">{log.date}</span>
-                              {selectedBranchFilter === 'all' && (
-                                <span className={`text-[9px] px-1 py-0 rounded font-bold border ${
-                                  logBranchId === 'cab-sidoarjo'
-                                    ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30'
-                                    : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
-                                }`}>
-                                  {logBranchId === 'cab-sidoarjo' ? 'Sidoarjo' : 'Nusantara'}
-                                </span>
-                              )}
-                            </div>
-                            <div className="font-bold text-amber-400 font-mono text-xs mt-0.5">
-                              {log.initialCode || '-'}
-                            </div>
-                          </td>
-
-                          <td className="px-3 py-1.5 leading-tight max-w-[260px]">
-                            <div className="font-semibold text-slate-200 flex items-center gap-1 truncate">
-                              <User className="w-3 h-3 text-slate-400 shrink-0" />
-                              <span className="truncate">{log.driverName}</span>
-                              {log.helperName && (
-                                <span className="text-[10px] font-medium text-amber-300 truncate shrink-0">
-                                  &bull; {log.helperName}
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-[11px] text-slate-400 truncate mt-0.5 flex items-center gap-1" title={`${log.routeTrip || 'Rute lokal AKK'} • ${log.gasStation}`}>
-                              <span className="truncate">{log.routeTrip || 'Rute lokal AKK'}</span>
-                              <span className="text-slate-500">&bull;</span>
-                              <MapPin className="w-2.5 h-2.5 text-blue-400 shrink-0" />
-                              <span className="truncate">{log.gasStation}</span>
-                            </div>
-                          </td>
-
-                          <td className="px-3 py-1.5 whitespace-nowrap leading-tight">
-                            <div className="font-bold text-slate-200">
-                              {log.liters} L <span className="text-slate-400 font-normal text-[11px]">({log.fuelType})</span>
-                            </div>
-                            <div className="text-[11px] mt-0.5 flex items-center gap-1.5">
-                              <span className="text-amber-400 font-mono font-semibold">
-                                Rp {log.totalCost.toLocaleString('id-ID')}
-                              </span>
-                              <span className="text-[10px] text-slate-400">
-                                ({log.costPerKm.toLocaleString('id-ID')}/KM)
-                              </span>
-                            </div>
-                          </td>
-
-                          <td className="px-3 py-1.5 whitespace-nowrap font-mono text-[11px] text-slate-300 leading-tight">
-                            <div>Awal: {log.startOdometerKm.toLocaleString('id-ID')}</div>
-                            <div className="text-amber-300 mt-0.5">Isi: {log.endOdometerKm.toLocaleString('id-ID')}</div>
-                          </td>
-
-                          <td className="px-3 py-1.5 text-center whitespace-nowrap font-mono font-bold text-white leading-tight">
-                            {log.distanceKm.toLocaleString('id-ID')} KM
-                          </td>
-
-                          <td className="px-3 py-1.5 text-center whitespace-nowrap leading-tight">
-                            <div className="font-black text-xs font-mono text-white">
-                              {log.ratioKmPerLiter} <span className="text-[10px] font-normal text-slate-400">/ {log.targetRatio}</span>
-                            </div>
-                          </td>
-
-                          <td className="px-3 py-1.5 text-center whitespace-nowrap leading-tight">
-                            <span
-                              className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                                isHighEfficient
-                                  ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                                  : isWaste
-                                  ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                                  : isAnomaly
-                                  ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                                  : 'bg-blue-500/15 text-blue-400 border-blue-500/30'
-                              }`}
-                            >
-                              {log.efficiencyStatus}
-                            </span>
-                          </td>
-
-                          <td className="px-3 py-1.5 text-right whitespace-nowrap space-x-1">
-                            <button
-                              type="button"
-                              onClick={() => openEditFuelModal(log)}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500 text-amber-300 hover:text-slate-950 font-semibold text-[11px] transition cursor-pointer"
-                            >
-                              <Edit className="w-3 h-3" />
-                              <span>Edit</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedLogForDetail(log)}
-                              className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-semibold text-[11px] transition cursor-pointer"
-                            >
-                              Detail
-                            </button>
-                            <button
-                              type="button"
-                              disabled={deletingLogId === log.id}
-                              onClick={async () => {
-                                if (deletingLogId) return;
-                                setFuelActionError('');
-                                setDeletingLogId(log.id);
-                                try {
-                                  await logisticsStore.deleteFuelLogAsync(log.id);
-                                } catch (err: any) {
-                                  setFuelActionError(err?.message || 'Gagal menghapus catatan BBM dari database MySQL.');
-                                } finally {
-                                  setDeletingLogId(null);
-                                }
-                              }}
-                              className="px-2 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500 disabled:opacity-50 text-rose-400 hover:text-white font-semibold text-[11px] transition cursor-pointer"
-                            >
-                              {deletingLogId === log.id ? '...' : 'Hapus'}
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* PAGINATION FOOTER BAR */}
-            {filteredLogs.length > 0 && (
-              <div className="px-3.5 py-2 border-t border-slate-800 bg-slate-950/60 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs">
-                <div className="text-slate-400">
-                  Menampilkan{' '}
-                  <span className="font-bold text-slate-200">
-                    {(safeLogsPage - 1) * LOGS_PER_PAGE + 1}&ndash;{Math.min(safeLogsPage * LOGS_PER_PAGE, filteredLogs.length)}
-                  </span>{' '}
-                  dari <span className="font-bold text-slate-200">{filteredLogs.length}</span> catatan BBM
-                  <span className="text-slate-500 ml-1.5">(Halaman {safeLogsPage} / {totalLogsPages})</span>
-                </div>
-
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    disabled={safeLogsPage <= 1}
-                    onClick={() => setLogsCurrentPage(p => Math.max(1, p - 1))}
-                    className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold flex items-center gap-1 transition ${
-                      safeLogsPage <= 1
-                        ? 'bg-slate-900/50 border-slate-800/70 text-slate-500 opacity-50 cursor-not-allowed'
-                        : 'bg-slate-900 border-slate-700 hover:border-amber-500/50 hover:text-amber-300 text-slate-200 cursor-pointer'
-                    }`}
-                  >
-                    <ChevronLeft className="w-3.5 h-3.5" />
-                    <span>Sebelumnya</span>
-                  </button>
-
-                  {Array.from({ length: totalLogsPages }, (_, i) => i + 1)
-                    .filter(p => p === 1 || p === totalLogsPages || Math.abs(p - safeLogsPage) <= 1)
-                    .reduce<Array<number | 'ellipsis'>>((acc, p, idx, arr) => {
-                      if (idx > 0 && p - arr[idx - 1] > 1) acc.push('ellipsis');
-                      acc.push(p);
-                      return acc;
-                    }, [])
-                    .map((item, idx) =>
-                      item === 'ellipsis' ? (
-                        <span key={`el-${idx}`} className="px-1.5 text-slate-500 select-none">
-                          &hellip;
-                        </span>
-                      ) : (
-                        <button
-                          key={item}
-                          type="button"
-                          onClick={() => setLogsCurrentPage(item)}
-                          className={`min-w-[28px] h-7 px-2 rounded-lg border text-[11px] font-bold transition cursor-pointer ${
-                            safeLogsPage === item
-                              ? 'bg-amber-500 border-amber-500 text-slate-950 shadow-xs'
-                              : 'bg-slate-900 border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white'
-                          }`}
-                        >
-                          {item}
-                        </button>
-                      )
-                    )}
-
-                  <button
-                    type="button"
-                    disabled={safeLogsPage >= totalLogsPages}
-                    onClick={() => setLogsCurrentPage(p => Math.min(totalLogsPages, p + 1))}
-                    className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold flex items-center gap-1 transition ${
-                      safeLogsPage >= totalLogsPages
-                        ? 'bg-slate-900/50 border-slate-800/70 text-slate-500 opacity-50 cursor-not-allowed'
-                        : 'bg-slate-900 border-slate-700 hover:border-amber-500/50 hover:text-amber-300 text-slate-200 cursor-pointer'
-                    }`}
-                  >
-                    <span>Berikutnya</span>
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 6. POPUP MODAL: KALKULATOR ESTIMASI KEBUTUHAN & BIAYA BBM RUTE            */}
-      {/* ========================================================================= */}
-      {isCalculatorModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200 my-6">
-            <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-800 bg-slate-950/80">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                  <Calculator className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white">
-                    Kalkulator Estimasi Kebutuhan &amp; Biaya BBM Rute
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    Hitung estimasi solar, biaya operasional per KM/box, dan konversi KM/L &harr; L/KM.
-                  </p>
-                </div>
+          {/* COMPACT UNIT EFFICIENCY TABLE */}
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Ringkasan Efisiensi Per Unit Armada ({unitLKmAnalysis.length} Unit)
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Klik baris unit untuk memfokuskan grafik perbandingan di atas.
+                </p>
               </div>
               <button
                 type="button"
-                onClick={() => setIsCalculatorModalOpen(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg transition cursor-pointer"
+                onClick={() => setActiveTab('liter_km')}
+                className="text-xs font-semibold text-blue-600 hover:text-blue-700 cursor-pointer self-start sm:self-center"
               >
-                <X className="w-5 h-5" />
+                Lihat Analisis L/KM Lengkap &rarr;
               </button>
             </div>
 
-            <div className="p-5 grid grid-cols-1 lg:grid-cols-2 gap-6 max-h-[82vh] overflow-y-auto">
-              {/* INPUT CONTROLS */}
-              <div className="space-y-3.5">
-                <h4 className="text-xs font-bold text-amber-400 flex items-center gap-2">
-                  <Settings className="w-4 h-4" />
-                  <span>Parameter Pengiriman &amp; Rute</span>
-                </h4>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Pilih Armada / Tipe Kendaraan
-                  </label>
-                  <select
-                    value={calcFleetType}
-                    onChange={(e) => setCalcFleetType(e.target.value as VehicleType)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500"
-                  >
-                    <option value="Pick Up Box">Pick Up Box (Target: 11.0 KM/L)</option>
-                    <option value="Engkel STD">Engkel STD - 4 Roda (Target: 8.2 KM/L)</option>
-                    <option value="Engkel Long">Engkel Long - 4 Roda (Target: 7.5 KM/L)</option>
-                    <option value="Double STD">Double STD - 6 Roda (Target: 6.2 KM/L)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Preset Rute Distribusi
-                  </label>
-                  <select
-                    value={calcSelectedRoute}
-                    onChange={(e) => handlePresetRouteChange(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500"
-                  >
-                    <option value="bwi-sby-pp">Banyuwangi &harr; Surabaya Hub (620 KM PP)</option>
-                    <option value="bwi-mlg-pp">Banyuwangi &harr; Malang Raya (560 KM PP)</option>
-                    <option value="bwi-jbr-pp">Banyuwangi &harr; Jember &amp; Lumajang (210 KM PP)</option>
-                    <option value="bwi-dps-pp">Banyuwangi &harr; Denpasar Bali (340 KM PP)</option>
-                    <option value="bwi-solo-pp">Banyuwangi &harr; Solo / Yogyakarta (820 KM PP)</option>
-                    <option value="custom">Kustom Jarak Tempuh Sendiri</option>
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1">
-                      Jarak Tempuh (KM)
-                    </label>
-                    <input
-                      type="number"
-                      value={calcDistanceKm}
-                      onChange={(e) => {
-                        setCalcDistanceKm(Number(e.target.value) || 0);
-                        setCalcSelectedRoute('custom');
-                      }}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-amber-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1">
-                      Muatan Karton Box (Pcs)
-                    </label>
-                    <input
-                      type="number"
-                      value={calcCargoBoxes}
-                      onChange={(e) => setCalcCargoBoxes(Number(e.target.value) || 0)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-amber-500"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1">
-                      Jenis Bahan Bakar
-                    </label>
-                    <select
-                      value={calcFuelType}
-                      onChange={(e) => {
-                        const ft = e.target.value as FuelType;
-                        setCalcFuelType(ft);
-                        setCalcCustomPrice(STANDARD_FUEL_PRICES[ft] || 6800);
-                      }}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500"
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm text-slate-700">
+                <thead className="bg-slate-50 text-xs font-semibold text-slate-500 border-b border-slate-200 whitespace-nowrap">
+                  <tr>
+                    <th className="py-3 px-4">Armada</th>
+                    <th className="py-3 px-4">Tipe</th>
+                    <th className="py-3 px-4">Driver Terakhir</th>
+                    <th className="py-3 px-4 text-right">Jarak (KM)</th>
+                    <th className="py-3 px-4 text-right">Total Liter</th>
+                    <th className="py-3 px-4 text-right">Rata-rata L/KM</th>
+                    <th className="py-3 px-4 text-right">Rasio KM/L</th>
+                    <th className="py-3 px-4 text-center">Selisih Target</th>
+                    <th className="py-3 px-4 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {unitLKmAnalysis.map(item => (
+                    <tr
+                      key={item.fleetId}
+                      onClick={() =>
+                        setComparisonSelectedFleetId(prev => (prev === item.fleetId ? 'all' : item.fleetId))
+                      }
+                      className={`hover:bg-slate-50 transition cursor-pointer ${
+                        comparisonSelectedFleetId === item.fleetId ? 'bg-blue-50/70' : ''
+                      }`}
                     >
-                      <option value="BioSolar">BioSolar (Subsidi)</option>
-                      <option value="Dexlite">Dexlite (Non-Subsidi)</option>
-                      <option value="Pertamina Dex">Pertamina Dex</option>
-                      <option value="Pertalite">Pertalite</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1">
-                      Harga / Liter (Rp)
-                    </label>
-                    <input
-                      type="number"
-                      value={calcCustomPrice}
-                      onChange={(e) => setCalcCustomPrice(Number(e.target.value) || 0)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-amber-500"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* OUTPUT PREVIEW PANEL */}
-              <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800/90 flex flex-col justify-between space-y-3">
-                <div>
-                  <div className="flex items-center justify-between pb-2.5 border-b border-slate-800 mb-3">
-                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                      Hasil Kalkulasi Estimasi
-                    </span>
-                    <span className="text-[11px] font-bold text-amber-400 bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/30">
-                      Standar: {calcOutput.target} KM/L
-                    </span>
-                  </div>
-
-                  <div className="space-y-3">
-                    <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800">
-                      <div className="text-[11px] text-slate-400">Total Kebutuhan Bahan Bakar:</div>
-                      <div className="text-2xl font-black text-amber-400 font-mono mt-0.5">
-                        {calcOutput.estLiters} <span className="text-xs text-slate-400 font-bold">Liter {calcFuelType}</span>
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800">
-                      <div className="text-[11px] text-slate-400">Estimasi Total Biaya BBM:</div>
-                      <div className="text-2xl font-black text-emerald-400 font-mono mt-0.5">
-                        Rp {calcOutput.estTotalCost.toLocaleString('id-ID')}
-                      </div>
-                      <div className="text-[11px] text-slate-400 mt-0.5">
-                        Biaya per KM: <strong className="text-slate-200">Rp {calcOutput.costPerKm.toLocaleString('id-ID')}/KM</strong>
-                      </div>
-                    </div>
-
-                    <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/25 flex items-center justify-between">
-                      <div>
-                        <div className="text-[11px] font-semibold text-blue-300">Biaya BBM Per Box:</div>
-                        <div className="text-[10px] text-slate-400">Muatan {calcCargoBoxes.toLocaleString('id-ID')} pcs</div>
-                      </div>
-                      <div className="text-lg font-black text-blue-400 font-mono">
-                        Rp {calcOutput.costPerBox} <span className="text-[10px] text-slate-400">/ pcs</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="pt-2.5 border-t border-slate-800 text-[10px] text-slate-400 flex items-center gap-2">
-                  <Info className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span>Gunakan estimasi ini sebagai acuan uang saku BBM operasional sebelum keberangkatan.</span>
-                </div>
-              </div>
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        <div className="font-semibold text-slate-900">{item.initialCode || '-'}</div>
+                        <div className="text-xs text-slate-500 font-mono">{item.plateNumber}</div>
+                      </td>
+                      <td className="py-3 px-4 text-xs text-slate-600 whitespace-nowrap">{item.vehicleType}</td>
+                      <td className="py-3 px-4 text-xs font-medium text-slate-800 whitespace-nowrap">{item.driverName}</td>
+                      <td className="py-3 px-4 text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">
+                        {item.totalDistanceKm.toLocaleString('id-ID')}
+                        {item.hasPortalKm && (
+                          <span className="ml-1.5 text-[10px] font-sans font-semibold text-blue-600">Portal</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap">
+                        {item.totalLiters.toLocaleString('id-ID')} L
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-slate-900 whitespace-nowrap">
+                        {item.avgLKm}
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono tabular-nums font-semibold text-slate-700 whitespace-nowrap">
+                        {item.avgKmPerLiter} KM/L
+                      </td>
+                      <td className="py-3 px-4 text-center whitespace-nowrap">
+                        {!item.hasData ? (
+                          <span className="text-xs text-slate-400">-</span>
+                        ) : item.isSaving ? (
+                          <span className="inline-flex items-center gap-0.5 text-xs font-semibold text-emerald-700">
+                            <ArrowDown className="w-3 h-3" />+{item.savingPct}% Hemat
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-0.5 text-xs font-semibold text-red-600">
+                            <ArrowUp className="w-3 h-3" />{item.savingPct}% Boros
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-center whitespace-nowrap">
+                        {!item.hasData ? (
+                          <span className="text-xs text-slate-400">Belum ada log</span>
+                        ) : (
+                          <span
+                            className={`px-2.5 py-0.5 rounded-md text-xs font-semibold border inline-block ${
+                              item.status === 'Sangat Efisien'
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : item.status === 'Efisien / Normal'
+                                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                : item.status === 'Boros'
+                                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                : 'bg-red-50 text-red-700 border-red-200'
+                            }`}
+                          >
+                            {item.status}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* 6. TAB: LAPORAN & REKAP MINGGUAN (PER DRIVER & ARMADA)                    */}
-      {/* ========================================================================= */}
+      {/* =================================================================== */}
+      {/* TAB 2: DETAIL LITER PER KM KENDARAAN                                */}
+      {/* =================================================================== */}
+      {activeTab === 'liter_km' && (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <div className="p-5 border-b border-slate-200 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-bold text-slate-900">
+                Detail Konsumsi Liter per Kilometer (L/KM) Tiap Armada
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Rumus: Total Liter ÷ Total Jarak KM (memprioritaskan jarak KM Awal &amp; KM Akhir Portal Driver).
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5">
+              <select
+                value={lKmFilterFleetId}
+                onChange={e => setLKmFilterFleetId(e.target.value)}
+                aria-label="Filter unit"
+                className="px-3 py-2 rounded-lg bg-white border border-slate-200 text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-600 cursor-pointer"
+              >
+                <option value="all">Semua Unit ({fleetSummaries.length})</option>
+                {branchScopedFleets.map(f => (
+                  <option key={f.id} value={f.id}>
+                    {f.initialCode || f.plateNumber} ({f.plateNumber})
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={lKmSortBy}
+                onChange={e => setLKmSortBy(e.target.value as typeof lKmSortBy)}
+                aria-label="Urutkan"
+                className="px-3 py-2 rounded-lg bg-white border border-slate-200 text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-600 cursor-pointer"
+              >
+                <option value="canonical_order">Urutan Armada Resmi</option>
+                <option value="lKm_asc">L/KM Paling Hemat</option>
+                <option value="lKm_desc">L/KM Paling Tinggi</option>
+                <option value="efficiency_desc">Skor Efisiensi Tertinggi</option>
+                <option value="distance_desc">Jarak Tempuh Terjauh</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm text-slate-700">
+              <thead className="bg-slate-50 text-xs font-semibold text-slate-500 border-b border-slate-200 whitespace-nowrap">
+                <tr>
+                  <th className="py-3 px-4">Armada &amp; Plat</th>
+                  <th className="py-3 px-4">Tipe</th>
+                  <th className="py-3 px-4">Area Terakhir</th>
+                  <th className="py-3 px-4 text-right">Isi</th>
+                  <th className="py-3 px-4 text-right">Total Liter</th>
+                  <th className="py-3 px-4 text-right">Jarak (KM)</th>
+                  <th className="py-3 px-4 text-right">Biaya/KM</th>
+                  <th className="py-3 px-4 text-right">Aktual L/KM</th>
+                  <th className="py-3 px-4 text-right">Target L/KM</th>
+                  <th className="py-3 px-4 text-right">L / 100 KM</th>
+                  <th className="py-3 px-4 text-center">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {unitLKmAnalysis.map(item => (
+                  <tr key={item.fleetId} className="hover:bg-slate-50 transition">
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      <div className="font-semibold text-slate-900">{item.initialCode || '-'}</div>
+                      <div className="text-xs text-slate-500 font-mono">{item.plateNumber}</div>
+                    </td>
+                    <td className="py-3 px-4 text-xs text-slate-600 whitespace-nowrap">{item.vehicleType}</td>
+                    <td className="py-3 px-4 text-xs text-slate-600 whitespace-nowrap">{item.areaKirim}</td>
+                    <td className="py-3 px-4 text-right font-mono tabular-nums">{item.totalLogs}x</td>
+                    <td className="py-3 px-4 text-right font-mono tabular-nums font-semibold text-slate-900">
+                      {item.totalLiters.toLocaleString('id-ID')} L
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono tabular-nums font-semibold text-blue-600">
+                      {item.totalDistanceKm.toLocaleString('id-ID')}
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono tabular-nums text-xs text-slate-700">
+                      Rp {item.avgCostPerKm.toLocaleString('id-ID')}
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-slate-900">
+                      {item.avgLKm}
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono tabular-nums text-xs text-slate-500">
+                      {item.targetLKm}
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-700">
+                      {item.avgL100Km}
+                    </td>
+                    <td className="py-3 px-4 text-center whitespace-nowrap">
+                      <span
+                        className={`px-2.5 py-0.5 rounded-md text-xs font-semibold border inline-block ${
+                          !item.hasData
+                            ? 'bg-slate-50 text-slate-500 border-slate-200'
+                            : item.status === 'Sangat Efisien'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : item.status === 'Efisien / Normal'
+                            ? 'bg-blue-50 text-blue-700 border-blue-200'
+                            : item.status === 'Boros'
+                            ? 'bg-amber-50 text-amber-700 border-amber-200'
+                            : 'bg-red-50 text-red-700 border-red-200'
+                        }`}
+                      >
+                        {item.hasData ? item.status : 'Belum ada data'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* =================================================================== */}
+      {/* TAB 3: EMBEDDED REKAP KM BERANGKAT & PULANG                         */}
+      {/* =================================================================== */}
+      {activeTab === 'km_recap' && (
+        <KmRecapManagement
+          embedded
+          branchFilterExternal={selectedBranchFilter}
+          onNavigateToFuel={() => setActiveTab('overview')}
+        />
+      )}
+
+      {/* =================================================================== */}
+      {/* TAB 4: REKAPITULASI MINGGUAN / RENTANG TANGGAL                      */}
+      {/* =================================================================== */}
       {activeTab === 'weekly_report' && (
         <FuelWeeklyReportView
-          fuelLogs={branchScopedLogs}
+          fuelLogs={reconciledLogs}
           onOpenExportModal={() => setIsExportModalOpen(true)}
         />
       )}
 
-      {/* ========================================================================= */}
-      {/* 7. MODAL: CATAT / EDIT PENGISIAN BBM                                      */}
-      {/* ========================================================================= */}
+      {/* =================================================================== */}
+      {/* TAB 5: ECO-DRIVER LEADERBOARD                                       */}
+      {/* =================================================================== */}
+      {activeTab === 'leaderboard' && (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <div className="p-5 border-b border-slate-200">
+            <h3 className="text-base font-bold text-slate-900">
+              Peringkat Efisiensi Driver (Eco-Driving)
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Berdasarkan perbandingan rasio aktual terhadap standar pabrik tiap armada yang dikemudikan.
+            </p>
+          </div>
+
+          {driverScores.length === 0 ? (
+            <div className="py-12 text-center text-sm text-slate-500">
+              Belum ada data pengisian BBM untuk menghitung skor driver.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm text-slate-700">
+                <thead className="bg-slate-50 text-xs font-semibold text-slate-500 border-b border-slate-200 whitespace-nowrap">
+                  <tr>
+                    <th className="py-3 px-4">Peringkat</th>
+                    <th className="py-3 px-4">Nama Driver</th>
+                    <th className="py-3 px-4 text-right">Ritase Log</th>
+                    <th className="py-3 px-4 text-right">Total Jarak (KM)</th>
+                    <th className="py-3 px-4 text-right">Total Solar (L)</th>
+                    <th className="py-3 px-4 text-right">Rerata KM/L</th>
+                    <th className="py-3 px-4 text-center">Skor</th>
+                    <th className="py-3 px-4 text-center">Kategori</th>
+                    <th className="py-3 px-4">Catatan Evaluasi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {driverScores.map(d => (
+                    <tr key={d.driverId} className="hover:bg-slate-50 transition">
+                      <td className="py-3 px-4 font-mono tabular-nums font-bold text-slate-900">#{d.ranking}</td>
+                      <td className="py-3 px-4 font-semibold text-slate-900 whitespace-nowrap">{d.driverName}</td>
+                      <td className="py-3 px-4 text-right font-mono tabular-nums">{d.totalTrips}x</td>
+                      <td className="py-3 px-4 text-right font-mono tabular-nums font-semibold text-blue-600">
+                        {d.totalDistanceKm.toLocaleString('id-ID')} KM
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono tabular-nums">{d.totalLiters.toLocaleString('id-ID')} L</td>
+                      <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-slate-900">
+                        {d.avgKmPerLiter}
+                      </td>
+                      <td className="py-3 px-4 text-center font-mono tabular-nums font-bold text-slate-900">
+                        {d.ecoDrivingScore}/100
+                      </td>
+                      <td className="py-3 px-4 text-center whitespace-nowrap">
+                        <span
+                          className={`px-2.5 py-0.5 rounded-md text-xs font-semibold border inline-flex items-center gap-1 ${
+                            d.badge === 'Master Eco-Driver'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : d.badge === 'Driver Efisien'
+                              ? 'bg-blue-50 text-blue-700 border-blue-200'
+                              : 'bg-amber-50 text-amber-700 border-amber-200'
+                          }`}
+                        >
+                          <Award className="w-3 h-3" />
+                          {d.badge}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-xs text-slate-600 max-w-xs">{d.recommendation}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* =================================================================== */}
+      {/* TAB 6: AUDIT RIWAYAT BBM                                            */}
+      {/* =================================================================== */}
+      {activeTab === 'logs' && (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <div className="p-5 border-b border-slate-200 space-y-3">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Audit Riwayat Pengisian BBM ({filteredLogs.length})
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Baris bertanda <span className="font-semibold text-blue-600">Portal KM</span> memakai jarak otomatis dari KM Awal &amp; KM Akhir driver.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={openAddFuelModal}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition cursor-pointer self-start lg:self-auto"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Tambah Log BBM</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2.5">
+              <div className="relative lg:col-span-2">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Cari plat, inisial, driver, SPBU, atau area..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-blue-600 focus:bg-white"
+                />
+              </div>
+
+              <select
+                value={filterFleetId}
+                onChange={e => setFilterFleetId(e.target.value)}
+                aria-label="Filter Armada"
+                className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:border-blue-600 cursor-pointer"
+              >
+                <option value="all">Semua Armada</option>
+                {branchScopedFleets.map(f => (
+                  <option key={f.id} value={f.id}>
+                    {f.initialCode || f.plateNumber} ({f.plateNumber})
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={filterSpbu}
+                onChange={e => setFilterSpbu(e.target.value as typeof filterSpbu)}
+                aria-label="Filter SPBU"
+                className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:border-blue-600 cursor-pointer"
+              >
+                <option value="all">Semua SPBU</option>
+                <option value="Farly">SPBU Farly</option>
+                <option value="Gajah Mada">SPBU Gajah Mada</option>
+                <option value="SPBU Lain">SPBU Lain</option>
+              </select>
+
+              <select
+                value={filterStatus}
+                onChange={e => setFilterStatus(e.target.value)}
+                aria-label="Filter Status"
+                className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:border-blue-600 cursor-pointer"
+              >
+                <option value="all">Semua Status</option>
+                <option value="Sangat Efisien">Sangat Efisien</option>
+                <option value="Efisien / Normal">Efisien / Normal</option>
+                <option value="Boros">Boros</option>
+                <option value="Kritis / Potensi Anomali">Kritis / Potensi Anomali</option>
+              </select>
+
+              <select
+                value={logSortBy}
+                onChange={e => setLogSortBy(e.target.value as typeof logSortBy)}
+                aria-label="Urutkan Log"
+                className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:border-blue-600 cursor-pointer"
+              >
+                <option value="date_desc">Tanggal Terbaru</option>
+                <option value="date_asc">Tanggal Terlama</option>
+                <option value="efficient_asc">Rasio Paling Hemat</option>
+                <option value="wasteful_desc">Rasio Paling Boros</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm text-slate-700">
+              <thead className="bg-slate-50 text-xs font-semibold text-slate-500 border-b border-slate-200 whitespace-nowrap">
+                <tr>
+                  <th className="py-3 px-3.5">Tanggal</th>
+                  <th className="py-3 px-3.5">Armada</th>
+                  <th className="py-3 px-3.5">Driver &amp; Helper</th>
+                  <th className="py-3 px-3.5">Area &amp; SPBU</th>
+                  <th className="py-3 px-3.5 text-right">Volume &amp; Biaya</th>
+                  <th className="py-3 px-3.5 text-right">KM Awal – Akhir</th>
+                  <th className="py-3 px-3.5 text-right">Jarak (KM)</th>
+                  <th className="py-3 px-3.5 text-right">Rasio</th>
+                  <th className="py-3 px-3.5 text-center">Status</th>
+                  <th className="py-3 px-3.5 text-center">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {paginatedLogs.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="py-12 text-center text-sm text-slate-500">
+                      Tidak ada catatan BBM yang sesuai filter pencarian.
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedLogs.map(log => (
+                    <tr key={log.id} className="hover:bg-slate-50/80 transition">
+                      <td className="py-3 px-3.5 font-mono tabular-nums text-xs text-slate-700 whitespace-nowrap">
+                        {log.date}
+                      </td>
+                      <td className="py-3 px-3.5 whitespace-nowrap">
+                        <div className="font-semibold text-slate-900">{log.initialCode || log.plateNumber}</div>
+                        <div className="text-xs text-slate-500 font-mono">{log.plateNumber}</div>
+                      </td>
+                      <td className="py-3 px-3.5 whitespace-nowrap">
+                        <div className="font-medium text-slate-900 text-xs">{log.driverName}</div>
+                        {log.helperName && (
+                          <div className="text-xs text-slate-500">Helper: {log.helperName}</div>
+                        )}
+                      </td>
+                      <td className="py-3 px-3.5 max-w-[190px]">
+                        <div className="text-xs font-medium text-slate-800 truncate">{log.routeTrip || '-'}</div>
+                        <div className="text-xs text-slate-500 truncate">{log.gasStation}</div>
+                      </td>
+                      <td className="py-3 px-3.5 text-right font-mono tabular-nums whitespace-nowrap">
+                        <div className="font-semibold text-slate-900 text-xs">
+                          {log.liters} L · {log.fuelType}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          Rp {log.totalCost.toLocaleString('id-ID')}
+                        </div>
+                      </td>
+                      <td className="py-3 px-3.5 text-right font-mono tabular-nums text-xs text-slate-600 whitespace-nowrap">
+                        {log.startOdometerKm.toLocaleString('id-ID')} – {log.endOdometerKm.toLocaleString('id-ID')}
+                      </td>
+                      <td className="py-3 px-3.5 text-right font-mono tabular-nums whitespace-nowrap">
+                        <div className="font-bold text-blue-600">{log.distanceKm.toLocaleString('id-ID')} KM</div>
+                        <div className="text-[11px] font-sans text-slate-500">
+                          {log.distanceSource === 'portal' ? 'Portal KM' : 'Input BBM'}
+                        </div>
+                      </td>
+                      <td className="py-3 px-3.5 text-right font-mono tabular-nums whitespace-nowrap">
+                        <div className="font-bold text-slate-900 text-xs">{log.ratioKmPerLiter} KM/L</div>
+                        <div className="text-[11px] text-slate-500">
+                          {log.distanceKm > 0 ? (log.liters / log.distanceKm).toFixed(3) : '0'} L/KM
+                        </div>
+                      </td>
+                      <td className="py-3 px-3.5 text-center whitespace-nowrap">
+                        <span
+                          className={`px-2 py-0.5 rounded-md text-xs font-semibold border inline-block ${
+                            log.efficiencyStatus === 'Sangat Efisien'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : log.efficiencyStatus === 'Efisien / Normal'
+                              ? 'bg-blue-50 text-blue-700 border-blue-200'
+                              : log.efficiencyStatus === 'Boros'
+                              ? 'bg-amber-50 text-amber-700 border-amber-200'
+                              : 'bg-red-50 text-red-700 border-red-200'
+                          }`}
+                        >
+                          {log.efficiencyStatus}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3.5 text-center whitespace-nowrap">
+                        {confirmDeleteId === log.id ? (
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              disabled={deletingLogId === log.id}
+                              onClick={() => handleDeleteLog(log.id)}
+                              className="px-2 py-1 rounded bg-red-600 hover:bg-red-700 text-white text-xs font-semibold cursor-pointer"
+                            >
+                              {deletingLogId === log.id ? '...' : 'Hapus'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteId(null)}
+                              className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer"
+                            >
+                              Batal
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedLogForDetail(log)}
+                              className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 cursor-pointer"
+                              title="Lihat Slip Detail"
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openEditFuelModal(log)}
+                              className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-blue-600 cursor-pointer"
+                              title="Edit Catatan"
+                            >
+                              <Edit className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteId(log.id)}
+                              className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-red-50 text-red-600 cursor-pointer"
+                              title="Hapus Catatan"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {totalLogsPages > 1 && (
+            <div className="px-5 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-xs text-slate-600">
+              <span>
+                Halaman {safeLogsPage} dari {totalLogsPages} ({filteredLogs.length} catatan)
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={safeLogsPage <= 1}
+                  onClick={() => setLogsCurrentPage(p => Math.max(1, p - 1))}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-50 font-semibold cursor-pointer"
+                >
+                  Sebelumnya
+                </button>
+                <button
+                  type="button"
+                  disabled={safeLogsPage >= totalLogsPages}
+                  onClick={() => setLogsCurrentPage(p => Math.min(totalLogsPages, p + 1))}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-50 font-semibold cursor-pointer"
+                >
+                  Berikutnya
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* =================================================================== */}
+      {/* MODAL 1: CATAT / EDIT BBM                                           */}
+      {/* =================================================================== */}
       {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200 my-4">
-            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800 bg-slate-950/70">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-xl bg-amber-500/15 text-amber-400">
-                  <Fuel className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white">
-                    {editingLogId ? 'Edit Catatan Pengisian BBM' : 'Catat Pengisian Bahan Bakar Baru'}
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    Entri data pengisian BBM cabang, driver, helper &amp; kilometer armada.
-                  </p>
-                </div>
+        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
+          <div
+            ref={modalDropdownRef}
+            className="bg-white border border-slate-200 rounded-xl w-full max-w-2xl max-h-[92vh] overflow-y-auto"
+          >
+            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white z-20">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">
+                  {editingLogId ? 'Edit Catatan Pengisian BBM' : 'Catat Pengisian BBM Baru'}
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Otomatis menyinkronkan odometer Portal Driver jika tersedia pada tanggal &amp; armada terpilih.
+                </p>
               </div>
               <button
                 type="button"
                 onClick={() => setIsAddModalOpen(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg transition cursor-pointer"
+                className="p-2 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveFuelLog} className="p-5 space-y-3.5 max-h-[85vh] overflow-y-auto overflow-x-hidden">
-              {/* Filter Cabang Modal */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-950/80 border border-slate-800">
-                <div className="flex items-center gap-2 text-xs text-slate-300 font-semibold">
-                  <Building2 className="w-4 h-4 text-amber-400" />
-                  <span>Cabang Operasional (Kru &amp; Armada):</span>
+            <form onSubmit={handleSaveFuelLog} className="p-5 space-y-4">
+              {formError && (
+                <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-semibold flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{formError}</span>
                 </div>
-                <div className="inline-flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
-                  {([
-                    { id: 'cab-banyuwangi', label: 'Cabang Nusantara' },
-                    { id: 'cab-sidoarjo', label: 'Cabang Sidoarjo' }
-                  ] as const).map(b => (
-                    <button
-                      key={b.id}
-                      type="button"
-                      onClick={() => {
-                        if (formBranchId === b.id) return;
-                        setFormBranchId(b.id);
-                        if (!editingLogId) {
-                          setFormFleetId('');
-                          setFormDriverId('');
-                          setFormDriverName('');
-                          setFormHelperId('');
-                          setFormHelperName('');
-                          setFormStartOdo('');
-                        }
-                        setFleetSearchFilter('');
-                        setDriverSearchFilter('');
-                        setHelperSearchFilter('');
-                      }}
-                      className={`px-3 py-1 rounded-md text-xs font-bold transition cursor-pointer ${
-                        formBranchId === b.id
-                          ? 'bg-amber-500 text-slate-950 shadow-xs'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      {b.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                {/* 1. Custom Searchable Dropdown: Armada Truk (Ketik + Panah Atas/Bawah + Enter) */}
-                <div className="relative min-w-0">
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Armada Truk <span className="text-rose-400">*</span>
-                  </label>
+              {/* Cabang */}
+              <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-lg border border-slate-200">
+                {([
+                  { id: 'cab-banyuwangi', label: 'Cabang Nusantara' },
+                  { id: 'cab-sidoarjo', label: 'Cabang Sidoarjo' }
+                ] as const).map(br => (
                   <button
+                    key={br.id}
                     type="button"
                     onClick={() => {
-                      setIsGasStationDropdownOpen(false);
-                      setActiveModalDropdown(activeModalDropdown === 'fleet' ? null : 'fleet');
-                      setFleetSearchFilter('');
-                      setDropdownHighlightIdx(0);
+                      setFormBranchId(br.id);
+                      setFormFleetId('');
+                      setFormDriverId('');
+                      setFormDriverName('');
+                      setFormHelperId('');
+                      setFormHelperName('');
                     }}
-                    className={`w-full h-10 bg-slate-950/90 hover:bg-slate-900 border ${
-                      activeModalDropdown === 'fleet' ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-800 hover:border-slate-700'
-                    } rounded-xl px-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
+                    className={`py-2 rounded-md text-xs font-semibold transition cursor-pointer ${
+                      formBranchId === br.id
+                        ? 'bg-white text-blue-600 border border-slate-200'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
                   >
-                    <span className="flex items-center gap-2 min-w-0 flex-1">
-                      <span className="w-6 h-6 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
-                        <Truck className="w-3.5 h-3.5" />
-                      </span>
-                      {selectedFormFleet ? (
-                        <span className="truncate font-bold text-white">
-                          {selectedFormFleet.initialCode || selectedFormFleet.plateNumber}{' '}
-                          <span className="text-slate-400 font-normal">({selectedFormFleet.plateNumber})</span>
-                        </span>
-                      ) : (
-                        <span className="truncate text-slate-400">-- Pilih Armada --</span>
-                      )}
+                    {br.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Fleet Selector */}
+                <div className="relative">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Armada Truk *</label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActiveModalDropdown(activeModalDropdown === 'fleet' ? null : 'fleet')
+                    }
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-left text-sm flex items-center justify-between cursor-pointer hover:border-blue-600"
+                  >
+                    <span className={selectedFormFleet ? 'text-slate-900 font-medium' : 'text-slate-400'}>
+                      {selectedFormFleet
+                        ? `${selectedFormFleet.initialCode || selectedFormFleet.plateNumber} (${selectedFormFleet.plateNumber})`
+                        : 'Pilih Armada'}
                     </span>
-                    <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${activeModalDropdown === 'fleet' ? 'rotate-180 text-amber-400' : ''}`} />
+                    <ChevronDown className="w-4 h-4 text-slate-400" />
                   </button>
 
                   {activeModalDropdown === 'fleet' && (
-                    <div className="absolute left-0 top-full mt-1.5 z-50 w-full sm:w-64 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-                      <div className="p-2 bg-slate-950/90 border-b border-slate-800">
-                        <div className="relative">
-                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                          <input
-                            type="text"
-                            autoFocus
-                            value={fleetSearchFilter}
-                            onChange={(e) => {
-                              setFleetSearchFilter(e.target.value);
-                              setDropdownHighlightIdx(0);
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === 'ArrowDown') {
-                                e.preventDefault();
-                                if (filteredModalFleets.length > 0) {
-                                  setDropdownHighlightIdx(prev => (prev + 1) % filteredModalFleets.length);
-                                }
-                              } else if (e.key === 'ArrowUp') {
-                                e.preventDefault();
-                                if (filteredModalFleets.length > 0) {
-                                  setDropdownHighlightIdx(prev => (prev - 1 + filteredModalFleets.length) % filteredModalFleets.length);
-                                }
-                              } else if (e.key === 'Enter') {
-                                e.preventDefault();
-                                const target = filteredModalFleets[Math.min(dropdownHighlightIdx, Math.max(0, filteredModalFleets.length - 1))];
-                                if (target) {
-                                  handleFleetSelection(target.id);
-                                  setActiveModalDropdown(null);
-                                }
-                              } else if (e.key === 'Escape') {
-                                setActiveModalDropdown(null);
-                              }
-                            }}
-                            placeholder="Ketik, panah ↑↓, lalu Enter..."
-                            className="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
-                          />
-                        </div>
+                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+                      <div className="p-2 border-b border-slate-100">
+                        <input
+                          type="text"
+                          value={fleetSearchFilter}
+                          onChange={e => setFleetSearchFilter(e.target.value)}
+                          placeholder="Cari plat atau kode armada..."
+                          className="w-full px-2.5 py-1.5 rounded border border-slate-200 text-xs focus:outline-none focus:border-blue-600"
+                        />
                       </div>
-                      <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60 p-1">
-                        {filteredModalFleets.length === 0 ? (
-                          <div className="p-3 text-center text-[11px] text-slate-400">Armada cabang tidak ditemukan</div>
-                        ) : (
-                          filteredModalFleets.map((f, idx) => {
-                            const isSelected = selectedFormFleet?.id === f.id || formFleetId === f.id;
-                            const isHighlighted = dropdownHighlightIdx === idx;
-                            return (
-                              <button
-                                key={f.id}
-                                type="button"
-                                data-modal-dropdown-active={isHighlighted ? 'true' : undefined}
-                                onMouseEnter={() => setDropdownHighlightIdx(idx)}
-                                onClick={() => {
-                                  handleFleetSelection(f.id);
-                                  setActiveModalDropdown(null);
-                                }}
-                                className={`w-full px-3 py-2 rounded-xl text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                                  isHighlighted
-                                    ? 'bg-amber-500/20 text-amber-300 font-bold ring-1 ring-inset ring-amber-500/40'
-                                    : isSelected
-                                    ? 'bg-amber-500/10 text-amber-300 font-bold'
-                                    : 'text-slate-200 hover:bg-slate-800/60'
-                                }`}
-                              >
-                                <div className="min-w-0">
-                                  <div className="text-xs font-bold flex items-center gap-1.5">
-                                    <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700 font-mono text-[10px] text-amber-400">
-                                      {f.initialCode || f.plateNumber}
-                                    </span>
-                                    <span className="truncate">{f.plateNumber}</span>
-                                  </div>
-                                  <div className="text-[10px] text-slate-400 truncate mt-0.5">
-                                    {f.vehicleType} {f.brand ? `• ${f.brand}` : ''}
-                                  </div>
-                                </div>
-                                {isSelected && <Check className="w-4 h-4 text-amber-400 shrink-0" />}
-                              </button>
-                            );
-                          })
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* 2. Custom Dropdown: Nama Driver (Ketik + Panah Atas/Bawah + Enter) */}
-                <div className="relative min-w-0">
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Nama Driver <span className="text-rose-400">*</span>
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsGasStationDropdownOpen(false);
-                      setActiveModalDropdown(activeModalDropdown === 'driver' ? null : 'driver');
-                      setDriverSearchFilter('');
-                      setDropdownHighlightIdx(0);
-                    }}
-                    className={`w-full h-10 bg-slate-950/90 hover:bg-slate-900 border ${
-                      activeModalDropdown === 'driver' ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-800 hover:border-slate-700'
-                    } rounded-xl px-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
-                  >
-                    <span className="flex items-center gap-2 min-w-0 flex-1">
-                      <span className="w-6 h-6 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0">
-                        <User className="w-3.5 h-3.5" />
-                      </span>
-                      {formDriverName ? (
-                        <span className="truncate font-bold text-white">{formDriverName}</span>
-                      ) : (
-                        <span className="truncate text-slate-400">-- Pilih Driver --</span>
-                      )}
-                    </span>
-                    <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${activeModalDropdown === 'driver' ? 'rotate-180 text-amber-400' : ''}`} />
-                  </button>
-
-                  {activeModalDropdown === 'driver' && (
-                    <div className="absolute left-0 top-full mt-1.5 z-50 w-full sm:w-64 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-                      <div className="p-2 bg-slate-950/90 border-b border-slate-800">
-                        <div className="relative">
-                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                          <input
-                            type="text"
-                            autoFocus
-                            value={driverSearchFilter}
-                            onChange={(e) => {
-                              setDriverSearchFilter(e.target.value);
-                              setDropdownHighlightIdx(0);
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === 'ArrowDown') {
-                                e.preventDefault();
-                                if (filteredDriverOptions.length > 0) {
-                                  setDropdownHighlightIdx(prev => (prev + 1) % filteredDriverOptions.length);
-                                }
-                              } else if (e.key === 'ArrowUp') {
-                                e.preventDefault();
-                                if (filteredDriverOptions.length > 0) {
-                                  setDropdownHighlightIdx(prev => (prev - 1 + filteredDriverOptions.length) % filteredDriverOptions.length);
-                                }
-                              } else if (e.key === 'Enter') {
-                                e.preventDefault();
-                                const target = filteredDriverOptions[Math.min(dropdownHighlightIdx, Math.max(0, filteredDriverOptions.length - 1))];
-                                if (target) {
-                                  setFormDriverName(target.name);
-                                  setFormDriverId(target.id);
-                                  setActiveModalDropdown(null);
-                                }
-                              } else if (e.key === 'Escape') {
-                                setActiveModalDropdown(null);
-                              }
-                            }}
-                            placeholder="Ketik, panah ↑↓, lalu Enter..."
-                            className="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-                          />
-                        </div>
-                      </div>
-                      <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60 p-1">
-                        {filteredDriverOptions.length === 0 ? (
-                          <div className="p-3 text-center text-[11px] text-slate-400">
-                            Tidak ada akun driver terdaftar yang cocok
-                          </div>
-                        ) : (
-                          filteredDriverOptions.map((d, idx) => {
-                            const isSelected = formDriverName === d.name;
-                            const isHighlighted = dropdownHighlightIdx === idx;
-                            return (
-                              <button
-                                key={d.id}
-                                type="button"
-                                data-modal-dropdown-active={isHighlighted ? 'true' : undefined}
-                                onMouseEnter={() => setDropdownHighlightIdx(idx)}
-                                onClick={() => {
-                                  setFormDriverName(d.name);
-                                  setFormDriverId(d.id);
-                                  setActiveModalDropdown(null);
-                                }}
-                                className={`w-full px-3 py-2 rounded-xl text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                                  isHighlighted
-                                    ? 'bg-blue-500/20 text-blue-300 font-bold ring-1 ring-inset ring-blue-500/40'
-                                    : isSelected
-                                    ? 'bg-blue-500/10 text-blue-300 font-bold'
-                                    : 'text-slate-200 hover:bg-slate-800/60'
-                                }`}
-                              >
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <span className="w-5 h-5 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-blue-400 shrink-0">
-                                    {d.name.charAt(0).toUpperCase()}
-                                  </span>
-                                  <span className="text-xs truncate">{d.name}</span>
-                                </div>
-                                {isSelected && (
-                                  <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                                )}
-                              </button>
-                            );
-                          })
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* 3. Custom Dropdown: Nama Helper (Ketik + Panah Atas/Bawah + Enter) */}
-                <div className="relative min-w-0">
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Nama Helper
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsGasStationDropdownOpen(false);
-                      setActiveModalDropdown(activeModalDropdown === 'helper' ? null : 'helper');
-                      setHelperSearchFilter('');
-                      setDropdownHighlightIdx(0);
-                    }}
-                    className={`w-full h-10 bg-slate-950/90 hover:bg-slate-900 border ${
-                      activeModalDropdown === 'helper' ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-800 hover:border-slate-700'
-                    } rounded-xl px-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
-                  >
-                    <span className="flex items-center gap-2 min-w-0 flex-1">
-                      <span className="w-6 h-6 rounded-lg bg-purple-500/15 border border-purple-500/30 flex items-center justify-center text-purple-400 shrink-0">
-                        <User className="w-3.5 h-3.5" />
-                      </span>
-                      {formHelperName ? (
-                        <span className="truncate font-bold text-white">{formHelperName}</span>
-                      ) : (
-                        <span className="truncate text-slate-400">-- Pilih Helper --</span>
-                      )}
-                    </span>
-                    <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${activeModalDropdown === 'helper' ? 'rotate-180 text-amber-400' : ''}`} />
-                  </button>
-
-                  {activeModalDropdown === 'helper' && (
-                    <div className="absolute left-0 top-full mt-1.5 z-50 w-full sm:w-64 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-                      <div className="p-2 bg-slate-950/90 border-b border-slate-800 space-y-1.5">
-                        <div className="relative">
-                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                          <input
-                            type="text"
-                            autoFocus
-                            value={helperSearchFilter}
-                            onChange={(e) => {
-                              setHelperSearchFilter(e.target.value);
-                              setDropdownHighlightIdx(0);
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === 'ArrowDown') {
-                                e.preventDefault();
-                                if (filteredHelperOptions.length > 0) {
-                                  setDropdownHighlightIdx(prev => (prev + 1) % filteredHelperOptions.length);
-                                }
-                              } else if (e.key === 'ArrowUp') {
-                                e.preventDefault();
-                                if (filteredHelperOptions.length > 0) {
-                                  setDropdownHighlightIdx(prev => (prev - 1 + filteredHelperOptions.length) % filteredHelperOptions.length);
-                                }
-                              } else if (e.key === 'Enter') {
-                                e.preventDefault();
-                                const target = filteredHelperOptions[Math.min(dropdownHighlightIdx, Math.max(0, filteredHelperOptions.length - 1))];
-                                if (target) {
-                                  setFormHelperName(target.name);
-                                  setFormHelperId(target.id);
-                                  setActiveModalDropdown(null);
-                                }
-                              } else if (e.key === 'Escape') {
-                                setActiveModalDropdown(null);
-                              }
-                            }}
-                            placeholder="Ketik, panah ↑↓, lalu Enter..."
-                            className="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500"
-                          />
-                        </div>
-                        {formHelperName && (
+                      <div className="max-h-52 overflow-y-auto divide-y divide-slate-100">
+                        {filteredModalFleets.map(f => (
                           <button
+                            key={f.id}
                             type="button"
                             onClick={() => {
-                              setFormHelperName('');
-                              setFormHelperId('');
+                              handleFleetSelection(f.id);
                               setActiveModalDropdown(null);
                             }}
-                            className="w-full text-[10px] text-rose-400 hover:text-rose-300 text-left px-1 font-semibold cursor-pointer"
+                            className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between hover:bg-blue-50 cursor-pointer ${
+                              formFleetId === f.id ? 'bg-blue-50 font-semibold text-blue-700' : 'text-slate-800'
+                            }`}
                           >
-                            &times; Kosongkan Pilihan Helper
+                            <span>
+                              {f.initialCode || f.plateNumber} · <span className="font-mono text-slate-500">{f.plateNumber}</span>
+                            </span>
+                            <span className="text-[11px] text-slate-500">{f.vehicleType}</span>
                           </button>
-                        )}
-                      </div>
-                      <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60 p-1">
-                        {filteredHelperOptions.length === 0 ? (
-                          <div className="p-3 text-center text-[11px] text-slate-400">
-                            Tidak ada akun kru terdaftar yang cocok
-                          </div>
-                        ) : (
-                          filteredHelperOptions.map((d, idx) => {
-                            const isSelected = formHelperName === d.name;
-                            const isHighlighted = dropdownHighlightIdx === idx;
-                            return (
-                              <button
-                                key={`hlp-${d.id}`}
-                                type="button"
-                                data-modal-dropdown-active={isHighlighted ? 'true' : undefined}
-                                onMouseEnter={() => setDropdownHighlightIdx(idx)}
-                                onClick={() => {
-                                  setFormHelperName(d.name);
-                                  setFormHelperId(d.id);
-                                  setActiveModalDropdown(null);
-                                }}
-                                className={`w-full px-3 py-2 rounded-xl text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                                  isHighlighted
-                                    ? 'bg-purple-500/20 text-purple-300 font-bold ring-1 ring-inset ring-purple-500/40'
-                                    : isSelected
-                                    ? 'bg-purple-500/10 text-purple-300 font-bold'
-                                    : 'text-slate-200 hover:bg-slate-800/60'
-                                }`}
-                              >
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <span className="w-5 h-5 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-purple-400 shrink-0">
-                                    {d.name.charAt(0).toUpperCase()}
-                                  </span>
-                                  <span className="text-xs truncate">{d.name}</span>
-                                </div>
-                                {isSelected && (
-                                  <Check className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                                )}
-                              </button>
-                            );
-                          })
-                        )}
+                        ))}
                       </div>
                     </div>
                   )}
                 </div>
 
-                {/* 4. Custom Dropdown: Area Kirim (Ketik + Panah Atas/Bawah + Enter - opens inward from right edge) */}
-                <div className="relative min-w-0">
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Area Kirim <span className="text-rose-400">*</span>
-                  </label>
+                {/* Date Picker */}
+                <div className="relative">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Tanggal Pengisian *</label>
                   <button
                     type="button"
-                    onClick={() => {
-                      setIsGasStationDropdownOpen(false);
-                      setActiveModalDropdown(activeModalDropdown === 'area' ? null : 'area');
-                      setAreaSearchFilter('');
-                      setDropdownHighlightIdx(0);
-                    }}
-                    className={`w-full h-10 bg-slate-950/90 hover:bg-slate-900 border ${
-                      activeModalDropdown === 'area' ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-800 hover:border-slate-700'
-                    } rounded-xl px-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
+                    onClick={() => setActiveModalDropdown(activeModalDropdown === 'date' ? null : 'date')}
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-left text-sm flex items-center justify-between cursor-pointer hover:border-blue-600"
                   >
-                    <span className="flex items-center gap-2 min-w-0 flex-1">
-                      <span className="w-6 h-6 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
-                        <MapPin className="w-3.5 h-3.5" />
-                      </span>
-                      {formRouteTrip ? (
-                        <span className="truncate font-bold text-white">{formRouteTrip}</span>
-                      ) : (
-                        <span className="truncate text-slate-400">-- Pilih Area --</span>
-                      )}
-                    </span>
-                    <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${activeModalDropdown === 'area' ? 'rotate-180 text-amber-400' : ''}`} />
+                    <span className="font-mono text-slate-900">{formDate}</span>
+                    <Calendar className="w-4 h-4 text-slate-400" />
                   </button>
 
-                  {activeModalDropdown === 'area' && (
-                    <div className="absolute right-0 left-auto top-full mt-1.5 z-50 w-full sm:w-64 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-                      <div className="p-2 bg-slate-950/90 border-b border-slate-800 space-y-1.5">
-                        <div className="relative">
-                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                          <input
-                            type="text"
-                            autoFocus
-                            value={areaSearchFilter}
-                            onChange={(e) => {
-                              setAreaSearchFilter(e.target.value);
-                              setDropdownHighlightIdx(0);
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === 'ArrowDown') {
-                                e.preventDefault();
-                                if (filteredAreaOptions.length > 0) {
-                                  setDropdownHighlightIdx(prev => (prev + 1) % filteredAreaOptions.length);
-                                }
-                              } else if (e.key === 'ArrowUp') {
-                                e.preventDefault();
-                                if (filteredAreaOptions.length > 0) {
-                                  setDropdownHighlightIdx(prev => (prev - 1 + filteredAreaOptions.length) % filteredAreaOptions.length);
-                                }
-                              } else if (e.key === 'Enter') {
-                                e.preventDefault();
-                                const target = filteredAreaOptions[Math.min(dropdownHighlightIdx, Math.max(0, filteredAreaOptions.length - 1))];
-                                if (target) {
-                                  setFormRouteTrip(target);
-                                } else if (areaSearchFilter.trim()) {
-                                  setFormRouteTrip(areaSearchFilter.trim());
-                                }
-                                setActiveModalDropdown(null);
-                              } else if (e.key === 'Escape') {
-                                setActiveModalDropdown(null);
-                              }
-                            }}
-                            placeholder="Ketik, panah ↑↓, lalu Enter..."
-                            className="w-full bg-slate-900 border border-slate-700/80 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-                          />
-                        </div>
+                  {activeModalDropdown === 'date' && (
+                    <div className="absolute right-0 top-full mt-1 z-30 w-72 bg-white border border-slate-200 rounded-lg shadow-lg p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={() => setCalendarViewMonth(new Date(calYear, calMonthIdx - 1, 1))}
+                          className="p-1 rounded border border-slate-200 hover:bg-slate-50 cursor-pointer"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <span className="text-xs font-bold text-slate-900">
+                          {MONTHS_FULL_ID[calMonthIdx]} {calYear}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setCalendarViewMonth(new Date(calYear, calMonthIdx + 1, 1))}
+                          className="p-1 rounded border border-slate-200 hover:bg-slate-50 cursor-pointer"
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
                       </div>
-                      <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60 p-1">
-                        {filteredAreaOptions.map((area, idx) => {
-                          const isSelected = formRouteTrip.toLowerCase() === area.toLowerCase();
-                          const isHighlighted = dropdownHighlightIdx === idx;
+                      <div className="grid grid-cols-7 gap-1 text-center">
+                        {['M', 'S', 'S', 'R', 'K', 'J', 'S'].map((d, i) => (
+                          <span key={i} className="text-[10px] font-semibold text-slate-400">{d}</span>
+                        ))}
+                        {calendarCells.map((day, idx) => {
+                          if (day === null) return <div key={`e-${idx}`} />;
+                          const iso = `${calYear}-${String(calMonthIdx + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                           return (
                             <button
-                              key={area}
+                              key={iso}
                               type="button"
-                              data-modal-dropdown-active={isHighlighted ? 'true' : undefined}
-                              onMouseEnter={() => setDropdownHighlightIdx(idx)}
                               onClick={() => {
-                                setFormRouteTrip(area);
+                                setFormDate(iso);
                                 setActiveModalDropdown(null);
                               }}
-                              className={`w-full px-3 py-2 rounded-xl text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                                isHighlighted
-                                  ? 'bg-emerald-500/20 text-emerald-300 font-bold ring-1 ring-inset ring-emerald-500/40'
-                                  : isSelected
-                                  ? 'bg-emerald-500/10 text-emerald-300 font-bold'
-                                  : 'text-slate-200 hover:bg-slate-800/60'
+                              className={`h-7 rounded text-xs font-mono cursor-pointer ${
+                                formDate === iso ? 'bg-blue-600 text-white font-bold' : 'hover:bg-slate-100 text-slate-700'
                               }`}
                             >
-                              <span className="text-xs truncate flex items-center gap-2">
-                                <MapPin className="w-3 h-3 text-emerald-400 shrink-0" />
-                                {area}
-                              </span>
-                              {isSelected && <Check className="w-4 h-4 text-emerald-400 shrink-0" />}
+                              {day}
                             </button>
                           );
                         })}
@@ -3605,461 +2401,315 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     </div>
                   )}
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {/* 4. Modern Interactive Calendar Date Picker: Tanggal Isi */}
-                <div className="relative min-w-0">
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Tanggal Isi <span className="text-rose-400">*</span>
-                  </label>
+                {/* Driver Selector */}
+                <div className="relative">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Driver Bertugas *</label>
                   <button
                     type="button"
-                    onClick={() => {
-                      setIsGasStationDropdownOpen(false);
-                      if (activeModalDropdown !== 'date') {
-                        const parsed = formDate ? new Date(`${formDate}T00:00:00`) : new Date();
-                        if (!isNaN(parsed.getTime())) setCalendarViewMonth(parsed);
-                      }
-                      setActiveModalDropdown(activeModalDropdown === 'date' ? null : 'date');
-                    }}
-                    className={`w-full h-10 bg-slate-950/90 hover:bg-slate-900 border ${
-                      activeModalDropdown === 'date' ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-800 hover:border-slate-700'
-                    } rounded-xl px-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
+                    onClick={() => setActiveModalDropdown(activeModalDropdown === 'driver' ? null : 'driver')}
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-left text-sm flex items-center justify-between cursor-pointer hover:border-blue-600"
                   >
-                    <span className="flex items-center gap-2 min-w-0">
-                      <span className="w-6 h-6 rounded-lg bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
-                        <Calendar className="w-3.5 h-3.5" />
-                      </span>
-                      <span className="font-bold text-white truncate">
-                        {formDate
-                          ? new Date(`${formDate}T00:00:00`).toLocaleDateString('id-ID', {
-                              day: '2-digit',
-                              month: 'short',
-                              year: 'numeric'
-                            })
-                          : 'Pilih Tanggal'}
-                      </span>
+                    <span className={formDriverName ? 'text-slate-900 font-medium' : 'text-slate-400'}>
+                      {formDriverName || 'Pilih Driver'}
                     </span>
-                    <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${activeModalDropdown === 'date' ? 'rotate-180 text-amber-400' : ''}`} />
+                    <ChevronDown className="w-4 h-4 text-slate-400" />
                   </button>
 
-                  {activeModalDropdown === 'date' && (() => {
-                    const year = calendarViewMonth.getFullYear();
-                    const month = calendarViewMonth.getMonth();
-                    const monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
-                    const firstDayIndex = new Date(year, month, 1).getDay();
-                    const daysInMonth = new Date(year, month + 1, 0).getDate();
-                    const todayIso = new Date().toISOString().split('T')[0];
-                    const yesterdayDate = new Date();
-                    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-                    const yesterdayIso = yesterdayDate.toISOString().split('T')[0];
-
-                    const dayCells: (number | null)[] = [];
-                    for (let i = 0; i < firstDayIndex; i++) dayCells.push(null);
-                    for (let d = 1; d <= daysInMonth; d++) dayCells.push(d);
-
-                    return (
-                      <div className="absolute left-0 top-full mt-1.5 z-50 w-72 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl p-3 animate-in fade-in zoom-in-95 duration-150">
-                        {/* Calendar Header */}
-                        <div className="flex items-center justify-between mb-2.5 pb-2 border-b border-slate-800">
-                          <button
-                            type="button"
-                            onClick={() => setCalendarViewMonth(new Date(year, month - 1, 1))}
-                            className="p-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 transition cursor-pointer"
-                          >
-                            <ChevronLeft className="w-3.5 h-3.5" />
-                          </button>
-                          <div className="text-xs font-extrabold text-white tracking-wide">
-                            {monthNames[month]} {year}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setCalendarViewMonth(new Date(year, month + 1, 1))}
-                            className="p-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 transition cursor-pointer"
-                          >
-                            <ChevronRight className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-
-                        {/* Quick Select Buttons */}
-                        <div className="flex items-center gap-1.5 mb-2.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setFormDate(todayIso);
-                              setActiveModalDropdown(null);
-                            }}
-                            className={`flex-1 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
-                              formDate === todayIso
-                                ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300'
-                                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                            }`}
-                          >
-                            Hari Ini
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setFormDate(yesterdayIso);
-                              setActiveModalDropdown(null);
-                            }}
-                            className={`flex-1 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
-                              formDate === yesterdayIso
-                                ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300'
-                                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                            }`}
-                          >
-                            Kemarin
-                          </button>
-                        </div>
-
-                        {/* Day Names */}
-                        <div className="grid grid-cols-7 gap-1 text-center mb-1">
-                          {['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].map(d => (
-                            <div key={d} className="text-[9px] font-bold text-slate-500 uppercase">
-                              {d}
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* Calendar Grid */}
-                        <div className="grid grid-cols-7 gap-1">
-                          {dayCells.map((day, idx) => {
-                            if (day === null) {
-                              return <div key={`empty-${idx}`} className="h-7" />;
-                            }
-                            const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                            const isSelected = formDate === iso;
-                            const isToday = todayIso === iso;
-                            return (
-                              <button
-                                key={iso}
-                                type="button"
-                                onClick={() => {
-                                  setFormDate(iso);
-                                  setActiveModalDropdown(null);
-                                }}
-                                className={`h-7 rounded-lg text-[11px] font-mono font-bold flex items-center justify-center transition cursor-pointer ${
-                                  isSelected
-                                    ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/25'
-                                    : isToday
-                                    ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40'
-                                    : 'text-slate-200 hover:bg-slate-800'
-                                }`}
-                              >
-                                {day}
-                              </button>
-                            );
-                          })}
-                        </div>
+                  {activeModalDropdown === 'driver' && (
+                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+                      <div className="p-2 border-b border-slate-100">
+                        <input
+                          type="text"
+                          value={driverSearchFilter}
+                          onChange={e => setDriverSearchFilter(e.target.value)}
+                          placeholder="Cari nama driver..."
+                          className="w-full px-2.5 py-1.5 rounded border border-slate-200 text-xs focus:outline-none focus:border-blue-600"
+                        />
                       </div>
-                    );
-                  })()}
-                </div>
-
-                {/* 5. Custom Dropdown: Jenis Bahan Bakar */}
-                <div className="relative min-w-0">
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Jenis Bahan Bakar <span className="text-rose-400">*</span>
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsGasStationDropdownOpen(false);
-                      setActiveModalDropdown(activeModalDropdown === 'fuel' ? null : 'fuel');
-                    }}
-                    className={`w-full h-10 bg-slate-950/90 hover:bg-slate-900 border ${
-                      activeModalDropdown === 'fuel' ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-slate-800 hover:border-slate-700'
-                    } rounded-xl px-2.5 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer shadow-inner`}
-                  >
-                    <span className="flex items-center gap-2 min-w-0">
-                      <span className="w-6 h-6 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
-                        <Fuel className="w-3.5 h-3.5" />
-                      </span>
-                      <span className="font-bold text-white truncate">
-                        {formFuelType === 'BioSolar' ? 'Solar (BioSolar Subsidi)' : formFuelType}
-                      </span>
-                    </span>
-                    <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${activeModalDropdown === 'fuel' ? 'rotate-180 text-amber-400' : ''}`} />
-                  </button>
-
-                  {activeModalDropdown === 'fuel' && (
-                    <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-slate-900/95 backdrop-blur-xl border border-slate-700/90 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-                      {([
-                        { value: 'BioSolar' as FuelType, label: 'Solar (BioSolar)', price: STANDARD_FUEL_PRICES['BioSolar'] },
-                        { value: 'Dexlite' as FuelType, label: 'Dexlite', price: STANDARD_FUEL_PRICES['Dexlite'] },
-                        { value: 'Pertamina Dex' as FuelType, label: 'Pertamina Dex', price: STANDARD_FUEL_PRICES['Pertamina Dex'] }
-                      ]).map(opt => {
-                        const isSelected = formFuelType === opt.value;
-                        return (
+                      <div className="max-h-48 overflow-y-auto divide-y divide-slate-100">
+                        {filteredDriverOptions.map(d => (
                           <button
-                            key={opt.value}
+                            key={d.id}
                             type="button"
                             onClick={() => {
-                              handleFuelTypeChange(opt.value);
+                              setFormDriverId(d.id);
+                              setFormDriverName(d.name);
                               setActiveModalDropdown(null);
                             }}
-                            className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 border-b last:border-b-0 border-slate-800/60 transition cursor-pointer ${
-                              isSelected ? 'bg-amber-500/15 text-amber-300 font-bold' : 'hover:bg-slate-800/80 text-slate-200'
-                            }`}
+                            className="w-full px-3 py-2 text-left text-xs flex items-center justify-between hover:bg-blue-50 cursor-pointer"
                           >
-                            <div>
-                              <div className="text-xs font-bold">{opt.label}</div>
-                              <div className="text-[10px] text-slate-400 font-mono">Rp {opt.price.toLocaleString('id-ID')}/L</div>
-                            </div>
-                            {isSelected && <Check className="w-4 h-4 text-amber-400 shrink-0" />}
+                            <span className="font-medium text-slate-900">{d.name}</span>
+                            <span className="text-[11px] text-slate-500">{d.role}</span>
                           </button>
-                        );
-                      })}
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
 
-                <div className="min-w-0">
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Harga per Liter (Rp)
-                  </label>
+                {/* Helper Selector */}
+                <div className="relative">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Helper (Opsional)</label>
+                  <button
+                    type="button"
+                    onClick={() => setActiveModalDropdown(activeModalDropdown === 'helper' ? null : 'helper')}
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-left text-sm flex items-center justify-between cursor-pointer hover:border-blue-600"
+                  >
+                    <span className={formHelperName ? 'text-slate-900 font-medium' : 'text-slate-400'}>
+                      {formHelperName || 'Tanpa Helper'}
+                    </span>
+                    <ChevronDown className="w-4 h-4 text-slate-400" />
+                  </button>
+
+                  {activeModalDropdown === 'helper' && (
+                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+                      <div className="p-2 border-b border-slate-100">
+                        <input
+                          type="text"
+                          value={helperSearchFilter}
+                          onChange={e => setHelperSearchFilter(e.target.value)}
+                          placeholder="Cari nama helper..."
+                          className="w-full px-2.5 py-1.5 rounded border border-slate-200 text-xs focus:outline-none focus:border-blue-600"
+                        />
+                      </div>
+                      <div className="max-h-48 overflow-y-auto divide-y divide-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFormHelperId('');
+                            setFormHelperName('');
+                            setActiveModalDropdown(null);
+                          }}
+                          className="w-full px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-50 cursor-pointer"
+                        >
+                          Tanpa Helper
+                        </button>
+                        {filteredHelperOptions.map(h => (
+                          <button
+                            key={h.id}
+                            type="button"
+                            onClick={() => {
+                              setFormHelperId(h.id);
+                              setFormHelperName(h.name);
+                              setActiveModalDropdown(null);
+                            }}
+                            className="w-full px-3 py-2 text-left text-xs flex items-center justify-between hover:bg-blue-50 cursor-pointer"
+                          >
+                            <span className="font-medium text-slate-900">{h.name}</span>
+                            <span className="text-[11px] text-slate-500">{h.role}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Fuel Type & Price */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Jenis BBM *</label>
+                  <select
+                    value={formFuelType}
+                    onChange={e => handleFuelTypeChange(e.target.value as FuelType)}
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-blue-600 cursor-pointer"
+                  >
+                    {FUEL_TYPES.map(ft => (
+                      <option key={ft} value={ft}>{ft}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Harga per Liter (Rp) *</label>
                   <input
                     type="number"
-                    placeholder="misal 6800"
+                    min="0"
                     value={formCostPerLiter}
-                    onChange={(e) => setFormCostPerLiter(e.target.value)}
-                    required
-                    className="w-full h-10 bg-slate-950/90 border border-slate-800 rounded-xl px-3 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
+                    onChange={e => setFormCostPerLiter(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm font-mono text-slate-900 focus:outline-none focus:border-blue-600"
                   />
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="min-w-0">
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Volume BBM (Liter) <span className="text-rose-400">*</span>
-                  </label>
+                {/* Volume & SPBU */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Volume BBM (Liter) *</label>
                   <input
                     type="number"
                     step="0.1"
-                    placeholder="misal 65"
+                    min="0"
+                    placeholder="Contoh: 25.5"
                     value={formLiters}
-                    onChange={(e) => setFormLiters(e.target.value)}
-                    required
-                    className="w-full h-10 bg-slate-950 border border-slate-800 rounded-xl px-3 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
+                    onChange={e => setFormLiters(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm font-mono text-slate-900 focus:outline-none focus:border-blue-600"
                   />
                 </div>
 
-                <div className="min-w-0">
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Kilometer Awal (KM) <span className="text-rose-400">*</span>
-                  </label>
+                <div className="relative">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">SPBU Pengisian *</label>
                   <input
-                    type="number"
-                    placeholder="Otomatis dari KM isi terakhir"
-                    value={formStartOdo}
-                    onChange={(e) => setFormStartOdo(e.target.value)}
-                    required
-                    className="w-full h-10 bg-slate-950 border border-slate-800 rounded-xl px-3 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
+                    type="text"
+                    value={formGasStation}
+                    onFocus={() => setIsGasStationDropdownOpen(true)}
+                    onChange={e => setFormGasStation(e.target.value)}
+                    placeholder="Nama SPBU"
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-blue-600"
                   />
-                </div>
-
-                <div className="min-w-0">
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Kilometer Isi (KM) <span className="text-rose-400">*</span>
-                  </label>
-                  <input
-                    type="number"
-                    placeholder="Kilometer saat pengisian BBM"
-                    value={formEndOdo}
-                    onChange={(e) => setFormEndOdo(e.target.value)}
-                    required
-                    className="w-full h-10 bg-slate-950 border border-slate-800 rounded-xl px-3 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              {/* LIVE CALCULATION BAR */}
-              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5">
-                <div className="text-[11px] font-bold text-slate-400 flex items-center justify-between">
-                  <span>Kalkulasi Otomatis Sistem:</span>
-                  <span className={`px-2 py-0.5 rounded-md border text-[10px] ${liveFormEfficiency.color}`}>
-                    {liveFormEfficiency.status}
-                  </span>
-                </div>
-                <div className="grid grid-cols-3 gap-2 text-xs">
-                  <div>
-                    <span className="text-slate-400 text-[10px]">Jarak Tempuh:</span>
-                    <div className="font-mono font-bold text-white">{liveFormDistance} KM</div>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 text-[10px]">Total Biaya BBM:</span>
-                    <div className="font-mono font-bold text-emerald-400">Rp {liveFormTotalCost.toLocaleString('id-ID')}</div>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 text-[10px]">Rasio Efisiensi:</span>
-                    <div className="font-mono font-black text-amber-400">{liveFormRatio} KM / Liter</div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="relative min-w-0">
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Lokasi SPBU <span className="text-rose-400">*</span>
-                  </label>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveModalDropdown(null);
-                      setIsGasStationDropdownOpen(prev => !prev);
-                    }}
-                    className={`w-full h-10 bg-slate-950 border rounded-xl px-3 text-xs text-white flex items-center justify-between gap-2 transition cursor-pointer ${
-                      isGasStationDropdownOpen
-                        ? 'border-amber-400 ring-2 ring-amber-500/20'
-                        : 'border-slate-800 hover:border-amber-500/60'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <MapPin
-                        className={`w-3.5 h-3.5 shrink-0 ${
-                          formGasStation.includes('Farly')
-                            ? 'text-amber-400'
-                            : formGasStation.includes('Gajah Mada')
-                            ? 'text-blue-400'
-                            : 'text-rose-400'
-                        }`}
-                      />
-                      <span className="font-bold text-white truncate">
-                        {formGasStation.replace(/^SPBU\s+/i, '')}
-                      </span>
-                      {!formGasStation.includes('Farly') && !formGasStation.includes('Gajah Mada') && (
-                        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold border bg-rose-500/20 text-rose-300 border-rose-500/30">
-                          Urgent
-                        </span>
-                      )}
-                    </div>
-                    <ChevronDown
-                      className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${
-                        isGasStationDropdownOpen ? 'rotate-180 text-amber-400' : ''
-                      }`}
-                    />
-                  </button>
-
                   {isGasStationDropdownOpen && (
-                    <div className="absolute left-0 right-0 bottom-full mb-1.5 z-50 rounded-2xl bg-slate-900 border border-slate-700/90 shadow-2xl overflow-hidden p-1.5 space-y-1 animate-in fade-in zoom-in-95 duration-150">
-                      {[
-                        {
-                          value: 'SPBU Farly',
-                          label: 'Farly',
-                          badge: '',
-                          desc: 'Pos Pengisian Solar Reguler Farly',
-                          badgeCls: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
-                          iconCls: 'text-amber-400 bg-amber-500/15 border-amber-500/30'
-                        },
-                        {
-                          value: 'SPBU Gajah Mada',
-                          label: 'Gajah Mada',
-                          badge: '',
-                          desc: 'Pos Pengisian Solar Gajah Mada',
-                          badgeCls: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
-                          iconCls: 'text-blue-400 bg-blue-500/15 border-blue-500/30'
-                        },
-                        {
-                          value: 'SPBU Lain (Urgent)',
-                          label: 'SPBU Lain (Urgent)',
-                          badge: 'Urgent',
-                          desc: 'Pengisian darurat rute luar kota / lintas pulau',
-                          badgeCls: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
-                          iconCls: 'text-rose-400 bg-rose-500/15 border-rose-500/30'
-                        }
-                      ].map(opt => {
-                        const isSelected = formGasStation === opt.value;
-                        const isFarly = opt.value.includes('Farly');
-                        const isGajahMada = opt.value.includes('Gajah Mada');
-                        const rowCls = isSelected
-                          ? isFarly
-                            ? 'bg-amber-500/20 text-amber-300 ring-1 ring-inset ring-amber-500/40'
-                            : isGajahMada
-                            ? 'bg-blue-500/20 text-blue-300 ring-1 ring-inset ring-blue-500/40'
-                            : 'bg-rose-500/20 text-rose-300 ring-1 ring-inset ring-rose-500/40'
-                          : isFarly
-                          ? 'hover:bg-amber-500/10'
-                          : isGajahMada
-                          ? 'hover:bg-blue-500/10'
-                          : 'hover:bg-rose-500/10';
-                        return (
-                          <button
-                            key={opt.value}
-                            type="button"
-                            onClick={() => {
-                              setFormGasStation(opt.value);
-                              setIsGasStationDropdownOpen(false);
-                            }}
-                            className={`w-full px-2.5 py-2 rounded-xl text-left flex items-center justify-between gap-2 transition cursor-pointer ${rowCls}`}
-                          >
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 border ${opt.iconCls}`}>
-                                <Fuel className="w-3.5 h-3.5" />
-                              </div>
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-xs font-bold text-white truncate">{opt.label}</span>
-                                  {opt.badge && (
-                                    <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${opt.badgeCls}`}>
-                                      {opt.badge}
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="text-[10px] text-slate-400 truncate">{opt.desc}</div>
-                              </div>
-                            </div>
-                            {isSelected && <Check className="w-4 h-4 text-amber-400 shrink-0" />}
-                          </button>
-                        );
-                      })}
+                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-lg divide-y divide-slate-100">
+                      {['SPBU Farly', 'SPBU Gajah Mada', 'SPBU Luar / Urgent'].map(st => (
+                        <button
+                          key={st}
+                          type="button"
+                          onClick={() => {
+                            setFormGasStation(st);
+                            setIsGasStationDropdownOpen(false);
+                          }}
+                          className="w-full px-3 py-2 text-left text-xs text-slate-800 hover:bg-blue-50 flex items-center justify-between cursor-pointer"
+                        >
+                          <span>{st}</span>
+                          {formGasStation === st && <Check className="w-3.5 h-3.5 text-blue-600" />}
+                        </button>
+                      ))}
                     </div>
                   )}
                 </div>
 
-                <div className="min-w-0">
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Catatan (Opsional)
-                  </label>
+                {/* KM Awal & Akhir */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">KM Awal (Berangkat) *</label>
                   <input
-                    type="text"
-                    placeholder="Catatan tambahan pengiriman..."
-                    value={formNotes}
-                    onChange={(e) => setFormNotes(e.target.value)}
-                    className="w-full h-10 bg-slate-950 border border-slate-800 rounded-xl px-3 text-xs text-white focus:border-amber-500 focus:outline-none"
+                    type="number"
+                    min="0"
+                    placeholder="Odometer awal"
+                    value={formStartOdo}
+                    onChange={e => setFormStartOdo(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm font-mono text-slate-900 focus:outline-none focus:border-blue-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">KM Akhir / Isi BBM *</label>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="Odometer saat isi / pulang"
+                    value={formEndOdo}
+                    onChange={e => setFormEndOdo(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm font-mono text-slate-900 focus:outline-none focus:border-blue-600"
+                  />
+                </div>
+
+                {/* Area Tujuan & Muatan */}
+                <div className="relative">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Area / Rute Pengiriman</label>
+                  <button
+                    type="button"
+                    onClick={() => setActiveModalDropdown(activeModalDropdown === 'area' ? null : 'area')}
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-left text-sm flex items-center justify-between cursor-pointer hover:border-blue-600"
+                  >
+                    <span className={formRouteTrip ? 'text-slate-900' : 'text-slate-400'}>
+                      {formRouteTrip || 'Pilih Area Tujuan'}
+                    </span>
+                    <ChevronDown className="w-4 h-4 text-slate-400" />
+                  </button>
+
+                  {activeModalDropdown === 'area' && (
+                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+                      <div className="p-2 border-b border-slate-100">
+                        <input
+                          type="text"
+                          value={areaSearchFilter}
+                          onChange={e => setAreaSearchFilter(e.target.value)}
+                          placeholder="Cari area pengiriman..."
+                          className="w-full px-2.5 py-1.5 rounded border border-slate-200 text-xs focus:outline-none focus:border-blue-600"
+                        />
+                      </div>
+                      <div className="max-h-48 overflow-y-auto divide-y divide-slate-100">
+                        {filteredAreaOptions.map(area => (
+                          <button
+                            key={area}
+                            type="button"
+                            onClick={() => {
+                              setFormRouteTrip(area);
+                              setActiveModalDropdown(null);
+                            }}
+                            className="w-full px-3 py-2 text-left text-xs text-slate-800 hover:bg-blue-50 cursor-pointer"
+                          >
+                            {area}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Muatan (Ton, Opsional)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    placeholder="Contoh: 3.5"
+                    value={formCargoLoadTon}
+                    onChange={e => setFormCargoLoadTon(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm font-mono text-slate-900 focus:outline-none focus:border-blue-600"
                   />
                 </div>
               </div>
 
-              {formError && (
-                <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-semibold flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
-                  <span>{formError}</span>
-                </div>
-              )}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Catatan Tambahan</label>
+                <input
+                  type="text"
+                  placeholder="Contoh: Antre muat atau kondisi jalan..."
+                  value={formNotes}
+                  onChange={e => setFormNotes(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-blue-600"
+                />
+              </div>
 
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+              {/* Live Calculation Summary */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+                <div>
+                  <div className="text-[11px] text-slate-500">Jarak Tempuh</div>
+                  <div className="text-sm font-bold text-slate-900 font-mono tabular-nums">
+                    {liveFormDistance.toLocaleString('id-ID')} KM
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-500">Total Biaya</div>
+                  <div className="text-sm font-bold text-slate-900 font-mono tabular-nums">
+                    Rp {liveFormTotalCost.toLocaleString('id-ID')}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-500">Estimasi Rasio</div>
+                  <div className="text-sm font-bold text-blue-600 font-mono tabular-nums">
+                    {liveFormRatio} KM/L
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-500">Evaluasi</div>
+                  <div className={`text-xs font-semibold px-2 py-0.5 rounded border inline-block mt-0.5 ${liveFormEfficiency.tone}`}>
+                    {liveFormEfficiency.status}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
                 <button
                   type="button"
-                  disabled={isSavingFuelLog}
                   onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 text-xs font-semibold transition cursor-pointer"
+                  className="px-4 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
                   disabled={isSavingFuelLog}
-                  className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 text-xs font-bold shadow-md transition cursor-pointer"
+                  className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition cursor-pointer disabled:opacity-50"
                 >
-                  {isSavingFuelLog
-                    ? 'Menyimpan ke Database...'
-                    : editingLogId
-                    ? 'Simpan Perubahan BBM'
-                    : 'Simpan Catatan BBM'}
+                  {isSavingFuelLog ? 'Menyimpan...' : editingLogId ? 'Simpan Perubahan' : 'Simpan Catatan BBM'}
                 </button>
               </div>
             </form>
@@ -4067,116 +2717,232 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* 8. MODAL: DETAIL / SLIP BUKTI BBM                                         */}
-      {/* ========================================================================= */}
-      {selectedLogForDetail && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950">
-              <div className="flex items-center gap-2">
-                <FileText className="w-5 h-5 text-amber-400" />
-                <h3 className="font-bold text-white text-sm">Slip Bukti Pengisian BBM</h3>
+      {/* =================================================================== */}
+      {/* MODAL 2: KALKULATOR ESTIMASI BBM                                    */}
+      {/* =================================================================== */}
+      {isCalculatorModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-xl w-full max-w-2xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Kalkulator Estimasi Biaya BBM Rute</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Hitung kebutuhan liter dan biaya per KM / per box berdasarkan standar rasio tipe armada.
+                </p>
               </div>
               <button
                 type="button"
-                onClick={() => setSelectedLogForDetail(null)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg cursor-pointer"
+                onClick={() => setIsCalculatorModalOpen(false)}
+                className="p-2 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-5 space-y-4 text-xs">
-              <div className="text-center border-b border-dashed border-slate-800 pb-3">
-                <div className="font-black text-white text-sm">PT ANUGRAH KEMASAN KREATIF</div>
-                <div className="text-[10px] text-slate-400">Divisi Distribusi &amp; Logistik Armada</div>
-                <div className="text-[11px] font-mono text-amber-400 mt-1">
-                  ID LOG: {selectedLogForDetail.id}
+            <div className="p-5 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Preset Rute</label>
+                  <select
+                    value={calcSelectedRoute}
+                    onChange={e => handlePresetRouteChange(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-blue-600"
+                  >
+                    <option value="bwi-sby-pp">Banyuwangi – Surabaya PP (620 KM)</option>
+                    <option value="bwi-mlg-pp">Banyuwangi – Malang PP (560 KM)</option>
+                    <option value="bwi-dps-pp">Banyuwangi – Denpasar PP (340 KM)</option>
+                    <option value="bwi-jbr-pp">Banyuwangi – Jember PP (210 KM)</option>
+                    <option value="bwi-solo-pp">Banyuwangi – Solo PP (820 KM)</option>
+                    <option value="custom">Input Jarak Manual</option>
+                  </select>
                 </div>
-              </div>
 
-              <div className="space-y-2 font-mono">
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Tanggal:</span>
-                  <span className="text-white font-bold">{selectedLogForDetail.date}</span>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Jarak Tempuh (KM)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={calcDistanceKm}
+                    onChange={e => {
+                      setCalcSelectedRoute('custom');
+                      setCalcDistanceKm(Number(e.target.value) || 0);
+                    }}
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm font-mono text-slate-900 focus:outline-none focus:border-blue-600"
+                  />
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Armada:</span>
-                  <span className="text-white font-bold">{selectedLogForDetail.initialCode || selectedLogForDetail.plateNumber} ({selectedLogForDetail.plateNumber})</span>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Tipe Kendaraan</label>
+                  <select
+                    value={calcFleetType}
+                    onChange={e => setCalcFleetType(e.target.value as VehicleType)}
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-blue-600"
+                  >
+                    {(Object.keys(FUEL_TARGET_RATIOS) as VehicleType[]).map(vt => (
+                      <option key={vt} value={vt}>
+                        {vt} (Target {FUEL_TARGET_RATIOS[vt].target} KM/L)
+                      </option>
+                    ))}
+                  </select>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Driver:</span>
-                  <span className="text-white">{selectedLogForDetail.driverName}</span>
-                </div>
-                {selectedLogForDetail.helperName && (
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Helper:</span>
-                    <span className="text-amber-300">{selectedLogForDetail.helperName}</span>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Jenis &amp; Harga BBM</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      value={calcFuelType}
+                      onChange={e => {
+                        const ft = e.target.value as FuelType;
+                        setCalcFuelType(ft);
+                        setCalcCustomPrice(STANDARD_FUEL_PRICES[ft] || 6800);
+                      }}
+                      className="px-2.5 py-2 rounded-lg bg-white border border-slate-200 text-xs text-slate-900 focus:outline-none focus:border-blue-600"
+                    >
+                      {FUEL_TYPES.map(ft => (
+                        <option key={ft} value={ft}>{ft}</option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      min="0"
+                      value={calcCustomPrice}
+                      onChange={e => setCalcCustomPrice(Number(e.target.value) || 0)}
+                      className="px-2.5 py-2 rounded-lg bg-white border border-slate-200 text-xs font-mono text-slate-900 focus:outline-none focus:border-blue-600"
+                    />
                   </div>
-                )}
-                <div className="flex justify-between">
-                  <span className="text-slate-400">SPBU:</span>
-                  <span className="text-white truncate max-w-[200px]" title={selectedLogForDetail.gasStation}>{selectedLogForDetail.gasStation}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Rute:</span>
-                  <span className="text-white truncate max-w-[200px]">{selectedLogForDetail.routeTrip || '-'}</span>
-                </div>
-                <div className="flex justify-between border-t border-slate-800 pt-2">
-                  <span className="text-slate-400">Volume BBM:</span>
-                  <span className="text-white font-bold">{selectedLogForDetail.liters} L ({selectedLogForDetail.fuelType})</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Harga per Liter:</span>
-                  <span className="text-white">Rp {selectedLogForDetail.costPerLiter.toLocaleString('id-ID')}</span>
-                </div>
-                <div className="flex justify-between text-amber-400 font-bold text-sm border-b border-slate-800 pb-2">
-                  <span>TOTAL BIAYA:</span>
-                  <span>Rp {selectedLogForDetail.totalCost.toLocaleString('id-ID')}</span>
-                </div>
-                <div className="flex justify-between text-[11px] pt-1">
-                  <span className="text-slate-400">Jarak Ditempuh:</span>
-                  <span className="text-white font-bold">{selectedLogForDetail.distanceKm} KM (Awal: {selectedLogForDetail.startOdometerKm} - Isi: {selectedLogForDetail.endOdometerKm})</span>
-                </div>
-                <div className="flex justify-between text-[11px]">
-                  <span className="text-slate-400">Rasio Konsumsi:</span>
-                  <span className="text-emerald-400 font-bold">{selectedLogForDetail.ratioKmPerLiter} KM / L</span>
-                </div>
-                <div className="flex justify-between text-[11px]">
-                  <span className="text-slate-400">Status Efisiensi:</span>
-                  <span className="text-amber-400 font-bold">{selectedLogForDetail.efficiencyStatus}</span>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Kapasitas Muatan (Box Kemasan)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={calcCargoBoxes}
+                    onChange={e => setCalcCargoBoxes(Number(e.target.value) || 1)}
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm font-mono text-slate-900 focus:outline-none focus:border-blue-600"
+                  />
                 </div>
               </div>
 
-              {selectedLogForDetail.notes && (
-                <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-300">
-                  <span className="font-semibold text-slate-400">Catatan:</span> {selectedLogForDetail.notes}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
+                <div>
+                  <div className="text-xs text-slate-500">Estimasi BBM</div>
+                  <div className="text-lg font-bold text-slate-900 font-mono tabular-nums">{calcOutput.estLiters} L</div>
+                  <div className="text-[11px] text-slate-500">Target {calcOutput.target} KM/L</div>
                 </div>
-              )}
-
-              <div className="pt-2 flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => window.print()}
-                  className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition cursor-pointer"
-                >
-                  <Printer className="w-4 h-4" />
-                  <span>Cetak Slip Rekap</span>
-                </button>
+                <div>
+                  <div className="text-xs text-slate-500">Estimasi Biaya</div>
+                  <div className="text-lg font-bold text-blue-600 font-mono tabular-nums">
+                    Rp {calcOutput.estTotalCost.toLocaleString('id-ID')}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Biaya per KM</div>
+                  <div className="text-lg font-bold text-slate-900 font-mono tabular-nums">
+                    Rp {calcOutput.costPerKm.toLocaleString('id-ID')}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Biaya per Box</div>
+                  <div className="text-lg font-bold text-slate-900 font-mono tabular-nums">
+                    Rp {calcOutput.costPerBox.toLocaleString('id-ID')}
+                  </div>
+                </div>
               </div>
+            </div>
+
+            <div className="px-5 py-3.5 border-t border-slate-200 bg-slate-50 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsCalculatorModalOpen(false)}
+                className="px-4 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold cursor-pointer"
+              >
+                Tutup
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* 9. MODAL: EXPORT LAPORAN KONSUMSI BBM (PDF / EXCEL)                       */}
-      {/* ========================================================================= */}
+      {/* =================================================================== */}
+      {/* MODAL 3: SLIP DETAIL PENGISIAN BBM                                  */}
+      {/* =================================================================== */}
+      {selectedLogForDetail && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-xl w-full max-w-md overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Slip Bukti Pengisian BBM</h3>
+                <p className="text-xs text-slate-500 font-mono mt-0.5">ID: {selectedLogForDetail.id}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedLogForDetail(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-2.5 text-sm">
+              {[
+                { label: 'Tanggal', value: selectedLogForDetail.date },
+                { label: 'Armada', value: `${selectedLogForDetail.initialCode || selectedLogForDetail.plateNumber} (${selectedLogForDetail.plateNumber})` },
+                { label: 'Driver', value: selectedLogForDetail.driverName },
+                ...(selectedLogForDetail.helperName ? [{ label: 'Helper', value: selectedLogForDetail.helperName }] : []),
+                { label: 'SPBU', value: selectedLogForDetail.gasStation },
+                { label: 'Area Kirim', value: selectedLogForDetail.routeTrip || '-' },
+                { label: 'Volume & Jenis', value: `${selectedLogForDetail.liters} L (${selectedLogForDetail.fuelType})` },
+                { label: 'Total Biaya', value: `Rp ${selectedLogForDetail.totalCost.toLocaleString('id-ID')}` },
+                { label: 'Odometer', value: `${selectedLogForDetail.startOdometerKm} – ${selectedLogForDetail.endOdometerKm} KM` },
+                {
+                  label: 'Jarak & Sumber',
+                  value: `${selectedLogForDetail.distanceKm} KM (${
+                    selectedLogForDetail.distanceSource === 'portal' ? 'Portal Driver' : 'Input BBM'
+                  })`
+                },
+                { label: 'Rasio Aktual', value: `${selectedLogForDetail.ratioKmPerLiter} KM/L` },
+                { label: 'Status', value: selectedLogForDetail.efficiencyStatus }
+              ].map(row => (
+                <div key={row.label} className="flex items-center justify-between gap-4 py-1.5 border-b border-slate-100 last:border-b-0">
+                  <span className="text-xs text-slate-500">{row.label}</span>
+                  <span className="text-xs font-semibold text-slate-900 text-right">{row.value}</span>
+                </div>
+              ))}
+
+              {selectedLogForDetail.notes && (
+                <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700 mt-2">
+                  <span className="font-semibold text-slate-900">Catatan:</span> {selectedLogForDetail.notes}
+                </div>
+              )}
+            </div>
+
+            <div className="px-5 py-3.5 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold cursor-pointer"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Cetak</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedLogForDetail(null)}
+                className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold cursor-pointer"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EXPORT REPORT MODAL */}
       <FuelConsumptionReportModal
         isOpen={isExportModalOpen}
         onClose={() => setIsExportModalOpen(false)}
-        fuelLogs={branchScopedLogs}
+        fuelLogs={reconciledLogs}
       />
     </div>
   );

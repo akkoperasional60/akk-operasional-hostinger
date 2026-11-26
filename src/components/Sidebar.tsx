@@ -18,7 +18,7 @@ import '../styles/akk-driver-helper-clean.css';
 export type NavTab =
   | 'dashboard' | 'driver_portal' | 'driver_reports' | 'analytics_reports'
   | 'operational_dashboard' | 'schedules' | 'portal_validation' | 'integrated_validation' | 'fleets'
-  | 'spareparts' | 'maintenance_costs' | 'fuel_efficiency' | 'crew_history'
+  | 'spareparts' | 'maintenance_costs' | 'fuel_efficiency' | 'km_recap' | 'crew_history'
   | 'fleet_forms' | 'sales_dashboard'
   | 'sales_activities' | 'sales_schedules' | 'sales_loading_duration'
   | 'sales_invoice_so' | 'sales_form_kirim' | 'sales_rfid_scanner'
@@ -96,6 +96,7 @@ const SECTIONS: MenuSection[] = [
     { tab: 'spareparts', label: 'Bengkel & Sparepart' },
     { tab: 'maintenance_costs', label: 'Biaya Servis' },
     { tab: 'fuel_efficiency', label: 'BBM' },
+    { tab: 'km_recap', label: 'Rekap KM Armada', keywords: 'km berangkat pulang odometer jarak' },
     { tab: 'warehouse_fleet_cubication', label: 'Simulasi Muatan' },
   ] },
   { id: 'warehouse', label: 'Gudang', icon: Package, access: u => canAccess(u, 'warehouse'), items: [
