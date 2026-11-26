@@ -406,11 +406,11 @@ export interface DiscountErrorLogItem {
   year: string;
   adminName: string;
   noFakturOrSo: string;
-  customerName: string;
-  expectedDiscount: number; // % atau Rp
-  inputDiscount: number; // % atau Rp
-  selisihNominal: number; // Rp
   keterangan: string;
+  customerName?: string;
+  expectedDiscount?: number;
+  inputDiscount?: number;
+  selisihNominal?: number;
 }
 
 export interface DendaCheckerRecord {

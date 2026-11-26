@@ -4856,11 +4856,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   };
 
   return (
-    <div className="akk-flat-schedule space-y-6">
+    <div className="akk-flat-schedule bg-slate-50 dark:bg-slate-950 p-3 sm:p-5 rounded-2xl space-y-5">
       {activeSubPage === 'schedule' ? (
         <>
       {/* 1. Header Halaman (Bagian Atas): Flat Modern Clean Blue & White */}
-      <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-2xl p-5 sm:p-6">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6">
         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
           <div className="space-y-1">
             <h2 className="text-xl font-bold text-slate-900 dark:text-slate-50 tracking-tight">
@@ -5271,204 +5271,180 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         </div>
       </div>
 
-      {/* Main Content: Split View (Calendar on Left ~5 cols, Details & Standby Crew on Right ~7 cols) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Kolom Kiri: Kalender Pengiriman (~5 Kolom) */}
+      {/* Main Content: Split View (Calendar on Left 5 cols, Details & Standby Crew on Right 7 cols) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        {/* Kolom Kiri: Kalender Pengiriman (5 Kolom) */}
         <div className="lg:col-span-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 space-y-4">
           <div className="flex flex-col gap-3 border-b border-slate-200 dark:border-slate-800 pb-3.5">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0">
                 <Calendar className="w-4 h-4" />
               </div>
-              <div>
-                <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
+              <div className="min-w-0">
+                <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white truncate">
                   Kalender Pengiriman — {selectedMonth === -1 ? `Semua Bulan (${calendarGridData.monthName})` : calendarGridData.monthName} {calendarGridData.year}
                 </h3>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   Klik tanggal untuk melihat rincian pengiriman &amp; kru.
                 </p>
               </div>
             </div>
 
             {!isSidoarjoBranch && (
-              <div className="flex items-center gap-3 flex-wrap text-[11px] font-medium text-slate-600 dark:text-slate-300">
+              <div className="flex items-center gap-4 flex-wrap text-xs font-medium text-slate-600 dark:text-slate-300">
                 <span className="inline-flex items-center gap-1.5" title="Area Banyuwangi">
-                  <span className="w-2 h-2 rounded-full bg-sky-500" />
+                  <span className="w-2.5 h-2.5 rounded-sm bg-sky-500" />
                   <span>Banyuwangi</span>
                 </span>
                 <span className="inline-flex items-center gap-1.5" title="Area Luar Kota">
-                  <span className="w-2 h-2 rounded-full bg-blue-600" />
+                  <span className="w-2.5 h-2.5 rounded-sm bg-blue-600" />
                   <span>Luar Kota</span>
                 </span>
                 <span className="inline-flex items-center gap-1.5" title="Area Bali">
-                  <span className="w-2 h-2 rounded-full bg-indigo-500" />
+                  <span className="w-2.5 h-2.5 rounded-sm bg-indigo-500" />
                   <span>Bali</span>
                 </span>
               </div>
             )}
           </div>
 
-            {/* 7-Column Calendar Grid Header */}
-            <div className="grid grid-cols-7 gap-2 text-center text-[11px] font-bold tracking-wider text-[#64748B] dark:text-[#94A3B8] bg-[#F8FAFC] dark:bg-[#1E293B] py-2.5 rounded-[10px] border border-[#E2E8F0] dark:border-[#24344D]">
-              <div className="text-[#E11D48] dark:text-[#FB7185]">MINGGU</div>
-              <div>SENIN</div>
-              <div>SELASA</div>
-              <div>RABU</div>
-              <div>KAMIS</div>
-              <div>JUMAT</div>
-              <div className="text-[#2563EB] dark:text-[#60A5FA]">SABTU</div>
-            </div>
-
-            {/* Calendar Cells Grid (Flat Blue & White with Generous Padding) */}
-            <div className="grid grid-cols-7 gap-2">
-              {calendarGridData.cells.map((cell, cIdx) => {
-                if (cell.type === 'padding') {
-                  return (
-                    <div key={`pad-${cIdx}`} className="min-h-[82px] sm:min-h-[90px] bg-[#F8FAFC]/60 dark:bg-[#111C2D]/40 rounded-[10px] border border-dashed border-[#E2E8F0] dark:border-[#24344D]" />
-                  );
-                }
-
-                const isSelected = selectedCalendarDate === cell.dateString;
-                const hasDeliveries = cell.totalTrips > 0;
-                const isSunday = cIdx % 7 === 0 || cell.dayName === 'MINGGU';
-
-                return (
-                  <div
-                    key={`cal-cell-${cell.dayNumber}-${cell.dateString}`}
-                    onClick={() => {
-                      if (cell.dateString) {
-                        setSelectedCalendarDate(cell.dateString);
-                        setSelectedDayFilter(cell.dateString);
-                      }
-                    }}
-                    className={`min-h-[82px] sm:min-h-[90px] p-2.5 rounded-[10px] border transition-colors cursor-pointer flex flex-col justify-between select-none ${
-                      isSunday
-                        ? isSelected
-                          ? 'bg-[#FFF1F2] dark:bg-[#4C1D24]/50 border-2 border-[#E11D48]'
-                          : 'bg-[#FFF7F8] dark:bg-[#331820]/30 hover:bg-[#FFF1F2] dark:hover:bg-[#3E1C26]/50 border-[#FECDD3] dark:border-[#6B2737]'
-                        : isSelected
-                        ? 'bg-[#EFF6FF] dark:bg-[#1E3A5F] border-2 border-[#2563EB]'
-                        : hasDeliveries
-                        ? 'bg-white dark:bg-[#162234] hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B] border-[#CBD5E1] dark:border-[#334155] hover:border-[#93C5FD]'
-                        : 'bg-[#FAFCFF] dark:bg-[#111C2D]/60 hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B] border-[#E2E8F0] dark:border-[#24344D]'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-1">
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded-md tabular-nums ${
-                        isSunday
-                          ? isSelected
-                            ? 'bg-[#E11D48] text-white'
-                            : 'text-[#E11D48] dark:text-[#FB7185]'
-                          : isSelected
-                          ? 'bg-[#2563EB] text-white'
-                          : hasDeliveries
-                          ? 'bg-[#EFF6FF] dark:bg-[#1E3A5F] text-[#1D4ED8] dark:text-[#93C5FD]'
-                          : 'text-[#64748B] dark:text-[#94A3B8]'
-                      }`}>
-                        {String(cell.dayNumber).padStart(2, '0')}
-                      </span>
-                      {hasDeliveries && (
-                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md tabular-nums ${
-                          isSunday
-                            ? 'text-[#BE123C] dark:text-[#FDA4AF] bg-[#FFE4E6] dark:bg-[#5E1C2A]'
-                            : 'text-[#1D4ED8] dark:text-[#93C5FD] bg-[#EFF6FF] dark:bg-[#1E3A5F]'
-                        }`}>
-                          {cell.totalTrips} Rit
-                        </span>
-                      )}
-                    </div>
-
-                    {hasDeliveries ? (
-                      isSidoarjoBranch ? (
-                        <div className="space-y-1 mt-1.5">
-                          <div className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-[#EFF6FF] dark:bg-[#1E3A5F] text-[#1D4ED8] dark:text-[#93C5FD] flex items-center justify-between">
-                            <span className="truncate">Area Kirim</span>
-                            <span className="font-mono font-bold tabular-nums">{cell.uniqueAreaCount}</span>
-                          </div>
-                          {cell.areaPreviewList.length > 0 && (
-                            <div className="text-[10px] text-[#64748B] dark:text-[#94A3B8] truncate px-0.5">
-                              {cell.areaPreviewList.slice(0, 2).join(', ')}
-                              {cell.areaPreviewList.length > 2 ? ` +${cell.areaPreviewList.length - 2}` : ''}
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="space-y-1 mt-1.5">
-                          {cell.lokalCount > 0 && (
-                            <div className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#F0F9FF] dark:bg-[#0C4A6E]/50 text-[#0369A1] dark:text-[#7DD3FC] flex items-center justify-between gap-1">
-                              <span className="truncate">Banyuwangi</span>
-                              <span className="font-mono font-bold tabular-nums">{cell.lokalCount}</span>
-                            </div>
-                          )}
-                          {cell.luarKotaCount > 0 && (
-                            <div className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#EFF6FF] dark:bg-[#1E3A5F] text-[#1D4ED8] dark:text-[#93C5FD] flex items-center justify-between gap-1">
-                              <span className="truncate">Luar Kota</span>
-                              <span className="font-mono font-bold tabular-nums">{cell.luarKotaCount}</span>
-                            </div>
-                          )}
-                          {cell.baliCount > 0 && (
-                            <div className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#EEF2FF] dark:bg-[#312E81]/60 text-[#4338CA] dark:text-[#A5B4FC] flex items-center justify-between gap-1">
-                              <span className="truncate">Bali</span>
-                              <span className="font-mono font-bold tabular-nums">{cell.baliCount}</span>
-                            </div>
-                          )}
-                        </div>
-                      )
-                    ) : (
-                      <div className={`text-[11px] text-center py-1 ${
-                        isSunday
-                          ? 'font-semibold text-[#E11D48] dark:text-[#FB7185]'
-                          : 'text-[#94A3B8] dark:text-[#64748B]'
-                      }`}>
-                        {isSunday ? 'Libur' : 'Off'}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+          {/* 7-Column Calendar Grid Header */}
+          <div className="grid grid-cols-7 gap-1.5 text-center text-[10px] font-bold tracking-wider text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800 py-2 rounded-lg border border-slate-200 dark:border-slate-700">
+            <div className="text-rose-600 dark:text-rose-400">MINGGU</div>
+            <div>SENIN</div>
+            <div>SELASA</div>
+            <div>RABU</div>
+            <div>KAMIS</div>
+            <div>JUMAT</div>
+            <div className="text-blue-600 dark:text-blue-400">SABTU</div>
           </div>
-        </div>
 
-        {/* Kolom Kanan: Rincian Pengiriman Terfaktur & Kru Stand By (~7 Kolom) */}
-        <div className="lg:col-span-7 space-y-6">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 space-y-5">
-            {(() => {
-              const allDaysFlat = filteredWeeks.flatMap((w: AdminScheduleWeek) => w.days);
-              const activeDayObj = allDaysFlat.find((d: AdminScheduleDay) => d.dateString === selectedCalendarDate);
-
-              // Collect all Kanvas LKT trips across the active month for the History Kanvas LKT summary
-              const kanvasLktMonthHistory = allDaysFlat.flatMap((d: AdminScheduleDay) =>
-                d.pengiriman
-                  .filter((p: DeliveryAssignment) => standardizeAreaName(p.area).toUpperCase().includes('KANVAS LKT') || p.area.toUpperCase().includes('KANVAS'))
-                  .map((p: DeliveryAssignment) => ({
-                    dayName: d.dayName,
-                    dateString: d.dateString,
-                    dayNumber: d.dayNumber,
-                    ...p
-                  }))
-              );
-
-              if (!activeDayObj || activeDayObj.pengiriman.length === 0) {
+          {/* Calendar Cells Grid */}
+          <div className="grid grid-cols-7 gap-1.5">
+            {calendarGridData.cells.map((cell, cIdx) => {
+              if (cell.type === 'padding') {
                 return (
-                  <div className="py-10 px-6 text-center space-y-2.5">
-                    <div className="w-12 h-12 rounded-xl bg-[#EFF6FF] dark:bg-[#1E3A5F] text-[#2563EB] dark:text-[#60A5FA] flex items-center justify-center mx-auto">
-                      <Calendar className="w-6 h-6" />
-                    </div>
-                    <h4 className="text-sm font-bold text-[#0F172A] dark:text-white">
-                      Tidak Ada Jadwal Pengiriman pada {selectedCalendarDate}
-                    </h4>
-                    <p className="text-xs text-[#64748B] dark:text-[#94A3B8] max-w-md mx-auto">
-                      Silakan klik tanggal lain pada kalender di atas untuk melihat rincian penugasan driver, helper, area kirim, dan armada.
-                    </p>
-                  </div>
+                  <div key={`pad-${cIdx}`} className="min-h-[80px] sm:min-h-[86px] bg-slate-50/70 dark:bg-slate-800/30 rounded-lg border border-dashed border-slate-200 dark:border-slate-800" />
                 );
               }
 
-              let lokalInSelected = 0;
-              let luarKotaInSelected = 0;
-              let baliInSelected = 0;
-              let kanvasLktInSelected = 0;
+              const isSelected = selectedCalendarDate === cell.dateString;
+              const hasDeliveries = cell.totalTrips > 0;
+              const isSunday = cIdx % 7 === 0 || cell.dayName === 'MINGGU';
+
+              return (
+                <div
+                  key={`cal-cell-${cell.dayNumber}-${cell.dateString}`}
+                  onClick={() => {
+                    if (cell.dateString) {
+                      setSelectedCalendarDate(cell.dateString);
+                      setSelectedDayFilter(cell.dateString);
+                    }
+                  }}
+                  className={`min-h-[80px] sm:min-h-[86px] p-1.5 sm:p-2 rounded-lg border transition-colors cursor-pointer flex flex-col justify-between select-none ${
+                    isSunday
+                      ? isSelected
+                        ? 'bg-rose-50 dark:bg-rose-950/40 border-2 border-rose-600'
+                        : 'bg-rose-50/50 dark:bg-rose-950/20 hover:bg-rose-50 dark:hover:bg-rose-950/35 border-rose-200 dark:border-rose-900/50'
+                      : isSelected
+                      ? 'bg-blue-50 dark:bg-blue-950/40 border-2 border-blue-600'
+                      : hasDeliveries
+                      ? 'bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-blue-300'
+                      : 'bg-slate-50/60 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-0.5">
+                    <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded tabular-nums ${
+                      isSunday
+                        ? isSelected
+                          ? 'bg-rose-600 text-white'
+                          : 'text-rose-600 dark:text-rose-400'
+                        : isSelected
+                        ? 'bg-blue-600 text-white'
+                        : hasDeliveries
+                        ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300'
+                        : 'text-slate-500 dark:text-slate-400'
+                    }`}>
+                      {String(cell.dayNumber).padStart(2, '0')}
+                    </span>
+                    {hasDeliveries && (
+                      <span className={`text-[10px] font-semibold px-1 py-0.5 rounded tabular-nums ${
+                        isSunday
+                          ? 'text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-900/50'
+                          : 'text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60'
+                      }`}>
+                        {cell.totalTrips} Rit
+                      </span>
+                    )}
+                  </div>
+
+                  {hasDeliveries ? (
+                    isSidoarjoBranch ? (
+                      <div className="space-y-1 mt-1">
+                        <div className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 flex items-center justify-between">
+                          <span className="truncate">Area</span>
+                          <span className="font-mono font-bold tabular-nums">{cell.uniqueAreaCount}</span>
+                        </div>
+                        {cell.areaPreviewList.length > 0 && (
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate px-0.5">
+                            {cell.areaPreviewList.slice(0, 2).join(', ')}
+                            {cell.areaPreviewList.length > 2 ? ` +${cell.areaPreviewList.length - 2}` : ''}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-0.5 mt-1">
+                        {cell.lokalCount > 0 && (
+                          <div className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 flex items-center justify-between gap-1">
+                            <span className="truncate">Bwi</span>
+                            <span className="font-mono font-bold tabular-nums">{cell.lokalCount}</span>
+                          </div>
+                        )}
+                        {cell.luarKotaCount > 0 && (
+                          <div className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 flex items-center justify-between gap-1">
+                            <span className="truncate">Luar Kota</span>
+                            <span className="font-mono font-bold tabular-nums">{cell.luarKotaCount}</span>
+                          </div>
+                        )}
+                        {cell.baliCount > 0 && (
+                          <div className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 flex items-center justify-between gap-1">
+                            <span className="truncate">Bali</span>
+                            <span className="font-mono font-bold tabular-nums">{cell.baliCount}</span>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  ) : (
+                    <div className={`text-[11px] text-center py-1 ${
+                      isSunday
+                        ? 'font-semibold text-rose-600 dark:text-rose-400'
+                        : 'text-slate-400 dark:text-slate-500'
+                    }`}>
+                      {isSunday ? 'Libur' : 'Off'}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Kolom Kanan: Rincian Pengiriman Terfaktur & Kru Free / Stand By Gudang DC (7 Kolom) */}
+        <div className="lg:col-span-7 min-w-0 space-y-5">
+          {(() => {
+            const allDaysFlat = filteredWeeks.flatMap((w: AdminScheduleWeek) => w.days);
+            const activeDayObj = allDaysFlat.find((d: AdminScheduleDay) => d.dateString === selectedCalendarDate);
+            const standbyDataTop = computeDayCrewStandbyBreakdown(activeDayObj);
+            const hasTripsOnActiveDay = Boolean(activeDayObj && activeDayObj.pengiriman.length > 0);
+            const displayDateHeading = activeDayObj
+              ? `${activeDayObj.dayName}, ${activeDayObj.dateString}`
+              : (selectedCalendarDate || 'Tanggal Terpilih');
+
+            let lokalInSelected = 0;
+            let luarKotaInSelected = 0;
+            let baliInSelected = 0;
+            let kanvasLktInSelected = 0;
+            if (activeDayObj) {
               activeDayObj.pengiriman.forEach((p: DeliveryAssignment) => {
                 const std = standardizeAreaName(p.area).toUpperCase();
                 if (std.includes('KANVAS LKT') || (p.area || '').toUpperCase().includes('KANVAS')) {
@@ -5484,133 +5460,137 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   lokalInSelected++;
                 }
               });
+            }
 
-              const storeSchedules = logisticsStore.getSchedules();
+            const storeSchedules = logisticsStore.getSchedules();
 
-              const filteredPengiriman = activeDayObj.pengiriman.filter((p: DeliveryAssignment) => {
-                const standardArea = standardizeAreaName(p.area).toUpperCase();
-                const isKanvasLkt = standardArea.includes('KANVAS LKT') || (p.area || '').toUpperCase().includes('KANVAS');
-                const isBali = isAreaBaliSchedule(p.area);
-                const isLuarKota = isAreaLuarKotaSchedule(p.area);
-                const isBanyuwangi = isAreaBanyuwangiSchedule(p.area);
+            const filteredPengiriman = activeDayObj
+              ? activeDayObj.pengiriman.filter((p: DeliveryAssignment) => {
+                  const standardArea = standardizeAreaName(p.area).toUpperCase();
+                  const isKanvasLkt = standardArea.includes('KANVAS LKT') || (p.area || '').toUpperCase().includes('KANVAS');
+                  const isBali = isAreaBaliSchedule(p.area);
+                  const isLuarKota = isAreaLuarKotaSchedule(p.area);
+                  const isBanyuwangi = isAreaBanyuwangiSchedule(p.area);
 
-                if (categoryFilter === 'kanvas_lkt' && !isKanvasLkt) return false;
-                if (categoryFilter === 'lokal' && !isBanyuwangi) return false;
-                if (categoryFilter === 'luar_kota' && !isLuarKota) return false;
-                if (categoryFilter === 'bali' && !isBali) return false;
+                  if (categoryFilter === 'kanvas_lkt' && !isKanvasLkt) return false;
+                  if (categoryFilter === 'lokal' && !isBanyuwangi) return false;
+                  if (categoryFilter === 'luar_kota' && !isLuarKota) return false;
+                  if (categoryFilter === 'bali' && !isBali) return false;
 
-                if (searchQuery.trim()) {
-                  const q = searchQuery.toLowerCase().trim();
-                  const matchDriver = (p.driver || '').toLowerCase().includes(q);
-                  const matchHelper = (p.helper || '').toLowerCase().includes(q);
-                  const matchHelper2 = (p.helper2 || '').toLowerCase().includes(q);
-                  const matchArea = (p.area || '').toLowerCase().includes(q);
-                  const matchArmada = (p.armada || '').toLowerCase().includes(q);
-                  if (!matchDriver && !matchHelper && !matchHelper2 && !matchArea && !matchArmada) {
+                  if (searchQuery.trim()) {
+                    const q = searchQuery.toLowerCase().trim();
+                    const matchDriver = (p.driver || '').toLowerCase().includes(q);
+                    const matchHelper = (p.helper || '').toLowerCase().includes(q);
+                    const matchHelper2 = (p.helper2 || '').toLowerCase().includes(q);
+                    const matchArea = (p.area || '').toLowerCase().includes(q);
+                    const matchArmada = (p.armada || '').toLowerCase().includes(q);
+                    if (!matchDriver && !matchHelper && !matchHelper2 && !matchArea && !matchArmada) {
+                      return false;
+                    }
+                  }
+
+                  if (armadaFilter !== 'all' && p.armada !== armadaFilter) {
                     return false;
                   }
-                }
 
-                if (armadaFilter !== 'all' && p.armada !== armadaFilter) {
-                  return false;
-                }
+                  if (crewDriverFilter !== 'all' && p.driver !== crewDriverFilter) {
+                    return false;
+                  }
 
-                if (crewDriverFilter !== 'all' && p.driver !== crewDriverFilter) {
-                  return false;
-                }
-
-                if (scheduleStatusFilter !== 'all') {
-                  const activeDayMoIdx = MONTH_NAMES.findIndex(m =>
-                    (activeDayObj.dateString || '').toLowerCase().includes(m.toLowerCase())
-                  );
-                  const dayMo = activeDayMoIdx >= 0
-                    ? activeDayMoIdx
-                    : (selectedMonth === -1 ? new Date().getMonth() : selectedMonth);
-                  const rowDateIso = `${selectedYear}-${String(dayMo + 1).padStart(2, '0')}-${String(activeDayObj.dayNumber).padStart(2, '0')}`;
-                  const pFleet = logisticsStore.findFleetByCodeOrPlate(p.armada);
-                  const sameFleetOnDay = activeDayObj.pengiriman.filter(item => {
-                    const fItem = logisticsStore.findFleetByCodeOrPlate(item.armada);
-                    if (pFleet && fItem) return pFleet.id === fItem.id;
-                    return (item.armada || '').trim().toUpperCase() === (p.armada || '').trim().toUpperCase();
-                  }).length;
-                  const matched = storeSchedules.find(s => {
-                    if (p.id && s.id === p.id) return true;
-                    const sDate = getScheduleCalendarDateObj(s);
-                    const sameDay = Boolean(
-                      logisticsStore.doesScheduleCoverDate(s, rowDateIso) ||
-                      (sDate &&
-                        !isNaN(sDate.getTime()) &&
-                        sDate.getDate() === activeDayObj.dayNumber &&
-                        sDate.getMonth() === dayMo &&
-                        sDate.getFullYear() === selectedYear)
+                  if (scheduleStatusFilter !== 'all') {
+                    const activeDayMoIdx = MONTH_NAMES.findIndex(m =>
+                      (activeDayObj.dateString || '').toLowerCase().includes(m.toLowerCase())
                     );
-                    if (!sameDay) return false;
-                    const armadaMatches = pFleet
-                      ? logisticsStore.matchesFleetSchedule(pFleet, s)
-                      : (s.armada || s.fleet?.initialCode || '').trim().toUpperCase() === (p.armada || '').trim().toUpperCase();
-                    const areaMatches = (s.areaName || '').trim().toUpperCase() === standardizeAreaName(p.area).trim().toUpperCase();
-                    const driverMatches = Boolean(s.crew?.name && p.driver && isSameCrewPerson(s.crew.name, p.driver));
-                    if (armadaMatches && (areaMatches || driverMatches || sameFleetOnDay === 1)) return true;
-                    if (areaMatches && driverMatches) return true;
-                    return false;
-                  });
-                  const effStatus: ShipmentStatus = matched?.status || 'scheduled';
-                  if (effStatus !== scheduleStatusFilter) {
-                    return false;
+                    const dayMo = activeDayMoIdx >= 0
+                      ? activeDayMoIdx
+                      : (selectedMonth === -1 ? new Date().getMonth() : selectedMonth);
+                    const rowDateIso = `${selectedYear}-${String(dayMo + 1).padStart(2, '0')}-${String(activeDayObj.dayNumber).padStart(2, '0')}`;
+                    const pFleet = logisticsStore.findFleetByCodeOrPlate(p.armada);
+                    const sameFleetOnDay = activeDayObj.pengiriman.filter(item => {
+                      const fItem = logisticsStore.findFleetByCodeOrPlate(item.armada);
+                      if (pFleet && fItem) return pFleet.id === fItem.id;
+                      return (item.armada || '').trim().toUpperCase() === (p.armada || '').trim().toUpperCase();
+                    }).length;
+                    const matched = storeSchedules.find(s => {
+                      if (p.id && s.id === p.id) return true;
+                      const sDate = getScheduleCalendarDateObj(s);
+                      const sameDay = Boolean(
+                        logisticsStore.doesScheduleCoverDate(s, rowDateIso) ||
+                        (sDate &&
+                          !isNaN(sDate.getTime()) &&
+                          sDate.getDate() === activeDayObj.dayNumber &&
+                          sDate.getMonth() === dayMo &&
+                          sDate.getFullYear() === selectedYear)
+                      );
+                      if (!sameDay) return false;
+                      const armadaMatches = pFleet
+                        ? logisticsStore.matchesFleetSchedule(pFleet, s)
+                        : (s.armada || s.fleet?.initialCode || '').trim().toUpperCase() === (p.armada || '').trim().toUpperCase();
+                      const areaMatches = (s.areaName || '').trim().toUpperCase() === standardizeAreaName(p.area).trim().toUpperCase();
+                      const driverMatches = Boolean(s.crew?.name && p.driver && isSameCrewPerson(s.crew.name, p.driver));
+                      if (armadaMatches && (areaMatches || driverMatches || sameFleetOnDay === 1)) return true;
+                      if (areaMatches && driverMatches) return true;
+                      return false;
+                    });
+                    const effStatus: ShipmentStatus = matched?.status || 'scheduled';
+                    if (effStatus !== scheduleStatusFilter) {
+                      return false;
+                    }
                   }
-                }
 
-                return true;
-              });
+                  return true;
+                })
+              : [];
 
-              const dayArmadaCounts = new Map<string, number>();
+            const dayArmadaCounts = new Map<string, number>();
+            if (activeDayObj) {
               activeDayObj.pengiriman.forEach(item => {
                 const fItem = logisticsStore.findFleetByCodeOrPlate(item.armada);
                 const key = (fItem?.id || item.armada || '').trim().toUpperCase();
                 if (key) dayArmadaCounts.set(key, (dayArmadaCounts.get(key) || 0) + 1);
               });
+            }
 
-              const standbyDataTop = computeDayCrewStandbyBreakdown(activeDayObj);
-
-              return (
-                <div className="space-y-6">
-                  {/* 1. Rincian Pengiriman Terfaktur */}
-                  <div className="space-y-4">
-                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-[10px] bg-[#2563EB] text-white flex items-center justify-center shrink-0">
-                          <Calendar className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <span className="text-[11px] font-semibold text-[#2563EB] dark:text-[#60A5FA] block">
-                            Rincian Pengiriman Terfaktur
-                          </span>
-                          <h3 className="text-sm sm:text-base font-bold text-[#0F172A] dark:text-white">
-                            {activeDayObj.dayName}, {activeDayObj.dateString}
-                          </h3>
-                        </div>
+            return (
+              <>
+                {/* Kartu A: Rincian Pengiriman Terfaktur (Tanggal Terpilih) */}
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 space-y-4">
+                  <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-3.5">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0">
+                        <Calendar className="w-4 h-4" />
                       </div>
+                      <div className="min-w-0">
+                        <span className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 block">
+                          Rincian Pengiriman Terfaktur
+                        </span>
+                        <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white truncate">
+                          {displayDateHeading}
+                        </h3>
+                      </div>
+                    </div>
 
+                    {hasTripsOnActiveDay && activeDayObj && (
                       <div className="flex items-center gap-2 flex-wrap">
                         {isSidoarjoBranch ? (
-                          <div className="flex items-center gap-4 text-xs font-semibold text-[#475569] dark:text-[#CBD5E1]">
+                          <div className="flex items-center gap-3 text-xs font-semibold text-slate-600 dark:text-slate-300">
                             <span className="tabular-nums">
-                              Total Kirim: <strong className="text-[#0F172A] dark:text-white">{activeDayObj.pengiriman.length} Rit</strong>
+                              Total Kirim: <strong className="text-slate-900 dark:text-white">{activeDayObj.pengiriman.length} Rit</strong>
                             </span>
-                            <span aria-hidden="true" className="text-[#CBD5E1] dark:text-[#475569]">·</span>
+                            <span aria-hidden="true" className="text-slate-300 dark:text-slate-600">·</span>
                             <span className="tabular-nums">
-                              Total Area Kirim: <strong className="text-[#2563EB] dark:text-[#60A5FA]">{new Set(activeDayObj.pengiriman.map(item => standardizeAreaName(item.area, effectiveActiveBranchId).toUpperCase())).size} Area</strong>
+                              Total Area: <strong className="text-blue-600 dark:text-blue-400">{new Set(activeDayObj.pengiriman.map(item => standardizeAreaName(item.area, effectiveActiveBranchId).toUpperCase())).size} Area</strong>
                             </span>
                           </div>
                         ) : (
-                          <div className="inline-flex items-center gap-1 p-1 bg-[#F1F5F9] dark:bg-[#1E293B] rounded-[10px] flex-wrap">
+                          <div className="inline-flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-lg flex-wrap">
                             <button
                               type="button"
                               onClick={() => setCategoryFilter('all')}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                              className={`px-2.5 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                                 categoryFilter === 'all'
-                                  ? 'bg-[#2563EB] text-white'
-                                  : 'text-[#475569] dark:text-[#94A3B8] hover:text-[#0F172A] dark:hover:text-white hover:bg-white dark:hover:bg-[#273549]'
+                                  ? 'bg-blue-600 text-white'
+                                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white dark:hover:bg-slate-700'
                               }`}
                             >
                               Semua ({activeDayObj.pengiriman.length})
@@ -5619,10 +5599,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               type="button"
                               onClick={() => setCategoryFilter(categoryFilter === 'lokal' ? 'all' : 'lokal')}
                               title="Selain jadwal Luar Kota & Bali termasuk Area Banyuwangi"
-                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                              className={`px-2.5 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                                 categoryFilter === 'lokal'
-                                  ? 'bg-[#2563EB] text-white'
-                                  : 'text-[#475569] dark:text-[#94A3B8] hover:text-[#0F172A] dark:hover:text-white hover:bg-white dark:hover:bg-[#273549]'
+                                  ? 'bg-blue-600 text-white'
+                                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white dark:hover:bg-slate-700'
                               }`}
                             >
                               Banyuwangi ({lokalInSelected})
@@ -5631,10 +5611,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               type="button"
                               onClick={() => setCategoryFilter(categoryFilter === 'luar_kota' ? 'all' : 'luar_kota')}
                               title="Jember Selatan, Jember Barat, Jember Kota, Kanvas LKT, Situbondo, Bondowoso, Susulan Situbondo Bondowoso"
-                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                              className={`px-2.5 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                                 categoryFilter === 'luar_kota'
-                                  ? 'bg-[#2563EB] text-white'
-                                  : 'text-[#475569] dark:text-[#94A3B8] hover:text-[#0F172A] dark:hover:text-white hover:bg-white dark:hover:bg-[#273549]'
+                                  ? 'bg-blue-600 text-white'
+                                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white dark:hover:bg-slate-700'
                               }`}
                             >
                               Luar Kota ({luarKotaInSelected})
@@ -5643,10 +5623,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               type="button"
                               onClick={() => setCategoryFilter(categoryFilter === 'bali' ? 'all' : 'bali')}
                               title="Negara, Singaraja, Denpasar 1, Denpasar 2, Kanvas LKT"
-                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                              className={`px-2.5 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                                 categoryFilter === 'bali'
-                                  ? 'bg-[#2563EB] text-white'
-                                  : 'text-[#475569] dark:text-[#94A3B8] hover:text-[#0F172A] dark:hover:text-white hover:bg-white dark:hover:bg-[#273549]'
+                                  ? 'bg-blue-600 text-white'
+                                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white dark:hover:bg-slate-700'
                               }`}
                             >
                               Bali ({baliInSelected})
@@ -5654,10 +5634,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                             <button
                               type="button"
                               onClick={() => setCategoryFilter(categoryFilter === 'kanvas_lkt' ? 'all' : 'kanvas_lkt')}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                              className={`px-2.5 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                                 categoryFilter === 'kanvas_lkt'
-                                  ? 'bg-[#2563EB] text-white'
-                                  : 'text-[#475569] dark:text-[#94A3B8] hover:text-[#0F172A] dark:hover:text-white hover:bg-white dark:hover:bg-[#273549]'
+                                  ? 'bg-blue-600 text-white'
+                                  : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-white dark:hover:bg-slate-700'
                               }`}
                             >
                               Kanvas LKT ({kanvasLktInSelected})
@@ -5665,31 +5645,42 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                           </div>
                         )}
                       </div>
-                    </div>
+                    )}
+                  </div>
 
-                    {/* Shipment Details Table - Flat Modern Clean Grid */}
-                    <div className="overflow-x-auto rounded-xl border border-[#E2E8F0] dark:border-[#24344D]">
-                      <table className="w-full text-xs text-left border-collapse min-w-[880px]">
+                  {!hasTripsOnActiveDay || !activeDayObj ? (
+                    <div className="py-10 px-6 text-center space-y-2.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-slate-800">
+                      <div className="w-11 h-11 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto">
+                        <Calendar className="w-5 h-5" />
+                      </div>
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                        Tidak Ada Jadwal Pengiriman pada {selectedCalendarDate || 'Tanggal Ini'}
+                      </h4>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+                        Silakan klik tanggal lain pada kalender di sebelah kiri untuk melihat rincian penugasan driver, helper, area kirim, dan armada.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                      <table className="w-full text-left border-collapse min-w-[660px]">
                         <thead>
-                          <tr className="bg-[#F8FAFC] dark:bg-[#1E293B] text-[#475569] dark:text-[#94A3B8] font-bold border-b border-[#E2E8F0] dark:border-[#24344D] uppercase tracking-wider text-[10px]">
-                            <th className="py-3 px-3 text-center w-10">#</th>
-                            <th className="py-3 px-3.5 w-40">Driver</th>
-                            <th className="py-3 px-3.5 w-32">Helper 1</th>
-                            <th className="py-3 px-3.5 w-28">Helper 2</th>
-                            <th className="py-3 px-3.5 w-48">Back Up / Pengganti</th>
-                            <th className="py-3 px-3.5">Kirim Area (Tujuan)</th>
-                            <th className="py-3 px-3.5 w-32">Armada</th>
-                            <th className="py-3 px-3.5 w-32">Status</th>
-                            <th className="py-3 px-3 text-center w-20">Aksi</th>
+                          <tr className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700 uppercase tracking-wider text-[11px]">
+                            <th className="py-3 px-2.5 text-center w-9">#</th>
+                            <th className="py-3 px-3 w-44">Driver</th>
+                            <th className="py-3 px-3 w-44">Helper / Back Up</th>
+                            <th className="py-3 px-3">Area Tujuan</th>
+                            <th className="py-3 px-3 w-28">Armada</th>
+                            <th className="py-3 px-3 w-28">Status</th>
+                            <th className="py-3 px-2.5 text-center w-24">Aksi</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-[#E2E8F0] dark:divide-[#24344D] bg-white dark:bg-[#162234]">
+                        <tbody className="divide-y divide-slate-200 dark:divide-slate-800 bg-white dark:bg-slate-900">
                           {filteredPengiriman.length === 0 ? (
                             <tr>
-                              <td colSpan={9} className="p-8 text-center bg-[#FAFCFF] dark:bg-[#111C2D]">
+                              <td colSpan={7} className="p-8 text-center bg-slate-50 dark:bg-slate-800/40">
                                 <div className="max-w-md mx-auto space-y-2.5">
-                                  <Search className="w-5 h-5 text-[#2563EB] mx-auto" />
-                                  <div className="text-xs font-semibold text-[#334155] dark:text-[#CBD5E1]">
+                                  <Search className="w-5 h-5 text-blue-600 mx-auto" />
+                                  <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
                                     Tidak ada jadwal ritase yang cocok dengan filter
                                   </div>
                                   <button
@@ -5701,7 +5692,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                       setCrewDriverFilter('all');
                                       setCategoryFilter('all');
                                     }}
-                                    className="px-4 py-2 rounded-[10px] text-xs font-semibold bg-[#2563EB] hover:bg-[#1D4ED8] text-white cursor-pointer transition-colors"
+                                    className="px-4 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white cursor-pointer transition-colors"
                                   >
                                     Reset Filter
                                   </button>
@@ -5792,122 +5783,114 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                 : (matchedSch?.status || 'scheduled');
 
                               const statusBadgeConfig: Record<ShipmentStatus, { label: string; bg: string; text: string }> = {
-                                scheduled: { label: 'Terjadwal', bg: 'bg-[#EFF6FF] dark:bg-[#1E3A5F]', text: 'text-[#1D4ED8] dark:text-[#93C5FD]' },
-                                picked_up: { label: 'Telah Dimuat', bg: 'bg-[#FEF3C7] dark:bg-[#451A03]/60', text: 'text-[#B45309] dark:text-[#FCD34D]' },
-                                in_transit: { label: 'Sedang Kirim', bg: 'bg-[#EEF2FF] dark:bg-[#312E81]/60', text: 'text-[#4338CA] dark:text-[#A5B4FC]' },
-                                delivered: { label: 'Terkirim', bg: 'bg-[#ECFDF5] dark:bg-[#064E3B]/60', text: 'text-[#047857] dark:text-[#6EE7B7]' },
-                                delayed: { label: 'Tertunda', bg: 'bg-[#FFF1F2] dark:bg-[#4C1D24]/60', text: 'text-[#BE123C] dark:text-[#FDA4AF]' }
+                                scheduled: { label: 'Terjadwal', bg: 'bg-blue-50 dark:bg-blue-950/60', text: 'text-blue-700 dark:text-blue-300' },
+                                picked_up: { label: 'Telah Dimuat', bg: 'bg-amber-50 dark:bg-amber-950/50', text: 'text-amber-700 dark:text-amber-300' },
+                                in_transit: { label: 'Sedang Kirim', bg: 'bg-indigo-50 dark:bg-indigo-950/50', text: 'text-indigo-700 dark:text-indigo-300' },
+                                delivered: { label: 'Terkirim', bg: 'bg-emerald-50 dark:bg-emerald-950/50', text: 'text-emerald-700 dark:text-emerald-300' },
+                                delayed: { label: 'Tertunda', bg: 'bg-rose-50 dark:bg-rose-950/50', text: 'text-rose-700 dark:text-rose-300' }
                               };
 
                               const cfg = statusBadgeConfig[currentStatus] || statusBadgeConfig.scheduled;
+                              const hasHelper1 = Boolean(p.helper && p.helper !== '-');
+                              const hasHelper2 = Boolean(p.helper2 && p.helper2 !== '-');
 
                               return (
                                 <tr
                                   key={`cal-detail-${pIdx}-${displayDriver}-${p.armada}`}
-                                  className="hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B]/60 transition-colors"
+                                  className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors"
                                 >
-                                  <td className="py-3 px-3 text-center font-semibold text-[#64748B] dark:text-[#94A3B8] text-xs tabular-nums">
+                                  <td className="py-3 px-2.5 text-center font-semibold text-slate-500 dark:text-slate-400 text-xs tabular-nums">
                                     {pIdx + 1}
                                   </td>
 
                                   {/* Driver */}
-                                  <td className="py-3 px-3.5">
+                                  <td className="py-3 px-3">
                                     <div className="flex items-center gap-2.5">
-                                      <div className="w-7 h-7 rounded-full bg-[#EFF6FF] dark:bg-[#1E3A5F] text-[#2563EB] dark:text-[#93C5FD] flex items-center justify-center font-bold text-[10px] shrink-0">
+                                      <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-300 flex items-center justify-center font-bold text-[11px] shrink-0">
                                         {driverInitials}
                                       </div>
-                                      <span className="font-semibold text-[#0F172A] dark:text-white text-xs">
+                                      <span className="font-semibold text-slate-900 dark:text-white text-[13.5px] leading-snug">
                                         {displayDriver}
                                       </span>
                                     </div>
                                   </td>
 
-                                  {/* Helper 1 */}
-                                  <td className="py-3 px-3.5">
-                                    <span className={`font-medium text-xs ${p.helper && p.helper !== '-' ? 'text-[#334155] dark:text-[#E2E8F0]' : 'text-[#94A3B8]'}`}>
-                                      {p.helper || '-'}
-                                    </span>
-                                  </td>
-                                  {/* Helper 2 */}
-                                  <td className="py-3 px-3.5">
-                                    <span className={`font-medium text-xs ${p.helper2 && p.helper2 !== '-' ? 'text-[#334155] dark:text-[#E2E8F0]' : 'text-[#94A3B8]'}`}>
-                                      {p.helper2 || '-'}
-                                    </span>
-                                  </td>
-
-                                  {/* Back Up / Menggantikan */}
-                                  <td className="py-3 px-3.5">
-                                    {backupCrewName ? (
-                                      <div className="flex flex-col gap-1 items-start">
-                                        <div className="inline-flex items-center gap-1.5">
-                                          <span className="w-5 h-5 rounded-full bg-[#FEF3C7] dark:bg-[#451A03] text-[#B45309] dark:text-[#FCD34D] flex items-center justify-center font-bold text-[9px] shrink-0">
-                                            {getDriverInitials(backupCrewName)}
-                                          </span>
-                                          <span className="font-semibold text-[#B45309] dark:text-[#FCD34D] text-xs">
-                                            {backupCrewName}
-                                          </span>
-                                        </div>
-                                        <span className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">
-                                          Menggantikan {backupPosition === 'helper' ? 'Helper 1' : backupPosition === 'helper2' ? 'Helper 2' : 'Driver'} {backupTargetName}
-                                        </span>
-                                        {canEditSchedules && (
-                                          <button
-                                            type="button"
-                                            onClick={() => handleCancelTripReplacement(p)}
-                                            className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-semibold text-[#BE123C] dark:text-[#FDA4AF] bg-[#FFF1F2] dark:bg-[#4C1D24]/60 hover:bg-[#FFE4E6] px-2 py-0.5 rounded-md cursor-pointer transition-colors w-fit"
-                                            title="Batalkan kru pengganti untuk rute ini"
-                                          >
-                                            <XCircle className="w-3 h-3" />
-                                            <span>Batalkan Ganti</span>
-                                          </button>
-                                        )}
+                                  {/* Helper / Back Up */}
+                                  <td className="py-3 px-3">
+                                    <div className="flex flex-col gap-1 items-start">
+                                      <div className="text-[13px] font-medium text-slate-700 dark:text-slate-200 leading-snug">
+                                        {hasHelper1 ? p.helper : <span className="text-slate-400 text-xs">Tanpa Helper</span>}
                                       </div>
-                                    ) : (
-                                      <span className="text-[#94A3B8] text-xs">-</span>
-                                    )}
+                                      {hasHelper2 && (
+                                        <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                                          H2: {p.helper2}
+                                        </div>
+                                      )}
+                                      {backupCrewName && (
+                                        <div className="mt-0.5 flex flex-col gap-1 items-start pt-1 border-t border-slate-100 dark:border-slate-800 w-full">
+                                          <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                                            <span>Back Up: {backupCrewName}</span>
+                                          </div>
+                                          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                                            Ganti {backupPosition === 'helper' ? 'Helper 1' : backupPosition === 'helper2' ? 'Helper 2' : 'Driver'} ({backupTargetName})
+                                          </span>
+                                          {canEditSchedules && (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleCancelTripReplacement(p)}
+                                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 px-2 py-0.5 rounded cursor-pointer transition-colors"
+                                              title="Batalkan kru pengganti untuk rute ini"
+                                            >
+                                              <XCircle className="w-3 h-3" />
+                                              <span>Batalkan Ganti</span>
+                                            </button>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
                                   </td>
 
-                                  {/* Kirim Area */}
-                                  <td className="py-3 px-3.5">
+                                  {/* Area Tujuan */}
+                                  <td className="py-3 px-3">
                                     <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-md ${
+                                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-md ${
                                         isSidoarjoBranch
-                                          ? 'bg-[#F1F5F9] text-[#1E293B] dark:bg-[#1E293B] dark:text-[#E2E8F0]'
+                                          ? 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200'
                                           : isKanvasLkt || isBali
-                                          ? 'bg-[#EEF2FF] text-[#4338CA] dark:bg-[#312E81]/60 dark:text-[#A5B4FC]'
+                                          ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300'
                                           : isLuarKota
-                                          ? 'bg-[#EFF6FF] text-[#1D4ED8] dark:bg-[#1E3A5F] dark:text-[#93C5FD]'
-                                          : 'bg-[#F0F9FF] text-[#0369A1] dark:bg-[#0C4A6E]/50 dark:text-[#7DD3FC]'
+                                          ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300'
+                                          : 'bg-sky-50 text-sky-700 dark:bg-sky-950/50 dark:text-sky-300'
                                       }`}>
                                         {standardArea}
                                       </span>
                                       {isKanvasLkt && (
-                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-[#2563EB] text-white">
+                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-600 text-white">
                                           KANVAS
                                         </span>
                                       )}
                                     </div>
                                   </td>
 
-                                  {/* Armada & Cabang */}
-                                  <td className="py-3 px-3.5">
+                                  {/* Armada */}
+                                  <td className="py-3 px-3">
                                     <div className="flex flex-col gap-1 items-start">
-                                      <span className={`px-2.5 py-1 rounded-md font-mono font-semibold text-[11px] ${
+                                      <span className={`px-2.5 py-1 rounded-md font-mono font-bold text-xs ${
                                         sameFleetDayCount > 1
-                                          ? 'bg-[#FEF3C7] dark:bg-[#451A03]/60 text-[#B45309] dark:text-[#FCD34D]'
-                                          : 'bg-[#F1F5F9] dark:bg-[#1E293B] text-[#0F172A] dark:text-[#E2E8F0]'
+                                          ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300'
+                                          : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100'
                                       }`}>
                                         {p.armada}
                                       </span>
                                       {sameFleetDayCount > 1 && (
-                                        <span className="text-[10px] font-semibold text-[#B45309] dark:text-[#FCD34D]">
+                                        <span className="text-[10px] font-semibold text-amber-700 dark:text-amber-300">
                                           Ganda ({sameFleetDayCount}x)
                                         </span>
                                       )}
                                       {selectedBranchId === 'ALL' && (() => {
                                         const br = branchStore.getScheduleBranch(p.id, p.area, p.armada);
                                         return (
-                                          <span className="text-[10px] font-medium text-[#64748B] dark:text-[#94A3B8]">
+                                          <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
                                             {br.name}
                                           </span>
                                         );
@@ -5916,15 +5899,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                   </td>
 
                                   {/* Status */}
-                                  <td className="py-3 px-3.5">
-                                    <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-semibold ${cfg.bg} ${cfg.text}`}>
+                                  <td className="py-3 px-3">
+                                    <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold whitespace-nowrap ${cfg.bg} ${cfg.text}`}>
                                       {cfg.label}
                                     </span>
                                   </td>
 
                                   {/* Aksi */}
-                                  <td className="py-3 px-3 text-center">
-                                    <div className="flex items-center justify-center gap-1.5">
+                                  <td className="py-3 px-2.5 text-center">
+                                    <div className="flex items-center justify-center gap-1">
                                       {logisticsStore.getCurrentUser()?.role === 'super_admin' && currentStatus !== 'delivered' && (
                                         <button
                                           type="button"
@@ -5933,7 +5916,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                             if (!schId) return;
                                             setBypassConfirmModal({ schId, p, matchedSch });
                                           }}
-                                          className="p-1.5 rounded-lg bg-[#EFF6FF] hover:bg-[#DBEAFE] text-[#2563EB] dark:bg-[#1E3A5F] dark:text-[#60A5FA] transition-colors cursor-pointer"
+                                          className="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 transition-colors cursor-pointer"
                                           title="Tembus & Simpan Selesai Tanpa Checklist (Super Admin)"
                                         >
                                           <Zap className="w-3.5 h-3.5" />
@@ -5944,7 +5927,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                           <button
                                             type="button"
                                             onClick={() => handleOpenEditTripModal(p, activeDayObj.dayNumber, activeDayObj.dateString, pIdx)}
-                                            className="p-1.5 rounded-lg bg-[#EFF6FF] hover:bg-[#DBEAFE] text-[#2563EB] dark:bg-[#1E3A5F] dark:text-[#60A5FA] transition-colors cursor-pointer"
+                                            className="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 transition-colors cursor-pointer"
                                             title="Edit Rincian Pengiriman Ini"
                                           >
                                             <Edit className="w-3.5 h-3.5" />
@@ -5952,14 +5935,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                           <button
                                             type="button"
                                             onClick={() => setDeleteConfirmModal({ p, dayNumber: activeDayObj.dayNumber, tripIndex: pIdx, dateString: activeDayObj.dateString })}
-                                            className="p-1.5 rounded-lg bg-[#FFF1F2] hover:bg-[#FFE4E6] text-[#E11D48] dark:bg-[#4C1D24]/60 dark:text-[#FDA4AF] transition-colors cursor-pointer"
+                                            className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/50 dark:text-rose-300 transition-colors cursor-pointer"
                                             title="Hapus Rincian Pengiriman Ini"
                                           >
                                             <Trash2 className="w-3.5 h-3.5" />
                                           </button>
                                         </>
                                       ) : (
-                                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[#F1F5F9] dark:bg-[#1E293B] text-[#64748B] dark:text-[#94A3B8] text-[10px] font-semibold">
+                                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[11px] font-semibold">
                                           <Eye className="w-3 h-3" />
                                           <span>Lihat</span>
                                         </span>
@@ -5973,183 +5956,184 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                         </tbody>
                       </table>
                     </div>
+                  )}
+                </div>
+
+                {/* Kartu B: Kru Free / Stand By Gudang DC */}
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-3.5">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-9 h-9 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                        <Warehouse className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[11px] font-semibold text-blue-600 dark:text-blue-400">
+                            Kru Free / Stand By Gudang DC
+                          </span>
+                          <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+                            · {standbyDataTop.freeStandbyCrews.length} Kru Stand By
+                          </span>
+                        </div>
+                        <h4 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white truncate">
+                          {displayDateHeading}
+                        </h4>
+                      </div>
+                    </div>
+                    {canEditSchedules && hasTripsOnActiveDay && activeDayObj && standbyDataTop.freeStandbyCrews.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const firstCrew = standbyDataTop.freeStandbyCrews[0];
+                          setReplaceAbsentModal({
+                            isOpen: true,
+                            standbyCrewName: firstCrew.name,
+                            standbyCrewRole: firstCrew.role,
+                            dayNumber: activeDayObj.dayNumber,
+                            dateString: activeDayObj.dateString,
+                            selectedTripIndex: 0,
+                            replacePosition: firstCrew.role === 'Driver' ? 'driver' : 'helper',
+                            absentReason: '',
+                            isRouteDropdownOpen: false,
+                            isCrewDropdownOpen: false,
+                            routeSearchQuery: ''
+                          });
+                        }}
+                        className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-colors cursor-pointer inline-flex items-center gap-2 whitespace-nowrap shrink-0"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span>Pilih &amp; Gantikan Kru Kiriman</span>
+                      </button>
+                    )}
                   </div>
 
-                  {/* 2. Kru Free / Stand By Gudang DC */}
-                  <div className="pt-6 border-t border-[#E2E8F0] dark:border-[#24344D] space-y-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-[10px] bg-[#EFF6FF] dark:bg-[#1E3A5F] text-[#2563EB] dark:text-[#60A5FA] flex items-center justify-center shrink-0">
-                          <Warehouse className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-[11px] font-semibold text-[#2563EB] dark:text-[#60A5FA]">
-                              Kru Free / Stand By Gudang DC
-                            </span>
-                            <span className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">
-                              · Sinkron Portal ({standbyDataTop.freeStandbyCrews.length} Kru Stand By)
-                            </span>
-                          </div>
-                          <h4 className="text-sm sm:text-base font-bold text-[#0F172A] dark:text-white">
-                            {activeDayObj.dayName}, {activeDayObj.dateString}
-                          </h4>
-                        </div>
-                      </div>
-                      {canEditSchedules && standbyDataTop.freeStandbyCrews.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const firstCrew = standbyDataTop.freeStandbyCrews[0];
-                            setReplaceAbsentModal({
-                              isOpen: true,
-                              standbyCrewName: firstCrew.name,
-                              standbyCrewRole: firstCrew.role,
-                              dayNumber: activeDayObj.dayNumber,
-                              dateString: activeDayObj.dateString,
-                              selectedTripIndex: 0,
-                              replacePosition: firstCrew.role === 'Driver' ? 'driver' : 'helper',
-                              absentReason: '',
-                              isRouteDropdownOpen: false,
-                              isCrewDropdownOpen: false,
-                              routeSearchQuery: ''
-                            });
-                          }}
-                          className="px-4 py-2 rounded-[10px] bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-semibold text-xs transition-colors cursor-pointer inline-flex items-center gap-2 shrink-0"
-                        >
-                          <RefreshCw className="w-3.5 h-3.5" />
-                          <span>Pilih &amp; Gantikan Kru Kiriman</span>
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="overflow-x-auto rounded-xl border border-[#E2E8F0] dark:border-[#24344D]">
-                      <table className="w-full text-xs text-left border-collapse min-w-[680px]">
-                        <thead>
-                          <tr className="bg-[#F8FAFC] dark:bg-[#1E293B] text-[#475569] dark:text-[#94A3B8] font-bold border-b border-[#E2E8F0] dark:border-[#24344D] uppercase tracking-wider text-[10px]">
-                            <th className="py-3 px-3 text-center w-10">#</th>
-                            <th className="py-3 px-3.5 w-48">Kru Free / Stand By</th>
-                            <th className="py-3 px-3.5 w-28">Posisi</th>
-                            <th className="py-3 px-3.5">Penugasan Stand By / Area Pengganti</th>
-                            <th className="py-3 px-3.5 w-36">Status</th>
-                            <th className="py-3 px-3 text-center w-32">Aksi Hari H</th>
+                  <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                    <table className="w-full text-left border-collapse min-w-[580px]">
+                      <thead>
+                        <tr className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700 uppercase tracking-wider text-[11px]">
+                          <th className="py-3 px-2.5 text-center w-9">#</th>
+                          <th className="py-3 px-3 w-44">Kru Free / Stand By</th>
+                          <th className="py-3 px-3 w-24">Posisi</th>
+                          <th className="py-3 px-3">Penugasan Stand By / Area Pengganti</th>
+                          <th className="py-3 px-3 w-32">Status</th>
+                          <th className="py-3 px-2.5 text-center w-28">Aksi Hari H</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 dark:divide-slate-800 bg-white dark:bg-slate-900">
+                        {standbyDataTop.freeStandbyCrews.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="py-6 px-4 text-center bg-slate-50 dark:bg-slate-800/40 text-slate-500 dark:text-slate-400 text-xs font-medium">
+                              {selectedBranchId !== 'ALL' && stats.branchCrewCount === 0
+                                ? 'Belum ada personel kru driver/helper yang terdaftar pada cabang ini.'
+                                : 'Seluruh kru aktif telah terjadwal kirim pada tanggal ini.'}
+                            </td>
                           </tr>
-                        </thead>
-                        <tbody className="divide-y divide-[#E2E8F0] dark:divide-[#24344D] bg-white dark:bg-[#162234]">
-                          {standbyDataTop.freeStandbyCrews.length === 0 ? (
-                            <tr>
-                              <td colSpan={6} className="py-6 px-4 text-center bg-[#FAFCFF] dark:bg-[#111C2D] text-[#64748B] dark:text-[#94A3B8] text-xs font-medium">
-                                {selectedBranchId !== 'ALL' && stats.branchCrewCount === 0
-                                  ? 'Belum ada personel kru driver/helper yang terdaftar pada cabang ini.'
-                                  : 'Seluruh kru aktif telah terjadwal kirim pada tanggal ini.'}
-                              </td>
-                            </tr>
-                          ) : (
-                            standbyDataTop.freeStandbyCrews.map((crew, idx) => {
-                              const initials = getDriverInitials(crew.name);
-                              return (
-                                <tr
-                                  key={`free-crew-top-${crew.id}-${idx}`}
-                                  className="hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B]/60 transition-colors"
-                                >
-                                  <td className="py-3 px-3 text-center font-semibold text-[#64748B] dark:text-[#94A3B8] text-xs tabular-nums">
-                                    {idx + 1}
-                                  </td>
-                                  <td className="py-3 px-3.5">
-                                    <div className="flex items-center gap-2.5">
-                                      <div className="w-7 h-7 rounded-full bg-[#EFF6FF] dark:bg-[#1E3A5F] text-[#2563EB] dark:text-[#93C5FD] flex items-center justify-center font-bold text-[10px] shrink-0">
-                                        {initials}
-                                      </div>
-                                      <span className="font-semibold text-[#0F172A] dark:text-white text-xs truncate">
-                                        {crew.name}
-                                      </span>
+                        ) : (
+                          standbyDataTop.freeStandbyCrews.map((crew, idx) => {
+                            const initials = getDriverInitials(crew.name);
+                            return (
+                              <tr
+                                key={`free-crew-top-${crew.id}-${idx}`}
+                                className="hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors"
+                              >
+                                <td className="py-3 px-2.5 text-center font-semibold text-slate-500 dark:text-slate-400 text-xs tabular-nums">
+                                  {idx + 1}
+                                </td>
+                                <td className="py-3 px-3">
+                                  <div className="flex items-center gap-2.5">
+                                    <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-300 flex items-center justify-center font-bold text-[11px] shrink-0">
+                                      {initials}
                                     </div>
-                                  </td>
-                                  <td className="py-3 px-3.5">
-                                    <span className={`px-2.5 py-1 rounded-md text-[11px] font-semibold ${
-                                      crew.role === 'Driver'
-                                        ? 'bg-[#EFF6FF] text-[#1D4ED8] dark:bg-[#1E3A5F] dark:text-[#93C5FD]'
-                                        : 'bg-[#F0F9FF] text-[#0369A1] dark:bg-[#0C4A6E]/50 dark:text-[#7DD3FC]'
-                                    }`}>
-                                      {crew.role}
+                                    <span className="font-semibold text-slate-900 dark:text-white text-[13.5px] truncate">
+                                      {crew.name}
                                     </span>
-                                  </td>
-                                  <td className="py-3 px-3.5">
-                                    <span className={`text-xs ${
-                                      crew.isReplacing
-                                        ? 'text-[#047857] dark:text-[#6EE7B7] font-semibold'
-                                        : 'text-[#475569] dark:text-[#CBD5E1]'
-                                    }`}>
-                                      {crew.warehouseDutyNote}
+                                  </div>
+                                </td>
+                                <td className="py-3 px-3">
+                                  <span className={`px-2.5 py-1 rounded-md text-xs font-semibold ${
+                                    crew.role === 'Driver'
+                                      ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300'
+                                      : 'bg-sky-50 text-sky-700 dark:bg-sky-950/50 dark:text-sky-300'
+                                  }`}>
+                                    {crew.role}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-3">
+                                  <span className={`text-xs ${
+                                    crew.isReplacing
+                                      ? 'text-emerald-700 dark:text-emerald-300 font-semibold'
+                                      : 'text-slate-600 dark:text-slate-300'
+                                  }`}>
+                                    {crew.warehouseDutyNote}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-3">
+                                  {crew.isReplacing ? (
+                                    <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 whitespace-nowrap">
+                                      Menggantikan
                                     </span>
-                                  </td>
-                                  <td className="py-3 px-3.5">
-                                    {crew.isReplacing ? (
-                                      <span className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-semibold bg-[#ECFDF5] dark:bg-[#064E3B]/60 text-[#047857] dark:text-[#6EE7B7]">
-                                        Menggantikan
-                                      </span>
-                                    ) : (
-                                      <span className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-semibold bg-[#EFF6FF] dark:bg-[#1E3A5F] text-[#1D4ED8] dark:text-[#93C5FD]">
-                                        Stand By
-                                      </span>
-                                    )}
-                                  </td>
-                                  <td className="py-3 px-3 text-center">
-                                    {canEditSchedules ? (
-                                      <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                  ) : (
+                                    <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 whitespace-nowrap">
+                                      Stand By
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-3 px-2.5 text-center">
+                                  {canEditSchedules && hasTripsOnActiveDay && activeDayObj ? (
+                                    <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setReplaceAbsentModal({
+                                            isOpen: true,
+                                            standbyCrewName: crew.name,
+                                            standbyCrewRole: crew.role,
+                                            dayNumber: activeDayObj.dayNumber,
+                                            dateString: activeDayObj.dateString,
+                                            selectedTripIndex: 0,
+                                            replacePosition: crew.role === 'Driver' ? 'driver' : 'helper',
+                                            absentReason: '',
+                                            isRouteDropdownOpen: false,
+                                            isCrewDropdownOpen: false,
+                                            routeSearchQuery: ''
+                                          })
+                                        }
+                                        className="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-600 text-blue-700 hover:text-white dark:bg-blue-950/60 dark:text-blue-300 font-semibold text-xs transition-colors cursor-pointer inline-flex items-center gap-1 whitespace-nowrap"
+                                        title="Gantikan Driver atau Helper kiriman area lain yang berhalangan hadir pada Hari H"
+                                      >
+                                        <RefreshCw className="w-3 h-3" />
+                                        <span>{crew.isReplacing ? 'Ubah' : 'Gantikan'}</span>
+                                      </button>
+                                      {crew.isReplacing && (
                                         <button
                                           type="button"
-                                          onClick={() =>
-                                            setReplaceAbsentModal({
-                                              isOpen: true,
-                                              standbyCrewName: crew.name,
-                                              standbyCrewRole: crew.role,
-                                              dayNumber: activeDayObj.dayNumber,
-                                              dateString: activeDayObj.dateString,
-                                              selectedTripIndex: 0,
-                                              replacePosition: crew.role === 'Driver' ? 'driver' : 'helper',
-                                              absentReason: '',
-                                              isRouteDropdownOpen: false,
-                                              isCrewDropdownOpen: false,
-                                              routeSearchQuery: ''
-                                            })
-                                          }
-                                          className="px-2.5 py-1.5 rounded-lg bg-[#EFF6FF] hover:bg-[#2563EB] text-[#2563EB] hover:text-white dark:bg-[#1E3A5F] dark:text-[#93C5FD] font-semibold text-[11px] transition-colors cursor-pointer inline-flex items-center gap-1"
-                                          title="Gantikan Driver atau Helper kiriman area lain yang berhalangan hadir pada Hari H"
+                                          onClick={() => handleCancelReplaceAbsentCrew(crew.name)}
+                                          className="px-2.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300 font-semibold text-xs transition-colors cursor-pointer inline-flex items-center gap-1 whitespace-nowrap"
+                                          title="Batalkan penggantian dan kembalikan ke status Stand By di Gudang"
                                         >
-                                          <RefreshCw className="w-3 h-3" />
-                                          <span>{crew.isReplacing ? 'Ubah' : 'Gantikan'}</span>
+                                          <XCircle className="w-3 h-3" />
+                                          <span>Batal</span>
                                         </button>
-                                        {crew.isReplacing && (
-                                          <button
-                                            type="button"
-                                            onClick={() => handleCancelReplaceAbsentCrew(crew.name)}
-                                            className="px-2.5 py-1.5 rounded-lg bg-[#FFF1F2] hover:bg-[#FFE4E6] text-[#E11D48] dark:bg-[#4C1D24]/60 dark:text-[#FDA4AF] font-semibold text-[11px] transition-colors cursor-pointer inline-flex items-center gap-1"
-                                            title="Batalkan penggantian dan kembalikan ke status Stand By di Gudang"
-                                          >
-                                            <XCircle className="w-3 h-3" />
-                                            <span>Batal</span>
-                                          </button>
-                                        )}
-                                      </div>
-                                    ) : (
-                                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[#F1F5F9] dark:bg-[#1E293B] text-[#64748B] dark:text-[#94A3B8] text-[10px] font-semibold">
-                                        <Eye className="w-3 h-3" />
-                                        <span>Lihat</span>
-                                      </span>
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[11px] font-semibold">
+                                      <Eye className="w-3 h-3" />
+                                      <span>{canEditSchedules ? 'Stand By' : 'Lihat'}</span>
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
                   </div>
+                </div>
 
-                  {/* MODAL PENGGANTIAN KRU (UI/UX DROPDOWN MODERN: TAMPILKAN SEMUA KRU PENGGANTI & SEMUA POSISI DRIVER / HELPER 1 / HELPER 2) */}
-                  {replaceAbsentModal && replaceAbsentModal.isOpen && (() => {
+                {/* MODAL PENGGANTIAN KRU (UI/UX DROPDOWN MODERN: TAMPILKAN SEMUA KRU PENGGANTI & SEMUA POSISI DRIVER / HELPER 1 / HELPER 2) */}
+                {activeDayObj && replaceAbsentModal && replaceAbsentModal.isOpen && (() => {
                     const selectedTrip = activeDayObj.pengiriman[replaceAbsentModal.selectedTripIndex] || activeDayObj.pengiriman[0];
                     const selectedAreaName = selectedTrip ? standardizeAreaName(selectedTrip.area) : '-';
                     const selectedTargetCrewName = selectedTrip
@@ -6617,11 +6601,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                       </div>
                     );
                   })()}
-                </div>
-              );
-            })()}
-          </div>
+              </>
+            );
+          })()}
         </div>
+      </div>
         </>
       ) : activeSubPage === 'upload_excel' ? (
         /* HALAMAN BARU 1: FORM UNGGAH FILE JADWAL PENGIRIMAN (Tanpa Cabang Data) */
