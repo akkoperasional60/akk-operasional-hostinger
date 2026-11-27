@@ -1519,25 +1519,26 @@ export const DriverReportsManagement: React.FC = () => {
     id: typeof activeSubMenu;
     label: string;
     count?: number;
-    icon: React.ReactNode;
+    Icon: React.ElementType;
   }> = [
-    { id: 'operasional', label: 'Kendala Lapangan', count: totalCount, icon: <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" /> },
-    { id: 'absen_tim_kiriman', label: 'Absen Tim', count: absenTimKirimanCount, icon: <UserCheck className="w-4 h-4 text-blue-600 shrink-0" /> },
-    { id: 'checkin_checkout', label: 'Check-In & Out', count: checkinCheckoutList.length, icon: <Clock className="w-4 h-4 text-sky-600 shrink-0" /> },
-    { id: 'pengisian_bbm', label: 'Pengisian BBM', count: totalFuelReportsCount, icon: <Fuel className="w-4 h-4 text-amber-600 shrink-0" /> },
-    { id: 'checklist_armada', label: 'Checklist Armada', icon: <ShieldCheck className="w-4 h-4 text-green-600 shrink-0" /> },
-    { id: 'peringatan_offline', label: 'GPS Form Kirim', count: formKirimGpsReportsList.length, icon: <Navigation className="w-4 h-4 text-indigo-600 shrink-0" /> },
-    { id: 'validasi_jadwal_portal', label: 'Validasi Jadwal', icon: <FileCheck2 className="w-4 h-4 text-indigo-600 shrink-0" /> },
-    { id: 'validasi_rute_form', label: 'Validasi Rute & Form', icon: <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0" /> },
-    { id: 'retur_muat_salah', label: 'Retur & Muat', count: returMuatCount, icon: <ShieldCheck className="w-4 h-4 text-rose-500 shrink-0" /> }
+    { id: 'operasional', label: 'Kendala Lapangan', count: totalCount, Icon: AlertTriangle },
+    { id: 'absen_tim_kiriman', label: 'Absen Tim', count: absenTimKirimanCount, Icon: UserCheck },
+    { id: 'checkin_checkout', label: 'Check-In & Out', count: checkinCheckoutList.length, Icon: Clock },
+    { id: 'pengisian_bbm', label: 'Pengisian BBM', count: totalFuelReportsCount, Icon: Fuel },
+    { id: 'checklist_armada', label: 'Checklist Armada', Icon: ShieldCheck },
+    { id: 'peringatan_offline', label: 'GPS Form Kirim', count: formKirimGpsReportsList.length, Icon: Navigation },
+    { id: 'validasi_jadwal_portal', label: 'Validasi Jadwal', Icon: FileCheck2 },
+    { id: 'validasi_rute_form', label: 'Validasi Rute & Form', Icon: ShieldCheck },
+    { id: 'retur_muat_salah', label: 'Retur & Muat', count: returMuatCount, Icon: ShieldCheck }
   ];
 
   const activeLogisticsMenu = logisticsMenuItems.find(m => m.id === activeSubMenu) || logisticsMenuItems[0];
+  const ActiveLogisticsIcon = activeLogisticsMenu.Icon;
 
   return (
     <div className="akk-flat-reports w-full max-w-full bg-slate-50 dark:bg-[#0F172A] px-3 sm:px-6 py-5 space-y-5 animate-in fade-in duration-200">
       {/* 1. Header Utama & Logo Minimalis */}
-      <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-xl px-5 py-3.5 shadow-sm flex items-center justify-between gap-4 relative z-30">
+      <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-xl px-5 py-3.5 flex items-center justify-between gap-4 relative z-30">
         <div className="flex items-center gap-3 min-w-0">
           <AkkLogo size="md" showSubtitle subtitle="AKK Pengiriman · Logistik DC" />
         </div>
@@ -1547,12 +1548,16 @@ export const DriverReportsManagement: React.FC = () => {
             type="button"
             onClick={() => setIsLogisticsMenuOpen(prev => !prev)}
             aria-expanded={isLogisticsMenuOpen}
-            className="inline-flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-white dark:bg-[#162234] hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-[#24344D] text-xs sm:text-sm font-semibold text-slate-800 dark:text-slate-100 transition-colors cursor-pointer whitespace-nowrap"
+            className={`inline-flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-white dark:bg-[#162234] hover:bg-slate-50 dark:hover:bg-slate-800 border text-xs sm:text-sm font-semibold text-slate-800 dark:text-slate-100 transition-colors cursor-pointer whitespace-nowrap ${
+              isLogisticsMenuOpen
+                ? 'border-blue-600 text-blue-700 dark:text-blue-300'
+                : 'border-slate-200 dark:border-[#24344D]'
+            }`}
           >
-            {activeLogisticsMenu.icon}
+            <ActiveLogisticsIcon className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
             <span>Menu Logistik</span>
-            <span className="hidden sm:inline text-xs font-medium text-slate-400">·</span>
-            <span className="hidden sm:inline text-xs font-medium text-blue-600 dark:text-blue-400">
+            <span className="hidden sm:inline text-xs font-medium text-slate-300 dark:text-slate-600">|</span>
+            <span className="hidden sm:inline text-xs font-semibold text-blue-600 dark:text-blue-400">
               {activeLogisticsMenu.label}
             </span>
             <ChevronDown
@@ -1561,13 +1566,14 @@ export const DriverReportsManagement: React.FC = () => {
           </button>
 
           {isLogisticsMenuOpen && (
-            <div className="absolute right-0 mt-2 w-72 rounded-xl bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] shadow-lg p-1.5 z-50">
-              <div className="px-3 py-2 text-[11px] font-semibold text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-800 mb-1">
+            <div className="absolute right-0 mt-2 w-72 rounded-xl bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] p-1.5 z-50">
+              <div className="px-3 py-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-200/70 dark:border-slate-800 mb-1">
                 Pilih Modul Laporan Logistik
               </div>
               <div className="space-y-0.5">
                 {logisticsMenuItems.map(item => {
                   const isActive = item.id === activeSubMenu;
+                  const ItemIcon = item.Icon;
                   return (
                     <button
                       key={item.id}
@@ -1578,25 +1584,31 @@ export const DriverReportsManagement: React.FC = () => {
                       }}
                       className={`w-full flex items-center justify-between gap-2.5 px-3 py-2 rounded-lg text-left text-xs font-semibold transition-colors cursor-pointer ${
                         isActive
-                          ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300'
-                          : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/70'
+                          ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-200/70 dark:border-blue-500/30'
+                          : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/70 border border-transparent'
                       }`}
                     >
                       <span className="flex items-center gap-2.5 min-w-0">
-                        {item.icon}
+                        <ItemIcon
+                          className={`w-4 h-4 shrink-0 ${
+                            isActive ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400 dark:text-slate-500'
+                          }`}
+                        />
                         <span className="truncate">{item.label}</span>
                       </span>
-                      {typeof item.count === 'number' && (
-                        <span
-                          className={`text-[11px] px-2 py-0.5 rounded-md font-mono tabular-nums ${
-                            isActive
-                              ? 'bg-blue-100 dark:bg-blue-500/30 text-blue-700 dark:text-blue-200'
-                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                          }`}
-                        >
-                          {item.count}
-                        </span>
-                      )}
+                      <span className="flex items-center gap-1.5 shrink-0">
+                        {typeof item.count === 'number' && (
+                          <span
+                            className={`text-[11px] px-2 py-0.5 rounded-md font-mono tabular-nums ${
+                              isActive
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                            }`}
+                          >
+                            {item.count}
+                          </span>
+                        )}
+                      </span>
                     </button>
                   );
                 })}
@@ -1658,10 +1670,10 @@ export const DriverReportsManagement: React.FC = () => {
                     'Area / Lokasi',
                     'Target Berangkat (WIB)',
                     'Target Pulang (WIB)',
-                    'Waktu Check-In',
-                    'Ketepatan & Selisih Check-In',
-                    'Waktu Check-Out',
-                    'Ketepatan & Selisih Check-Out',
+                    'Waktu Berangkat (Check-In)',
+                    'Ketepatan & Selisih Berangkat',
+                    'Waktu Tiba (Check-Out)',
+                    'Ketepatan & Selisih Tiba',
                     'Status Shift'
                   ];
                   const rows = checkinCheckoutList.map(item => [
@@ -1839,8 +1851,8 @@ export const DriverReportsManagement: React.FC = () => {
                     <th className="py-3.5 px-4">Nomor Kendaraan</th>
                     <th className="py-3.5 px-4">Area / Lokasi</th>
                     <th className="py-3.5 px-4 text-center">Target Berangkat &amp; Pulang</th>
-                    <th className="py-3.5 px-4 text-center">Waktu Check-In</th>
-                    <th className="py-3.5 px-4 text-center">Waktu Check-Out</th>
+                    <th className="py-3.5 px-4 text-center">Waktu Berangkat (Check-In)</th>
+                    <th className="py-3.5 px-4 text-center">Waktu Tiba (Check-Out)</th>
                     <th className="py-3.5 px-4 text-center">Ketepatan Waktu &amp; Selisih</th>
                     <th className="py-3.5 px-4 text-center">Status Shift</th>
                     {isSuperAdmin && <th className="py-3.5 px-4 text-center">Tindakan</th>}
@@ -1907,7 +1919,7 @@ export const DriverReportsManagement: React.FC = () => {
                               {item.checkinTime}
                             </span>
                           ) : (
-                            <span className="text-slate-400 italic text-xs">Belum Check-In</span>
+                            <span className="text-slate-400 italic text-xs">Belum Berangkat</span>
                           )}
                         </td>
                         <td className="py-3.5 px-4 text-center whitespace-nowrap">
@@ -1916,7 +1928,7 @@ export const DriverReportsManagement: React.FC = () => {
                               {item.checkoutTime}
                             </span>
                           ) : (
-                            <span className="text-slate-400 italic text-xs">Belum Check-Out</span>
+                            <span className="text-slate-400 italic text-xs">Belum Tiba</span>
                           )}
                         </td>
                         <td className="py-3.5 px-4 text-center whitespace-nowrap">
@@ -1930,7 +1942,7 @@ export const DriverReportsManagement: React.FC = () => {
                                   : 'bg-slate-100 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'
                               }`}
                             >
-                              In: {item.checkinPunctuality.label}
+                              Berangkat: {item.checkinPunctuality.label}
                             </span>
                             <span
                               className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-bold border ${
@@ -1941,7 +1953,7 @@ export const DriverReportsManagement: React.FC = () => {
                                   : 'bg-slate-100 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'
                               }`}
                             >
-                              Out: {item.checkoutPunctuality.label}
+                              Tiba: {item.checkoutPunctuality.label}
                             </span>
                           </div>
                         </td>
@@ -3180,13 +3192,13 @@ export const DriverReportsManagement: React.FC = () => {
                               <div className="space-y-1">
                                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-sky-50 dark:bg-cyan-500/15 text-sky-700 dark:text-cyan-300 border border-sky-200 dark:border-cyan-500/30">
                                   <Clock className="w-3.5 h-3.5 text-sky-600 shrink-0" />
-                                  <span>Check-In &amp; Out</span>
+                                  <span>Berangkat &amp; Tiba</span>
                                 </span>
-                                <div className="text-xs font-mono text-slate-600 dark:text-slate-300">
-                                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold">In: {item.checkinTimeFormatted || '-'}</span>
+                                <div className="text-xs font-mono text-slate-600 dark:text-slate-300 tabular-nums">
+                                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Berangkat: {item.checkinTimeFormatted || '-'}</span>
                                   {' · '}
-                                  <span className={item.checkoutTimeFormatted ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-slate-500'}>
-                                    Out: {item.checkoutTimeFormatted || 'Dinas'}
+                                  <span className={item.checkoutTimeFormatted ? 'text-blue-600 dark:text-blue-400 font-semibold' : 'text-slate-500'}>
+                                    Tiba: {item.checkoutTimeFormatted || 'Dinas'}
                                   </span>
                                 </div>
                               </div>

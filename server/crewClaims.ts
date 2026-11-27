@@ -324,9 +324,6 @@ function validateAndNormalizeDepartureForm(raw: unknown, trip: any, actor: any, 
     throw Object.assign(new Error('Form Keluar beserta 4 tanda tangan digital wajib dilengkapi.'), { status: 422 });
   }
   const input = raw as any;
-  if (!input.checks?.waybillMatch || !input.checks?.documentsReady) {
-    throw Object.assign(new Error('Checklist verifikasi surat jalan dan kelengkapan dokumen wajib dicentang.'), { status: 422 });
-  }
   const signatures: Record<string, string> = {};
   for (const key of DEPARTURE_SIGNATURE_KEYS) {
     const val = typeof input.signatures?.[key] === 'string' ? input.signatures[key].trim() : '';
@@ -350,19 +347,27 @@ function validateAndNormalizeDepartureForm(raw: unknown, trip: any, actor: any, 
     year: 'numeric',
     timeZone: 'Asia/Jakarta'
   });
+  const branchRaw = clean(input.summary?.branchName) || (scheduleBranch(trip) === 'cab-sidoarjo' ? 'Cabang Sidoarjo' : 'Cabang Nusantara');
+  const depTimeRaw = clean(input.summary?.departureTime) || clean(trip?.departureTime) || wibTime;
   return {
     summary: {
+      branchName: branchRaw,
       driverName: clean(input.summary?.driverName) || clean(trip?.portalCrew?.name || trip?.crew?.name) || '-',
       helperName: clean(input.summary?.helperName) || clean(trip?.portalCrewHelper?.name || trip?.crewHelper?.name) || '-',
       fleetLabel: clean(input.summary?.fleetLabel) || clean(trip?.fleet?.initialCode || trip?.armada || trip?.fleet?.plateNumber) || '-',
+      departureTime: depTimeRaw,
       areaName: clean(input.summary?.areaName) || clean(trip?.areaName || trip?.store?.storeName) || '-',
       recordedAt: now,
       recordedAtWib: clean(input.summary?.recordedAtWib) || `${wibTime} WIB · ${wibDate}`
     },
-    checks: {
-      waybillMatch: true,
-      documentsReady: true
-    },
+    signerSelections: input.signerSelections && typeof input.signerSelections === 'object'
+      ? {
+          spvLogistik: clean(input.signerSelections.spvLogistik),
+          spvOperasional: clean(input.signerSelections.spvOperasional),
+          security: clean(input.signerSelections.security),
+          crew: clean(input.signerSelections.crew)
+        }
+      : undefined,
     signatures,
     signedAt: now,
     signedBy: clean(actor?.full_name || actor?.fullName) || 'Kru AKK',
@@ -485,7 +490,33 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
             latitude: Number(r.gpsLatitude), longitude: Number(r.gpsLongitude), accuracy: Number(r.gpsAccuracy || 0)
           } : undefined
         }));
-      const portalSchedules = ownBranch.map(sanitizeScheduleForPortal);
+      const isSuperAdmin = String(actor.role || '') === 'super_admin';
+      const portalSchedules = ownBranch.map((row: any) => {
+        const sanitized = sanitizeScheduleForPortal(row);
+        if (isSuperAdmin) return sanitized;
+        const compactEvents = Array.isArray(sanitized.crewFieldEvents)
+          ? sanitized.crewFieldEvents.slice(-10)
+          : undefined;
+        const compactChecklist = Array.isArray(sanitized.crewInspectionChecklist)
+          ? sanitized.crewInspectionChecklist.map((c: any) =>
+              c && typeof c === 'object' ? { ...c, photo: undefined } : c
+            )
+          : undefined;
+        const compactDeparture = sanitized.departureValidation && typeof sanitized.departureValidation === 'object'
+          ? {
+              ...sanitized.departureValidation,
+              signatures: undefined,
+              signaturesAttached: Boolean(sanitized.departureValidation.signatures)
+            }
+          : undefined;
+        return {
+          ...sanitized,
+          crewFieldEvents: compactEvents,
+          crewInspectionChecklist: compactChecklist,
+          departureValidation: compactDeparture,
+          podPhotoUrl: undefined
+        };
+      });
       return res.json({ success: true, schedules: portalSchedules, reports: reportMeta });
     } catch (error: any) { return res.status(Number(error?.status) || 503).json({ success: false, error: 'Jadwal tidak dapat dibaca dari database.' }); }
   });
@@ -601,13 +632,17 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
         return { scheduleId: trip.id, action, status: trip.status, at: now, gpsAccuracy: gps.accuracy, tripSnapshot: JSON.parse(JSON.stringify(trip)) };
       });
       if (opts.upsertDepartureShift && result.tripSnapshot) {
-        await opts.upsertDepartureShift({
-          trip: result.tripSnapshot,
-          action,
-          actor,
-          now: result.at,
-          gps
-        }).catch(err => console.warn('[Crew Shift Sync Warning]', err?.message || err));
+        const snapshot = result.tripSnapshot;
+        const actionAt = result.at;
+        setImmediate(() => {
+          void opts.upsertDepartureShift!({
+            trip: snapshot,
+            action,
+            actor,
+            now: actionAt,
+            gps
+          }).catch(err => console.warn('[Crew Shift Sync Warning]', err?.message || err));
+        });
       }
       const { tripSnapshot: _omitTripSnapshot, ...clientResult } = result;
       return res.json({ success: true, ...clientResult });
@@ -696,13 +731,18 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
         };
       });
       if (task === 'inspection' && opts.syncFleetChecklist && result.tripSnapshot && result.normalizedChecklist) {
-        await opts.syncFleetChecklist({
-          trip: result.tripSnapshot,
-          actor,
-          checklist: result.normalizedChecklist,
-          odometerKm: Number(result.tripSnapshot.crewOdometerStart || 0),
-          now: result.at
-        }).catch(err => console.warn('[Crew Checklist Sync Warning]', err?.message || err));
+        const snapshot = result.tripSnapshot;
+        const normalizedChecklist = result.normalizedChecklist;
+        const taskAt = result.at;
+        setImmediate(() => {
+          void opts.syncFleetChecklist!({
+            trip: snapshot,
+            actor,
+            checklist: normalizedChecklist,
+            odometerKm: Number(snapshot.crewOdometerStart || 0),
+            now: taskAt
+          }).catch(err => console.warn('[Crew Checklist Sync Warning]', err?.message || err));
+        });
       }
       return res.json({ success: true, task: result.task, at: result.at });
     } catch (e: any) {

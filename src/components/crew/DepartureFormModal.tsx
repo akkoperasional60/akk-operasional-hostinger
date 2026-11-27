@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, CheckCircle2, ClipboardCheck, Eraser, MapPin, PenTool, Truck, Users } from 'lucide-react';
+import { Building2, Check, ClipboardCheck, Clock3, Eraser, MapPin, PenTool, Truck, Users } from 'lucide-react';
 import type { DepartureSignatureKey, DepartureValidationData, FieldTrip } from './crewModel';
 import { Button, Dialog } from './CrewFieldUI';
+import { logisticsStore } from '../../services/store';
+import { branchStore } from '../../services/branchStore';
+import { exportCompactSignatureDataUrl } from '../../utils/imageCompression';
 
 interface SignatureBoxDef {
   key: DepartureSignatureKey;
@@ -38,11 +41,22 @@ function formatNowWib(): string {
 interface SignaturePadCardProps {
   def: SignatureBoxDef;
   value: string;
+  signerName: string;
+  candidates: string[];
   disabled?: boolean;
+  onSignerNameChange: (key: DepartureSignatureKey, name: string) => void;
   onChange: (key: DepartureSignatureKey, dataUrl: string) => void;
 }
 
-const SignaturePadCard: React.FC<SignaturePadCardProps> = ({ def, value, disabled, onChange }) => {
+const SignaturePadCard: React.FC<SignaturePadCardProps> = ({
+  def,
+  value,
+  signerName,
+  candidates,
+  disabled,
+  onSignerNameChange,
+  onChange
+}) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef(false);
   const hasStrokeRef = useRef(false);
@@ -127,8 +141,7 @@ const SignaturePadCard: React.FC<SignaturePadCardProps> = ({ def, value, disable
     lastPointRef.current = null;
     const canvas = canvasRef.current;
     if (!canvas || !hasStrokeRef.current) return;
-    const dataUrl = canvas.toDataURL('image/png');
-    onChange(def.key, dataUrl);
+    onChange(def.key, exportCompactSignatureDataUrl(canvas));
   };
 
   const handleClear = () => {
@@ -149,6 +162,10 @@ const SignaturePadCard: React.FC<SignaturePadCardProps> = ({ def, value, disable
   };
 
   const signed = Boolean(value && value.startsWith('data:image/'));
+  const dropdownOptions = useMemo(() => {
+    const merged = Array.from(new Set([signerName, ...candidates].map(v => String(v || '').trim()).filter(Boolean)));
+    return merged;
+  }, [signerName, candidates]);
 
   return (
     <div className={`cv75-sig-card ${signed ? 'cv75-sig-card--signed' : ''}`}>
@@ -174,6 +191,33 @@ const SignaturePadCard: React.FC<SignaturePadCardProps> = ({ def, value, disable
           )}
         </div>
       </div>
+
+      {dropdownOptions.length > 0 ? (
+        <select
+          className="cv75-sig-select"
+          value={signerName}
+          disabled={disabled}
+          aria-label={`Nama penandatangan ${def.title}`}
+          onChange={e => onSignerNameChange(def.key, e.target.value)}
+        >
+          {dropdownOptions.map(name => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          type="text"
+          className="cv75-sig-select"
+          value={signerName}
+          disabled={disabled}
+          placeholder={`Nama ${def.title}`}
+          aria-label={`Nama penandatangan ${def.title}`}
+          onChange={e => onSignerNameChange(def.key, e.target.value)}
+        />
+      )}
+
       <div className="cv75-sig-pad-wrap">
         <canvas
           ref={canvasRef}
@@ -213,7 +257,79 @@ export const DepartureFormModal: React.FC<DepartureFormModalProps> = ({
   onClose,
   onSubmit
 }) => {
-  const [checks, setChecks] = useState<[boolean, boolean]>([false, false]);
+  const branchName = useMemo(() => {
+    const matched = branchStore.getBranches().find(b => b.id === trip.branchId);
+    if (matched?.name) return matched.name;
+    return trip.branchId === 'cab-sidoarjo' ? 'Sidoarjo' : 'Nusantara';
+  }, [trip.branchId]);
+
+  const signerCandidates = useMemo<Record<DepartureSignatureKey, string[]>>(() => {
+    const users = logisticsStore.getUsers().filter(u => u && u.status === 'approved' && u.role !== 'super_admin');
+    const inBranch = users.filter(u => {
+      const perms = branchStore.getUserBranchPermissions(
+        u.id,
+        u.role,
+        u.permissions?.modules,
+        u.permissions?.branchPermissions
+      );
+      return Boolean(perms?.[trip.branchId]?.enabled);
+    });
+
+    const spvLogistikNames = inBranch
+      .filter(u => u.role === 'spv_logistik')
+      .map(u => String(u.fullName || '').trim())
+      .filter(Boolean);
+
+    const spvOperasionalNames = inBranch
+      .filter(u => u.role === 'operasional' || String(u.department || '').toLowerCase().includes('operasional'))
+      .sort((a, b) => {
+        const aSpv = /spv/i.test(`${a.fullName} ${a.department || ''}`) ? 0 : 1;
+        const bSpv = /spv/i.test(`${b.fullName} ${b.department || ''}`) ? 0 : 1;
+        return aSpv - bSpv;
+      })
+      .map(u => String(u.fullName || '').trim())
+      .filter(Boolean);
+
+    const securityNames = inBranch
+      .filter(u => u.role === 'security')
+      .map(u => String(u.fullName || '').trim())
+      .filter(Boolean);
+
+    const driverName = String(trip.driver?.name || '').trim();
+    const helperName = String(trip.helper?.name || actorName || '').trim();
+    const combinedCrew = [driverName, helperName].filter(Boolean).join(' / ');
+    const crewOptions = Array.from(new Set([combinedCrew, helperName, driverName].filter(Boolean)));
+
+    return {
+      spvLogistik: Array.from(new Set(spvLogistikNames)),
+      spvOperasional: Array.from(new Set(spvOperasionalNames)),
+      security: Array.from(new Set(securityNames)),
+      crew: crewOptions
+    };
+  }, [trip.branchId, trip.driver?.name, trip.helper?.name, actorName]);
+
+  const [signerSelections, setSignerSelections] = useState<Record<DepartureSignatureKey, string>>(() => ({
+    spvLogistik: signerCandidates.spvLogistik[0] || `SPV Logistik (${branchName})`,
+    spvOperasional: signerCandidates.spvOperasional[0] || `SPV Operasional (${branchName})`,
+    security: signerCandidates.security[0] || `Security (${branchName})`,
+    crew: signerCandidates.crew[0] || actorName || 'Kru Pengiriman'
+  }));
+
+  useEffect(() => {
+    setSignerSelections(prev => ({
+      spvLogistik: signerCandidates.spvLogistik.includes(prev.spvLogistik)
+        ? prev.spvLogistik
+        : signerCandidates.spvLogistik[0] || prev.spvLogistik,
+      spvOperasional: signerCandidates.spvOperasional.includes(prev.spvOperasional)
+        ? prev.spvOperasional
+        : signerCandidates.spvOperasional[0] || prev.spvOperasional,
+      security: signerCandidates.security.includes(prev.security)
+        ? prev.security
+        : signerCandidates.security[0] || prev.security,
+      crew: signerCandidates.crew[0] || prev.crew
+    }));
+  }, [signerCandidates]);
+
   const [signatures, setSignatures] = useState<Record<DepartureSignatureKey, string>>({
     spvLogistik: '',
     spvOperasional: '',
@@ -232,10 +348,14 @@ export const DepartureFormModal: React.FC<DepartureFormModalProps> = ({
     [signatures]
   );
 
-  const isReady = checks[0] && checks[1] && signedCount === SIGNATURE_BOXES.length;
+  const isReady = signedCount === SIGNATURE_BOXES.length;
 
   const handleSigChange = useCallback((key: DepartureSignatureKey, dataUrl: string) => {
     setSignatures(prev => ({ ...prev, [key]: dataUrl }));
+  }, []);
+
+  const handleSignerNameChange = useCallback((key: DepartureSignatureKey, name: string) => {
+    setSignerSelections(prev => ({ ...prev, [key]: name }));
   }, []);
 
   const handleSave = () => {
@@ -244,17 +364,16 @@ export const DepartureFormModal: React.FC<DepartureFormModalProps> = ({
     const wibStamp = formatNowWib();
     const payload: DepartureValidationData = {
       summary: {
+        branchName,
         driverName: trip.driver?.name || '-',
         helperName: trip.helper?.name || actorName || '-',
         fleetLabel: trip.fleetLabel || '-',
+        departureTime: `${trip.departureTime || '07:30'} WIB`,
         areaName: trip.area || '-',
         recordedAt: nowIso,
         recordedAtWib: wibStamp
       },
-      checks: {
-        waybillMatch: checks[0],
-        documentsReady: checks[1]
-      },
+      signerSelections: { ...signerSelections },
       signatures: {
         spvLogistik: signatures.spvLogistik,
         spvOperasional: signatures.spvOperasional,
@@ -280,47 +399,35 @@ export const DepartureFormModal: React.FC<DepartureFormModalProps> = ({
         </div>
         <div className="cv75-summary-grid">
           <div className="cv75-summary-item">
-            <span className="cv75-summary-label"><Truck size={12} /> Driver</span>
+            <span className="cv75-summary-label"><Building2 size={12} /> Cabang</span>
+            <span className="cv75-summary-val">{branchName}</span>
+          </div>
+          <div className="cv75-summary-item">
+            <span className="cv75-summary-label"><Clock3 size={12} /> Jam Berangkat</span>
+            <span className="cv75-summary-val">{trip.departureTime || '07:30'} WIB</span>
+          </div>
+          <div className="cv75-summary-item">
+            <span className="cv75-summary-label"><Truck size={12} /> Nama Driver</span>
             <span className="cv75-summary-val">{trip.driver?.name || '-'}</span>
           </div>
           <div className="cv75-summary-item">
-            <span className="cv75-summary-label"><Users size={12} /> Helper</span>
+            <span className="cv75-summary-label"><Users size={12} /> Nama Helper</span>
             <span className="cv75-summary-val">{trip.helper?.name || actorName || '-'}</span>
           </div>
           <div className="cv75-summary-item">
-            <span className="cv75-summary-label">Armada</span>
+            <span className="cv75-summary-label"><Truck size={12} /> Mobil Kiriman</span>
             <span className="cv75-summary-val">{trip.fleetLabel || '-'}</span>
           </div>
           <div className="cv75-summary-item">
-            <span className="cv75-summary-label"><MapPin size={12} /> Area Kiriman</span>
+            <span className="cv75-summary-label"><MapPin size={12} /> Area Kirim</span>
             <span className="cv75-summary-val">{trip.area || '-'}</span>
           </div>
         </div>
       </div>
 
-      <div className="cv66-checklist">
-        {[
-          'Tujuan dan jumlah surat jalan sesuai',
-          'Dokumen lengkap dan siap dibawa'
-        ].map((label, idx) => (
-          <label key={label} className="cv75-check-row">
-            <input
-              type="checkbox"
-              checked={checks[idx]}
-              disabled={busy}
-              onChange={e => {
-                const checked = e.target.checked;
-                setChecks(prev => (idx === 0 ? [checked, prev[1]] : [prev[0], checked]));
-              }}
-            />
-            <span>{label}</span>
-          </label>
-        ))}
-      </div>
-
       <div className="cv75-sig-section">
         <div className="cv75-sig-section-head">
-          <span>Tanda Tangan Digital (4 Pihak)</span>
+          <span>Tanda Tangan Digital (4 Pihak · {branchName})</span>
           <span className={`cv75-badge ${signedCount === 4 ? 'cv75-badge--green' : 'cv75-badge--slate'}`}>
             {signedCount}/4 Lengkap
           </span>
@@ -331,7 +438,10 @@ export const DepartureFormModal: React.FC<DepartureFormModalProps> = ({
               key={def.key}
               def={def}
               value={signatures[def.key]}
+              signerName={signerSelections[def.key]}
+              candidates={signerCandidates[def.key]}
               disabled={busy}
+              onSignerNameChange={handleSignerNameChange}
               onChange={handleSigChange}
             />
           ))}
@@ -340,11 +450,11 @@ export const DepartureFormModal: React.FC<DepartureFormModalProps> = ({
 
       <Button disabled={busy || !isReady} loading={busy} onClick={handleSave}>
         <Check size={18} />
-        {isReady ? 'Simpan Form Keluar & Validasi' : `Lengkapi Ceklis & ${4 - signedCount} TTD Tersisa`}
+        {isReady ? 'Simpan Form Keluar & Validasi' : `Lengkapi ${4 - signedCount} TTD Tersisa`}
       </Button>
       {!qa && (
         <p className="cv66-meta cv66-gps">
-          Waktu keluar, koordinat GPS, dan 4 tanda tangan digital tersimpan permanen ke server.
+          Waktu keluar, koordinat GPS, nama petugas cabang {branchName}, dan 4 tanda tangan digital tersimpan ke server.
         </p>
       )}
     </Dialog>

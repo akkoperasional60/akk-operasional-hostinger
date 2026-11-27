@@ -21,6 +21,7 @@ import {
 import { listenCrewChanged, notifyCrewChanged, submitWorkReport } from './crewApi';
 import { freshGps, type FieldTrip } from './crewModel';
 import { Button } from './CrewFieldUI';
+import { exportCompactSignatureDataUrl } from '../../utils/imageCompression';
 
 interface CrewFormKirimManifestProps {
   user: UserProfile;
@@ -140,7 +141,7 @@ const MiniSignaturePad: React.FC<MiniSignaturePadProps> = ({ value, disabled, on
     drawingRef.current = false;
     lastRef.current = null;
     if (canvasRef.current && hasStrokeRef.current) {
-      onChange(canvasRef.current.toDataURL('image/png'));
+      onChange(exportCompactSignatureDataUrl(canvasRef.current));
     }
   };
 

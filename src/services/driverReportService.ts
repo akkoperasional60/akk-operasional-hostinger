@@ -1,4 +1,5 @@
 import { resolvePreciseCustomerGps } from '../utils/preciseCustomerGps';
+import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 
 export interface DriverHelperReport {
   id: string;
@@ -241,9 +242,10 @@ class DriverReportService {
     this.isSyncingWithServer = true;
     this.lastServerSyncAt = nowMs;
     try {
-      const res = await fetch('/api/driver-reports', {
+      const res = await fetchWithTimeout('/api/driver-reports', {
         credentials: 'include',
-        headers: this.getAuthHeaders()
+        headers: this.getAuthHeaders(),
+        timeoutMs: 8000
       });
       if (!res.ok) return;
       const json = await res.json();
@@ -279,10 +281,11 @@ class DriverReportService {
         .filter(r => r?.id && !serverIds.has(r.id) && !this.syncedToServerIds.has(r.id));
       if (unsyncedReports.length > 0) {
         unsyncedReports.forEach(r => this.syncedToServerIds.add(r.id));
-        await fetch('/api/driver-reports', {
+        await fetchWithTimeout('/api/driver-reports', {
           method: 'POST',
           headers: this.getAuthHeaders(),
           credentials: 'include',
+          timeoutMs: 8000,
           body: JSON.stringify({ reports: unsyncedReports })
         });
       }
@@ -298,10 +301,11 @@ class DriverReportService {
     if (report?.id) {
       this.syncedToServerIds.add(report.id);
     }
-    fetch('/api/driver-reports', {
+    fetchWithTimeout('/api/driver-reports', {
       method: 'POST',
       headers: this.getAuthHeaders(),
       credentials: 'include',
+      timeoutMs: 9000,
       body: JSON.stringify({ report })
     }).catch(() => {
       if (report?.id) {
@@ -810,10 +814,11 @@ class DriverReportService {
       this.saveReports(list);
 
       if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
-        fetch(`/api/driver-reports/${encodeURIComponent(id)}/solution`, {
+        fetchWithTimeout(`/api/driver-reports/${encodeURIComponent(id)}/solution`, {
           method: 'PATCH',
           headers: this.getAuthHeaders(),
           credentials: 'include',
+          timeoutMs: 8000,
           body: JSON.stringify({
             solution,
             solutionBy,
@@ -843,10 +848,11 @@ class DriverReportService {
       this.saveReports(list);
 
       if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
-        fetch(`/api/driver-reports/${encodeURIComponent(id)}/acknowledge`, {
+        fetchWithTimeout(`/api/driver-reports/${encodeURIComponent(id)}/acknowledge`, {
           method: 'PATCH',
           headers: this.getAuthHeaders(),
-          credentials: 'include'
+          credentials: 'include',
+          timeoutMs: 8000
         }).catch(() => {});
       }
 
@@ -941,10 +947,11 @@ class DriverReportService {
     this.pushReportToServer(list[idx]);
 
     if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
-      fetch(`/api/driver-reports/${encodeURIComponent(params.id)}/solution`, {
+      fetchWithTimeout(`/api/driver-reports/${encodeURIComponent(params.id)}/solution`, {
         method: 'PATCH',
         headers: this.getAuthHeaders(),
         credentials: 'include',
+        timeoutMs: 8000,
         body: JSON.stringify({
           solution: feedbackText,
           solutionBy: params.validatedBy,
@@ -988,10 +995,11 @@ class DriverReportService {
     this.pushReportToServer(list[idx]);
 
     if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
-      fetch(`/api/driver-reports/${encodeURIComponent(params.id)}/solution`, {
+      fetchWithTimeout(`/api/driver-reports/${encodeURIComponent(params.id)}/solution`, {
         method: 'PATCH',
         headers: this.getAuthHeaders(),
         credentials: 'include',
+        timeoutMs: 8000,
         body: JSON.stringify({
           solution: list[idx].solution || `[Validasi GPS: ${params.gpsStatus === 'valid' ? 'Valid' : 'Tidak Sesuai'}] ${gpsNoteText}`,
           solutionBy: list[idx].solutionBy || params.validatedBy,
@@ -1025,10 +1033,11 @@ class DriverReportService {
     }
 
     if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
-      fetch(`/api/driver-reports/${encodeURIComponent(cleanId)}`, {
+      fetchWithTimeout(`/api/driver-reports/${encodeURIComponent(cleanId)}`, {
         method: 'DELETE',
         headers: this.getAuthHeaders(),
-        credentials: 'include'
+        credentials: 'include',
+        timeoutMs: 8000
       }).catch(() => {});
     }
 

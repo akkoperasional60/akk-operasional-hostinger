@@ -6,10 +6,6 @@ import {
   Award,
   Calculator,
   Calendar,
-  Check,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   Download,
   Edit,
   FileSpreadsheet,
@@ -50,8 +46,10 @@ import {
   STANDARD_FUEL_PRICES
 } from '../data/fuelMockData';
 import { getCanonicalFleetOrderIndex, sortFleetsByCanonicalOrder } from '../data/mockData';
+import * as XLSX from 'xlsx';
 import { OFFICIAL_DESTINATION_AREAS } from '../utils/areaNormalizer';
 import { FuelConsumptionReportModal } from './FuelConsumptionReportModal';
+import { FuelEntryFormModal } from './FuelEntryFormModal';
 import { FuelWeeklyReportView } from './FuelWeeklyReportView';
 import { KmRecapManagement } from './KmRecapManagement';
 
@@ -129,8 +127,11 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
   const [searchQuery, setSearchQuery] = useState('');
   const [filterFleetId, setFilterFleetId] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
-  const [filterFuelType, setFilterFuelType] = useState<string>('all');
+  const [filterFuelType] = useState<string>('all');
   const [filterSpbu, setFilterSpbu] = useState<'all' | 'Farly' | 'Gajah Mada' | 'SPBU Lain'>('all');
+  const [filterDateStart, setFilterDateStart] = useState<string>('');
+  const [filterDateEnd, setFilterDateEnd] = useState<string>('');
+  const [filterArea, setFilterArea] = useState<string>('all');
   const [logSortBy, setLogSortBy] = useState<'date_desc' | 'date_asc' | 'efficient_asc' | 'wasteful_desc'>('date_desc');
   const [logsCurrentPage, setLogsCurrentPage] = useState<number>(1);
   const LOGS_PER_PAGE = 10;
@@ -199,7 +200,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
   useEffect(() => {
     setLogsCurrentPage(1);
-  }, [searchQuery, filterFleetId, filterSpbu, filterStatus, filterFuelType, logSortBy, selectedBranchFilter]);
+  }, [searchQuery, filterFleetId, filterSpbu, filterStatus, filterFuelType, filterDateStart, filterDateEnd, filterArea, logSortBy, selectedBranchFilter]);
 
   useEffect(() => {
     if (!activeModalDropdown && !isGasStationDropdownOpen) return;
@@ -584,7 +585,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
   // Branch-scoped KPI Summary
   const kpiSummary = useMemo(() => {
-    const totalLiters = Number(reconciledLogs.reduce((acc, l) => acc + l.liters, 0).toFixed(1));
+    const totalLiters = Number(reconciledLogs.reduce((acc, l) => acc + l.liters, 0).toFixed(2));
     const totalCost = reconciledLogs.reduce((acc, l) => acc + l.totalCost, 0);
     const totalDistanceKm = reconciledLogs.reduce((acc, l) => acc + l.distanceKm, 0);
     const overallAvgKmPerLiter = totalLiters > 0 ? Number((totalDistanceKm / totalLiters).toFixed(2)) : 0;
@@ -628,7 +629,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
         map.set(iso, { fullDate: iso, date: iso.slice(5), liters: 0, distance: 0 });
       }
       const item = map.get(iso)!;
-      item.liters = Number((item.liters + l.liters).toFixed(1));
+      item.liters = Number((item.liters + l.liters).toFixed(2));
       item.distance += l.distanceKm;
     });
 
@@ -926,7 +927,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     setFormDate(log.date || new Date().toISOString().split('T')[0]);
     setFormFuelType(log.fuelType || 'BioSolar');
     setFormCostPerLiter(log.costPerLiter !== undefined ? String(log.costPerLiter) : '6800');
-    setFormLiters(String(log.liters || ''));
+    setFormLiters(log.liters ? Number(log.liters).toFixed(2) : '');
     setFormStartOdo(String(log.startOdometerKm || ''));
     setFormEndOdo(String(log.endOdometerKm || ''));
     setFormGasStation(log.gasStation || 'SPBU Farly');
@@ -1061,7 +1062,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       helperName: formHelperName || undefined,
       date: formDate,
       fuelType: formFuelType,
-      liters: Number(formLiters),
+      liters: Number(Number(formLiters).toFixed(2)),
       costPerLiter: Number(formCostPerLiter) || 6800,
       startOdometerKm: startKm,
       endOdometerKm: endKm,
@@ -1103,6 +1104,16 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     }
   };
 
+  const auditAreaOptions = useMemo(() => {
+    const set = new Set<string>(OFFICIAL_DESTINATION_AREAS);
+    reconciledLogs.forEach(l => {
+      if (l.routeTrip && l.routeTrip.trim()) {
+        set.add(l.routeTrip.trim());
+      }
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'id'));
+  }, [reconciledLogs]);
+
   // Filtered & Sorted Logs for Audit Tab
   const filteredLogs = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -1134,7 +1145,14 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
           ? gsLower.includes('gajah mada')
           : !gsLower.includes('farly') && !gsLower.includes('gajah mada');
 
-      return matchQuery && matchFleet && matchStatus && matchFuel && matchSpbu;
+      const logIso = normalizeIsoDate(log.date);
+      const matchDateStart = !filterDateStart || (logIso !== '' && logIso >= filterDateStart);
+      const matchDateEnd = !filterDateEnd || (logIso !== '' && logIso <= filterDateEnd);
+      const matchArea =
+        filterArea === 'all' ||
+        String(log.routeTrip || '').trim().toLowerCase() === filterArea.trim().toLowerCase();
+
+      return matchQuery && matchFleet && matchStatus && matchFuel && matchSpbu && matchDateStart && matchDateEnd && matchArea;
     });
 
     if (logSortBy === 'efficient_asc') {
@@ -1147,7 +1165,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       return [...list].sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.createdAt || '').localeCompare(b.createdAt || ''));
     }
     return [...list].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || '').localeCompare(a.createdAt || ''));
-  }, [reconciledLogs, searchQuery, filterFleetId, filterStatus, filterFuelType, filterSpbu, logSortBy, cleanCanonicalFleets, fleets]);
+  }, [reconciledLogs, searchQuery, filterFleetId, filterStatus, filterFuelType, filterSpbu, filterDateStart, filterDateEnd, filterArea, logSortBy, cleanCanonicalFleets, fleets]);
 
   const totalLogsPages = useMemo(
     () => Math.max(1, Math.ceil(filteredLogs.length / LOGS_PER_PAGE)),
@@ -1174,67 +1192,54 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
   const calcOutput = useMemo(() => {
     const target = FUEL_TARGET_RATIOS[calcFleetType]?.target || 7.5;
-    const estLiters = Number((calcDistanceKm / target).toFixed(1));
+    const estLiters = Number((calcDistanceKm / target).toFixed(2));
     const estTotalCost = Math.round(estLiters * calcCustomPrice);
     const costPerKm = calcDistanceKm > 0 ? Math.round(estTotalCost / calcDistanceKm) : 0;
     const costPerBox = calcCargoBoxes > 0 ? Math.round(estTotalCost / calcCargoBoxes) : 0;
     return { target, estLiters, estTotalCost, costPerKm, costPerBox };
   }, [calcFleetType, calcDistanceKm, calcCustomPrice, calcCargoBoxes]);
 
-  const handleExportCSV = () => {
-    const headers = [
-      'ID Log', 'Tanggal', 'Cabang', 'Plat Nomor', 'Inisial', 'Tipe Kendaraan',
-      'Driver', 'Helper', 'Jenis BBM', 'Liter', 'Harga/L', 'Total Biaya (Rp)',
-      'KM Awal', 'KM Akhir', 'Jarak (KM)', 'Sumber Jarak', 'Rasio (KM/L)',
-      'Standar Target', 'Status Efisiensi', 'SPBU', 'Rute Perjalanan', 'Catatan'
-    ];
-
-    const rows = filteredLogs.map(l => {
+  const handleExportExcel = () => {
+    const sourceRows = filteredLogs.length > 0 ? filteredLogs : reconciledLogs;
+    const excelRows = sourceRows.map(l => {
       const bId = resolveLogBranchId(l);
       const bLabel = bId === 'cab-sidoarjo' ? 'Cabang Sidoarjo' : 'Cabang Nusantara';
-      return [
-        l.id,
-        l.date,
-        bLabel,
-        l.plateNumber,
-        l.initialCode || '-',
-        l.vehicleType,
-        l.driverName,
-        l.helperName || '-',
-        l.fuelType,
-        l.liters,
-        l.costPerLiter,
-        l.totalCost,
-        l.startOdometerKm,
-        l.endOdometerKm,
-        l.distanceKm,
-        l.distanceSource === 'portal' ? 'Portal Driver' : 'Input BBM',
-        l.ratioKmPerLiter,
-        l.targetRatio,
-        l.efficiencyStatus,
-        `"${l.gasStation}"`,
-        `"${l.routeTrip || '-'}"`,
-        `"${l.notes || '-'}"`
-      ];
+      return {
+        'ID Log': l.id,
+        'Tanggal': l.date,
+        'Cabang': bLabel,
+        'Plat Nomor': l.plateNumber,
+        'Inisial Armada': l.initialCode || '-',
+        'Tipe Kendaraan': l.vehicleType,
+        'Driver': l.driverName,
+        'Helper': l.helperName || '-',
+        'Jenis BBM': l.fuelType,
+        'Volume (Liter)': Number(Number(l.liters || 0).toFixed(2)),
+        'Harga per Liter (Rp)': Number(l.costPerLiter || 0),
+        'Total Biaya (Rp)': Number(l.totalCost || 0),
+        'KM Awal': Number(l.startOdometerKm || 0),
+        'KM Akhir': Number(l.endOdometerKm || 0),
+        'Jarak Tempuh (KM)': Number(l.distanceKm || 0),
+        'Sumber Jarak': l.distanceSource === 'portal' ? 'Portal Driver' : 'Input BBM',
+        'Rasio (KM/L)': Number(Number(l.ratioKmPerLiter || 0).toFixed(2)),
+        'Standar Target (KM/L)': Number(Number(l.targetRatio || 0).toFixed(2)),
+        'Status Efisiensi': l.efficiencyStatus,
+        'SPBU': l.gasStation,
+        'Area / Rute': l.routeTrip || '-'
+      };
     });
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const link = document.createElement('a');
-    link.setAttribute('href', encodeURI(csvContent));
-    link.setAttribute('download', `efisiensi_bbm_akk_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const ws = XLSX.utils.json_to_sheet(excelRows);
+    ws['!cols'] = [
+      { wch: 18 }, { wch: 12 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 15 },
+      { wch: 24 }, { wch: 20 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 16 },
+      { wch: 11 }, { wch: 11 }, { wch: 14 }, { wch: 14 }, { wch: 13 }, { wch: 16 },
+      { wch: 22 }, { wch: 20 }, { wch: 24 }
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Efisiensi BBM');
+    XLSX.writeFile(wb, `Efisiensi_BBM_AKK_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
-
-  // Calendar grid helper for modal date picker
-  const calYear = calendarViewMonth.getFullYear();
-  const calMonthIdx = calendarViewMonth.getMonth();
-  const firstDayOffset = new Date(calYear, calMonthIdx, 1).getDay();
-  const daysInCalMonth = new Date(calYear, calMonthIdx + 1, 0).getDate();
-  const calendarCells: (number | null)[] = [];
-  for (let i = 0; i < firstDayOffset; i++) calendarCells.push(null);
-  for (let d = 1; d <= daysInCalMonth; d++) calendarCells.push(d);
 
   return (
     <div className="akk-flat-fuel bg-slate-50 min-h-full p-4 sm:p-6 space-y-5 text-slate-900">
@@ -1309,11 +1314,12 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
             <button
               type="button"
-              onClick={handleExportCSV}
+              onClick={handleExportExcel}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition cursor-pointer whitespace-nowrap"
+              title="Unduh data efisiensi BBM format Excel (.xlsx)"
             >
               <Download className="w-3.5 h-3.5 text-slate-500" />
-              <span>CSV</span>
+              <span>Excel</span>
             </button>
 
             <button
@@ -1332,7 +1338,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
           <div className="p-4 rounded-xl border border-slate-200 bg-white">
             <div className="text-xs font-semibold text-slate-500">Total Konsumsi &amp; Biaya BBM</div>
             <div className="text-2xl font-bold text-slate-900 font-mono tabular-nums mt-1">
-              {kpiSummary.totalLiters.toLocaleString('id-ID')} <span className="text-sm font-medium text-slate-500">Liter</span>
+              {kpiSummary.totalLiters.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-sm font-medium text-slate-500">Liter</span>
             </div>
             <div className="text-xs text-slate-500 mt-1 tabular-nums">
               Rp {(kpiSummary.totalCost / 1000000).toFixed(2)} Juta · Rp {kpiSummary.overallAvgCostPerKm.toLocaleString('id-ID')}/KM
@@ -1802,7 +1808,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                         )}
                       </td>
                       <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap">
-                        {item.totalLiters.toLocaleString('id-ID')} L
+                        {Number(item.totalLiters || 0).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L
                       </td>
                       <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-slate-900 whitespace-nowrap">
                         {item.avgLKm}
@@ -1924,7 +1930,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     <td className="py-3 px-4 text-xs text-slate-600 whitespace-nowrap">{item.areaKirim}</td>
                     <td className="py-3 px-4 text-right font-mono tabular-nums">{item.totalLogs}x</td>
                     <td className="py-3 px-4 text-right font-mono tabular-nums font-semibold text-slate-900">
-                      {item.totalLiters.toLocaleString('id-ID')} L
+                      {Number(item.totalLiters || 0).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L
                     </td>
                     <td className="py-3 px-4 text-right font-mono tabular-nums font-semibold text-blue-600">
                       {item.totalDistanceKm.toLocaleString('id-ID')}
@@ -2030,7 +2036,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                       <td className="py-3 px-4 text-right font-mono tabular-nums font-semibold text-blue-600">
                         {d.totalDistanceKm.toLocaleString('id-ID')} KM
                       </td>
-                      <td className="py-3 px-4 text-right font-mono tabular-nums">{d.totalLiters.toLocaleString('id-ID')} L</td>
+                      <td className="py-3 px-4 text-right font-mono tabular-nums">{Number(d.totalLiters || 0).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L</td>
                       <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-slate-900">
                         {d.avgKmPerLiter}
                       </td>
@@ -2149,6 +2155,74 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                 <option value="wasteful_desc">Rasio Paling Boros</option>
               </select>
             </div>
+
+            {/* Filter Kalender & Area Pengiriman */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2.5 pt-2 border-t border-slate-100">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 lg:col-span-2">
+                <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span className="text-[11px] font-semibold text-slate-500 shrink-0">Dari:</span>
+                <input
+                  type="date"
+                  aria-label="Tanggal Mulai Audit BBM"
+                  value={filterDateStart}
+                  onChange={e => setFilterDateStart(e.target.value)}
+                  className="w-full bg-transparent text-xs font-mono text-slate-800 focus:outline-none cursor-pointer"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 lg:col-span-2">
+                <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span className="text-[11px] font-semibold text-slate-500 shrink-0">Sampai:</span>
+                <input
+                  type="date"
+                  aria-label="Tanggal Akhir Audit BBM"
+                  value={filterDateEnd}
+                  onChange={e => setFilterDateEnd(e.target.value)}
+                  className="w-full bg-transparent text-xs font-mono text-slate-800 focus:outline-none cursor-pointer"
+                />
+              </div>
+
+              <select
+                value={filterArea}
+                onChange={e => setFilterArea(e.target.value)}
+                aria-label="Filter Area Pengiriman"
+                className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:border-blue-600 cursor-pointer"
+              >
+                <option value="all">Semua Area</option>
+                {auditAreaOptions.map(area => (
+                  <option key={area} value={area}>
+                    {area}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setFilterFleetId('all');
+                  setFilterSpbu('all');
+                  setFilterStatus('all');
+                  setFilterDateStart('');
+                  setFilterDateEnd('');
+                  setFilterArea('all');
+                  setLogSortBy('date_desc');
+                }}
+                disabled={
+                  !searchQuery &&
+                  filterFleetId === 'all' &&
+                  filterSpbu === 'all' &&
+                  filterStatus === 'all' &&
+                  !filterDateStart &&
+                  !filterDateEnd &&
+                  filterArea === 'all' &&
+                  logSortBy === 'date_desc'
+                }
+                className="px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition cursor-pointer disabled:opacity-45 disabled:cursor-default"
+              >
+                Reset Filter
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -2199,7 +2273,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                           </div>
                         </td>
                         <td className="py-3.5 px-4 text-right font-mono tabular-nums whitespace-nowrap text-xs">
-                          <span className="font-semibold text-slate-900">{log.liters} L</span>
+                          <span className="font-semibold text-slate-900">{Number(log.liters || 0).toFixed(2)} L</span>
                           <span className="text-slate-400 mx-1">·</span>
                           <span className="text-slate-600">Rp {log.totalCost.toLocaleString('id-ID')}</span>
                         </td>
@@ -2319,471 +2393,76 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       {/* =================================================================== */}
       {/* MODAL 1: CATAT / EDIT BBM                                           */}
       {/* =================================================================== */}
-      {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
-          <div
-            ref={modalDropdownRef}
-            className="bg-white border border-slate-200 rounded-xl w-full max-w-2xl max-h-[92vh] overflow-y-auto"
-          >
-            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white z-20">
-              <div>
-                <h2 className="text-lg font-bold text-slate-900">
-                  {editingLogId ? 'Edit Catatan Pengisian BBM' : 'Catat Pengisian BBM Baru'}
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Otomatis menyinkronkan odometer Portal Driver jika tersedia pada tanggal &amp; armada terpilih.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsAddModalOpen(false)}
-                className="p-2 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveFuelLog} className="p-5 space-y-4">
-              {formError && (
-                <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-semibold flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 shrink-0" />
-                  <span>{formError}</span>
-                </div>
-              )}
-
-              {/* Cabang */}
-              <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-lg border border-slate-200">
-                {([
-                  { id: 'cab-banyuwangi', label: 'Cabang Nusantara' },
-                  { id: 'cab-sidoarjo', label: 'Cabang Sidoarjo' }
-                ] as const).map(br => (
-                  <button
-                    key={br.id}
-                    type="button"
-                    onClick={() => {
-                      setFormBranchId(br.id);
-                      setFormFleetId('');
-                      setFormDriverId('');
-                      setFormDriverName('');
-                      setFormHelperId('');
-                      setFormHelperName('');
-                    }}
-                    className={`py-2 rounded-md text-xs font-semibold transition cursor-pointer ${
-                      formBranchId === br.id
-                        ? 'bg-white text-blue-600 border border-slate-200'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    {br.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Fleet Selector */}
-                <div className="relative">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Armada Truk *</label>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setActiveModalDropdown(activeModalDropdown === 'fleet' ? null : 'fleet')
-                    }
-                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-left text-sm flex items-center justify-between cursor-pointer hover:border-blue-600"
-                  >
-                    <span className={selectedFormFleet ? 'text-slate-900 font-medium' : 'text-slate-400'}>
-                      {selectedFormFleet
-                        ? `${selectedFormFleet.initialCode || selectedFormFleet.plateNumber} (${selectedFormFleet.plateNumber})`
-                        : 'Pilih Armada'}
-                    </span>
-                    <ChevronDown className="w-4 h-4 text-slate-400" />
-                  </button>
-
-                  {activeModalDropdown === 'fleet' && (
-                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
-                      <div className="p-2 border-b border-slate-100">
-                        <input
-                          type="text"
-                          value={fleetSearchFilter}
-                          onChange={e => setFleetSearchFilter(e.target.value)}
-                          placeholder="Cari plat atau kode armada..."
-                          className="w-full px-2.5 py-1.5 rounded border border-slate-200 text-xs focus:outline-none focus:border-blue-600"
-                        />
-                      </div>
-                      <div className="max-h-52 overflow-y-auto divide-y divide-slate-100">
-                        {filteredModalFleets.map(f => (
-                          <button
-                            key={f.id}
-                            type="button"
-                            onClick={() => {
-                              handleFleetSelection(f.id);
-                              setActiveModalDropdown(null);
-                            }}
-                            className={`w-full px-3 py-2 text-left text-xs flex items-center justify-between hover:bg-blue-50 cursor-pointer ${
-                              formFleetId === f.id ? 'bg-blue-50 font-semibold text-blue-700' : 'text-slate-800'
-                            }`}
-                          >
-                            <span>
-                              {f.initialCode || f.plateNumber} · <span className="font-mono text-slate-500">{f.plateNumber}</span>
-                            </span>
-                            <span className="text-[11px] text-slate-500">{f.vehicleType}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Date Picker */}
-                <div className="relative">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Tanggal Pengisian *</label>
-                  <button
-                    type="button"
-                    onClick={() => setActiveModalDropdown(activeModalDropdown === 'date' ? null : 'date')}
-                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-left text-sm flex items-center justify-between cursor-pointer hover:border-blue-600"
-                  >
-                    <span className="font-mono text-slate-900">{formDate}</span>
-                    <Calendar className="w-4 h-4 text-slate-400" />
-                  </button>
-
-                  {activeModalDropdown === 'date' && (
-                    <div className="absolute right-0 top-full mt-1 z-30 w-72 bg-white border border-slate-200 rounded-lg shadow-lg p-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <button
-                          type="button"
-                          onClick={() => setCalendarViewMonth(new Date(calYear, calMonthIdx - 1, 1))}
-                          className="p-1 rounded border border-slate-200 hover:bg-slate-50 cursor-pointer"
-                        >
-                          <ChevronLeft className="w-4 h-4" />
-                        </button>
-                        <span className="text-xs font-bold text-slate-900">
-                          {MONTHS_FULL_ID[calMonthIdx]} {calYear}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setCalendarViewMonth(new Date(calYear, calMonthIdx + 1, 1))}
-                          className="p-1 rounded border border-slate-200 hover:bg-slate-50 cursor-pointer"
-                        >
-                          <ChevronRight className="w-4 h-4" />
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-7 gap-1 text-center">
-                        {['M', 'S', 'S', 'R', 'K', 'J', 'S'].map((d, i) => (
-                          <span key={i} className="text-[10px] font-semibold text-slate-400">{d}</span>
-                        ))}
-                        {calendarCells.map((day, idx) => {
-                          if (day === null) return <div key={`e-${idx}`} />;
-                          const iso = `${calYear}-${String(calMonthIdx + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                          return (
-                            <button
-                              key={iso}
-                              type="button"
-                              onClick={() => {
-                                setFormDate(iso);
-                                setActiveModalDropdown(null);
-                              }}
-                              className={`h-7 rounded text-xs font-mono cursor-pointer ${
-                                formDate === iso ? 'bg-blue-600 text-white font-bold' : 'hover:bg-slate-100 text-slate-700'
-                              }`}
-                            >
-                              {day}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Driver Selector */}
-                <div className="relative">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Driver Bertugas *</label>
-                  <button
-                    type="button"
-                    onClick={() => setActiveModalDropdown(activeModalDropdown === 'driver' ? null : 'driver')}
-                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-left text-sm flex items-center justify-between cursor-pointer hover:border-blue-600"
-                  >
-                    <span className={formDriverName ? 'text-slate-900 font-medium' : 'text-slate-400'}>
-                      {formDriverName || 'Pilih Driver'}
-                    </span>
-                    <ChevronDown className="w-4 h-4 text-slate-400" />
-                  </button>
-
-                  {activeModalDropdown === 'driver' && (
-                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
-                      <div className="p-2 border-b border-slate-100">
-                        <input
-                          type="text"
-                          value={driverSearchFilter}
-                          onChange={e => setDriverSearchFilter(e.target.value)}
-                          placeholder="Cari nama driver..."
-                          className="w-full px-2.5 py-1.5 rounded border border-slate-200 text-xs focus:outline-none focus:border-blue-600"
-                        />
-                      </div>
-                      <div className="max-h-48 overflow-y-auto divide-y divide-slate-100">
-                        {filteredDriverOptions.map(d => (
-                          <button
-                            key={d.id}
-                            type="button"
-                            onClick={() => {
-                              setFormDriverId(d.id);
-                              setFormDriverName(d.name);
-                              setActiveModalDropdown(null);
-                            }}
-                            className="w-full px-3 py-2 text-left text-xs flex items-center justify-between hover:bg-blue-50 cursor-pointer"
-                          >
-                            <span className="font-medium text-slate-900">{d.name}</span>
-                            <span className="text-[11px] text-slate-500">{d.role}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Helper Selector */}
-                <div className="relative">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Helper (Opsional)</label>
-                  <button
-                    type="button"
-                    onClick={() => setActiveModalDropdown(activeModalDropdown === 'helper' ? null : 'helper')}
-                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-left text-sm flex items-center justify-between cursor-pointer hover:border-blue-600"
-                  >
-                    <span className={formHelperName ? 'text-slate-900 font-medium' : 'text-slate-400'}>
-                      {formHelperName || 'Tanpa Helper'}
-                    </span>
-                    <ChevronDown className="w-4 h-4 text-slate-400" />
-                  </button>
-
-                  {activeModalDropdown === 'helper' && (
-                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
-                      <div className="p-2 border-b border-slate-100">
-                        <input
-                          type="text"
-                          value={helperSearchFilter}
-                          onChange={e => setHelperSearchFilter(e.target.value)}
-                          placeholder="Cari nama helper..."
-                          className="w-full px-2.5 py-1.5 rounded border border-slate-200 text-xs focus:outline-none focus:border-blue-600"
-                        />
-                      </div>
-                      <div className="max-h-48 overflow-y-auto divide-y divide-slate-100">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFormHelperId('');
-                            setFormHelperName('');
-                            setActiveModalDropdown(null);
-                          }}
-                          className="w-full px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-50 cursor-pointer"
-                        >
-                          Tanpa Helper
-                        </button>
-                        {filteredHelperOptions.map(h => (
-                          <button
-                            key={h.id}
-                            type="button"
-                            onClick={() => {
-                              setFormHelperId(h.id);
-                              setFormHelperName(h.name);
-                              setActiveModalDropdown(null);
-                            }}
-                            className="w-full px-3 py-2 text-left text-xs flex items-center justify-between hover:bg-blue-50 cursor-pointer"
-                          >
-                            <span className="font-medium text-slate-900">{h.name}</span>
-                            <span className="text-[11px] text-slate-500">{h.role}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Fuel Type & Price */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Jenis BBM *</label>
-                  <select
-                    value={formFuelType}
-                    onChange={e => handleFuelTypeChange(e.target.value as FuelType)}
-                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-blue-600 cursor-pointer"
-                  >
-                    {FUEL_TYPES.map(ft => (
-                      <option key={ft} value={ft}>{ft}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Harga per Liter (Rp) *</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={formCostPerLiter}
-                    onChange={e => setFormCostPerLiter(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm font-mono text-slate-900 focus:outline-none focus:border-blue-600"
-                  />
-                </div>
-
-                {/* Volume & SPBU */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Volume BBM (Liter) *</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    placeholder="Contoh: 25.5"
-                    value={formLiters}
-                    onChange={e => setFormLiters(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm font-mono text-slate-900 focus:outline-none focus:border-blue-600"
-                  />
-                </div>
-
-                <div className="relative">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">SPBU Pengisian *</label>
-                  <input
-                    type="text"
-                    value={formGasStation}
-                    onFocus={() => setIsGasStationDropdownOpen(true)}
-                    onChange={e => setFormGasStation(e.target.value)}
-                    placeholder="Nama SPBU"
-                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-blue-600"
-                  />
-                  {isGasStationDropdownOpen && (
-                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-lg divide-y divide-slate-100">
-                      {['SPBU Farly', 'SPBU Gajah Mada', 'SPBU Luar / Urgent'].map(st => (
-                        <button
-                          key={st}
-                          type="button"
-                          onClick={() => {
-                            setFormGasStation(st);
-                            setIsGasStationDropdownOpen(false);
-                          }}
-                          className="w-full px-3 py-2 text-left text-xs text-slate-800 hover:bg-blue-50 flex items-center justify-between cursor-pointer"
-                        >
-                          <span>{st}</span>
-                          {formGasStation === st && <Check className="w-3.5 h-3.5 text-blue-600" />}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* KM Awal & Akhir */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">KM Awal (Berangkat) *</label>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="Odometer awal"
-                    value={formStartOdo}
-                    onChange={e => setFormStartOdo(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm font-mono text-slate-900 focus:outline-none focus:border-blue-600"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">KM Akhir / Isi BBM *</label>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="Odometer saat isi / pulang"
-                    value={formEndOdo}
-                    onChange={e => setFormEndOdo(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm font-mono text-slate-900 focus:outline-none focus:border-blue-600"
-                  />
-                </div>
-
-                {/* Area / Rute Pengiriman */}
-                <div className="relative sm:col-span-2">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Area / Rute Pengiriman</label>
-                  <button
-                    type="button"
-                    onClick={() => setActiveModalDropdown(activeModalDropdown === 'area' ? null : 'area')}
-                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-left text-sm flex items-center justify-between cursor-pointer hover:border-blue-600"
-                  >
-                    <span className={formRouteTrip ? 'text-slate-900' : 'text-slate-400'}>
-                      {formRouteTrip || 'Pilih Area Tujuan'}
-                    </span>
-                    <ChevronDown className="w-4 h-4 text-slate-400" />
-                  </button>
-
-                  {activeModalDropdown === 'area' && (
-                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
-                      <div className="p-2 border-b border-slate-100">
-                        <input
-                          type="text"
-                          value={areaSearchFilter}
-                          onChange={e => setAreaSearchFilter(e.target.value)}
-                          placeholder="Cari area pengiriman..."
-                          className="w-full px-2.5 py-1.5 rounded border border-slate-200 text-xs focus:outline-none focus:border-blue-600"
-                        />
-                      </div>
-                      <div className="max-h-48 overflow-y-auto divide-y divide-slate-100">
-                        {filteredAreaOptions.map(area => (
-                          <button
-                            key={area}
-                            type="button"
-                            onClick={() => {
-                              setFormRouteTrip(area);
-                              setActiveModalDropdown(null);
-                            }}
-                            className="w-full px-3 py-2 text-left text-xs text-slate-800 hover:bg-blue-50 cursor-pointer"
-                          >
-                            {area}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Live Calculation Summary */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
-                <div>
-                  <div className="text-[11px] text-slate-500">Jarak Tempuh</div>
-                  <div className="text-sm font-bold text-slate-900 font-mono tabular-nums">
-                    {liveFormDistance.toLocaleString('id-ID')} KM
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[11px] text-slate-500">Total Biaya</div>
-                  <div className="text-sm font-bold text-slate-900 font-mono tabular-nums">
-                    Rp {liveFormTotalCost.toLocaleString('id-ID')}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[11px] text-slate-500">Estimasi Rasio</div>
-                  <div className="text-sm font-bold text-blue-600 font-mono tabular-nums">
-                    {liveFormRatio} KM/L
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[11px] text-slate-500">Evaluasi</div>
-                  <div className={`text-xs font-semibold px-2 py-0.5 rounded border inline-block mt-0.5 ${liveFormEfficiency.tone}`}>
-                    {liveFormEfficiency.status}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingFuelLog}
-                  className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition cursor-pointer disabled:opacity-50"
-                >
-                  {isSavingFuelLog ? 'Menyimpan...' : editingLogId ? 'Simpan Perubahan' : 'Simpan Catatan BBM'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <FuelEntryFormModal
+        isOpen={isAddModalOpen}
+        editingLogId={editingLogId}
+        formError={formError}
+        formBranchId={formBranchId}
+        onBranchChange={branchId => {
+          setFormBranchId(branchId);
+          setFormFleetId('');
+          setFormDriverId('');
+          setFormDriverName('');
+          setFormHelperId('');
+          setFormHelperName('');
+        }}
+        formFleetId={formFleetId}
+        selectedFormFleet={selectedFormFleet}
+        filteredModalFleets={filteredModalFleets}
+        fleetSearchFilter={fleetSearchFilter}
+        onFleetSearchFilterChange={setFleetSearchFilter}
+        onSelectFleet={handleFleetSelection}
+        formDate={formDate}
+        onDateChange={setFormDate}
+        calendarViewMonth={calendarViewMonth}
+        onCalendarViewMonthChange={setCalendarViewMonth}
+        formDriverName={formDriverName}
+        filteredDriverOptions={filteredDriverOptions}
+        driverSearchFilter={driverSearchFilter}
+        onDriverSearchFilterChange={setDriverSearchFilter}
+        onSelectDriver={(id, name) => {
+          setFormDriverId(id);
+          setFormDriverName(name);
+        }}
+        formHelperName={formHelperName}
+        filteredHelperOptions={filteredHelperOptions}
+        helperSearchFilter={helperSearchFilter}
+        onHelperSearchFilterChange={setHelperSearchFilter}
+        onSelectHelper={(id, name) => {
+          setFormHelperId(id);
+          setFormHelperName(name);
+        }}
+        formFuelType={formFuelType}
+        fuelTypes={FUEL_TYPES}
+        onFuelTypeChange={handleFuelTypeChange}
+        formCostPerLiter={formCostPerLiter}
+        onCostPerLiterChange={setFormCostPerLiter}
+        formLiters={formLiters}
+        onLitersChange={setFormLiters}
+        formGasStation={formGasStation}
+        onGasStationChange={setFormGasStation}
+        isGasStationDropdownOpen={isGasStationDropdownOpen}
+        onGasStationDropdownOpenChange={setIsGasStationDropdownOpen}
+        formStartOdo={formStartOdo}
+        onStartOdoChange={setFormStartOdo}
+        formEndOdo={formEndOdo}
+        onEndOdoChange={setFormEndOdo}
+        formRouteTrip={formRouteTrip}
+        filteredAreaOptions={filteredAreaOptions}
+        areaSearchFilter={areaSearchFilter}
+        onAreaSearchFilterChange={setAreaSearchFilter}
+        onSelectArea={setFormRouteTrip}
+        activeModalDropdown={activeModalDropdown}
+        onActiveModalDropdownChange={setActiveModalDropdown}
+        modalDropdownRef={modalDropdownRef}
+        liveFormDistance={liveFormDistance}
+        liveFormTotalCost={liveFormTotalCost}
+        liveFormRatio={liveFormRatio}
+        liveFormEfficiency={liveFormEfficiency}
+        isSavingFuelLog={isSavingFuelLog}
+        onClose={() => setIsAddModalOpen(false)}
+        onSubmit={handleSaveFuelLog}
+      />
 
       {/* =================================================================== */}
       {/* MODAL 2: KALKULATOR ESTIMASI BBM                                    */}
@@ -2895,7 +2574,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
                 <div>
                   <div className="text-xs text-slate-500">Estimasi BBM</div>
-                  <div className="text-lg font-bold text-slate-900 font-mono tabular-nums">{calcOutput.estLiters} L</div>
+                  <div className="text-lg font-bold text-slate-900 font-mono tabular-nums">{calcOutput.estLiters.toFixed(2)} L</div>
                   <div className="text-[11px] text-slate-500">Target {calcOutput.target} KM/L</div>
                 </div>
                 <div>
@@ -2960,7 +2639,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                 ...(selectedLogForDetail.helperName ? [{ label: 'Helper', value: selectedLogForDetail.helperName }] : []),
                 { label: 'SPBU', value: selectedLogForDetail.gasStation },
                 { label: 'Area Kirim', value: selectedLogForDetail.routeTrip || '-' },
-                { label: 'Volume & Jenis', value: `${selectedLogForDetail.liters} L (${selectedLogForDetail.fuelType})` },
+                { label: 'Volume & Jenis', value: `${Number(selectedLogForDetail.liters || 0).toFixed(2)} L (${selectedLogForDetail.fuelType})` },
                 { label: 'Total Biaya', value: `Rp ${selectedLogForDetail.totalCost.toLocaleString('id-ID')}` },
                 { label: 'Odometer', value: `${selectedLogForDetail.startOdometerKm} – ${selectedLogForDetail.endOdometerKm} KM` },
                 {

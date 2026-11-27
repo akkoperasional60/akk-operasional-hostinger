@@ -24,7 +24,8 @@ import {
   Warehouse,
   FileText,
   ChevronDown,
-  Check
+  Check,
+  RefreshCw
 } from 'lucide-react';
 import { SparePart, SparePartUsage, SparePartCategory, Fleet } from '../types';
 import { logisticsStore } from '../services/store';
@@ -39,22 +40,48 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
   initialFleetId,
   onNavigateToFleets
 }) => {
+  const currentUser = logisticsStore.getCurrentUser();
+  const isSuperAdmin = String(currentUser?.role || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[\s_-]+/g, '') === 'superadmin';
+
   const [activeTab, setActiveTab] = useState<'inventory' | 'fleet_health' | 'history'>('fleet_health');
   const [spareParts, setSpareParts] = useState<SparePart[]>(logisticsStore.getSpareParts());
   const [usages, setUsages] = useState<SparePartUsage[]>(logisticsStore.getSparePartUsages());
   const [allFleets, setAllFleets] = useState<Fleet[]>(logisticsStore.getFleets());
+  const [isRefreshingServer, setIsRefreshingServer] = useState(false);
+  const [confirmDeletePartId, setConfirmDeletePartId] = useState<string | null>(null);
+  const [confirmDeleteUsageId, setConfirmDeleteUsageId] = useState<string | null>(null);
 
-  // Multi-Branch State
-  const [selectedBranchId, setSelectedBranchId] = useState<string>(() => branchStore.getSelectedOriginBranchId());
+  // Multi-Branch State (Super Admin defaults to ALL branches so cross-branch spareparts & logs are visible immediately)
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(() =>
+    isSuperAdmin ? 'ALL' : branchStore.getSelectedOriginBranchId()
+  );
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState<boolean>(false);
   const branches = branchStore.getBranches();
   const selectedBranch = branches.find((b: any) => b.id === selectedBranchId) || branches[0];
 
   useEffect(() => {
+    if (isSuperAdmin) {
+      branchStore.setSelectedOriginBranchId('ALL');
+    }
     return branchStore.subscribe(() => {
       setSelectedBranchId(branchStore.getSelectedOriginBranchId());
     });
-  }, []);
+  }, [isSuperAdmin]);
+
+  const handleRefreshFromServer = async () => {
+    setIsRefreshingServer(true);
+    try {
+      await logisticsStore.refreshSparePartsFromServer();
+      setSpareParts(logisticsStore.getSpareParts());
+      setUsages(logisticsStore.getSparePartUsages());
+      setAllFleets(logisticsStore.getFleets());
+    } finally {
+      setIsRefreshingServer(false);
+    }
+  };
 
   // Filter fleets by selected branch
   const fleets = selectedBranchId === 'ALL'
@@ -137,13 +164,14 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
     return `${parts[2]} ${months[mIdx] || parts[1]} ${parts[0]}`;
   };
 
-  // Subscribe to store updates
+  // Subscribe to store updates & sync from MySQL server on mount so Super Admin always sees entries added by other branches/accounts
   useEffect(() => {
     const unsubscribe = logisticsStore.subscribe(() => {
       setSpareParts(logisticsStore.getSpareParts());
       setUsages(logisticsStore.getSparePartUsages());
       setAllFleets(logisticsStore.getFleets());
     });
+    void handleRefreshFromServer();
     return unsubscribe;
   }, []);
 
@@ -229,7 +257,10 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
   // Submit new Spare Part
   const handleCreatePart = (e: React.FormEvent) => {
     e.preventDefault();
-    logisticsStore.addSparePart(newPart);
+    logisticsStore.addSparePart({
+      ...newPart,
+      createdBy: logisticsStore.getCurrentUser().fullName
+    });
     setIsAddPartOpen(false);
     setNewPart({
       name: '',
@@ -258,7 +289,7 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
   // Submit Usage (Routine Replacement)
   const handleSubmitUsage = (e: React.FormEvent) => {
     e.preventDefault();
-    const selectedFleet = fleets.find(f => f.id === usageForm.fleetId);
+    const selectedFleet = allFleets.find(f => f.id === usageForm.fleetId);
     const selectedPart = spareParts.find(p => p.id === usageForm.partId);
 
     if (!selectedFleet) return;
@@ -307,11 +338,14 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
     return matchSearch && matchCat;
   });
 
-  // Filtered Usages
+  // Filtered Usages (Super Admin 'ALL' sees usages across all branches; specific branch filters to its fleets)
   const filteredUsages = usages.filter(u => {
+    const matchBranch =
+      selectedBranchId === 'ALL' ||
+      fleets.some(f => f.id === u.fleetId || f.plateNumber === u.plateNumber);
     const matchFleet = selectedFleetFilter === 'all' || u.fleetId === selectedFleetFilter;
     const matchCat = selectedCategory === 'all' || u.category === selectedCategory;
-    return matchFleet && matchCat;
+    return matchBranch && matchFleet && matchCat;
   });
 
   // Category Icon & Color Helper
@@ -490,11 +524,24 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
             </div>
 
             <button
+              type="button"
+              onClick={() => {
+                void handleRefreshFromServer();
+              }}
+              disabled={isRefreshingServer}
+              className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer disabled:opacity-60"
+              title="Muat ulang data sparepart dari server MySQL"
+            >
+              <RefreshCw className={`w-4 h-4 text-blue-400 ${isRefreshingServer ? 'animate-spin' : ''}`} />
+              <span>{isRefreshingServer ? 'Menyegarkan...' : 'Segarkan'}</span>
+            </button>
+
+            <button
               onClick={() => {
                 const defaultFleet = fleets[0] || allFleets[0];
                 if (defaultFleet) handleOpenLogForFleet(defaultFleet, 'oli');
               }}
-              className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-2 shadow-lg shadow-amber-500/20 transition cursor-pointer active:scale-95"
+              className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-2 transition cursor-pointer active:scale-95"
             >
               <Wrench className="w-4 h-4" />
               <span>Ganti Sparepart</span>
@@ -502,7 +549,7 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
 
             <button
               onClick={() => setIsAddPartOpen(true)}
-              className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
             >
               <Plus className="w-4 h-4 text-emerald-400" />
               <span>Tambah Master Part</span>
@@ -919,6 +966,13 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                         <span className="text-slate-400 text-[11px]">Harga Satuan (Est):</span>
                         <span className="font-bold text-amber-400">Rp {part.costPerUnit.toLocaleString('id-ID')}</span>
                       </div>
+
+                      {part.createdBy && (
+                        <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
+                          <span className="text-slate-400 text-[11px]">Diinput Oleh:</span>
+                          <span className="font-semibold text-slate-200 text-[11px] truncate max-w-[60%]">{part.createdBy}</span>
+                        </div>
+                      )}
                     </div>
 
                     {part.notes && (
@@ -929,7 +983,7 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                   </div>
 
                   {/* Footer & Stock Controls */}
-                  <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between">
+                  <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
                     <div>
                       <span className="text-[10px] text-slate-400 block">Stok Tersedia</span>
                       <span className={`text-lg font-black ${isLowStock ? 'text-rose-400' : 'text-emerald-400'}`}>
@@ -943,7 +997,7 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                           setSelectedPartForRestock(part);
                           setIsRestockOpen(true);
                         }}
-                        className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1 shadow-xs"
+                        className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1"
                         title="Restock / Tambah Stok Masuk"
                       >
                         <Plus className="w-3.5 h-3.5" />
@@ -961,17 +1015,36 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                         <Edit3 className="w-3.5 h-3.5" />
                       </button>
 
-                      <button
-                        onClick={() => {
-                          if (confirm(`Yakin ingin menghapus master part ${part.name}?`)) {
-                            logisticsStore.deleteSparePart(part.id);
-                          }
-                        }}
-                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 transition cursor-pointer"
-                        title="Hapus Part"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {confirmDeletePartId === part.id ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              logisticsStore.deleteSparePart(part.id);
+                              setConfirmDeletePartId(null);
+                            }}
+                            className="px-2 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-bold cursor-pointer"
+                          >
+                            Hapus
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeletePartId(null)}
+                            className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-[10px] font-semibold cursor-pointer"
+                          >
+                            Batal
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeletePartId(part.id)}
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 transition cursor-pointer"
+                          title="Hapus Part"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1116,23 +1189,45 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                             )}
                           </td>
                           <td className="px-4 py-3 text-slate-300">
-                            {usage.mechanicOrWorkshop}
+                            <div>{usage.mechanicOrWorkshop}</div>
+                            {usage.performedBy && (
+                              <div className="text-[10px] text-slate-400">Oleh: {usage.performedBy}</div>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-right font-mono font-bold text-emerald-400">
                             Rp {usage.totalCost.toLocaleString('id-ID')}
                           </td>
                           <td className="px-4 py-3 text-center">
-                            <button
-                              onClick={() => {
-                                if (confirm(`Hapus catatan penggantian ${usage.partName} pada ${usage.plateNumber}?`)) {
-                                  logisticsStore.deleteSparePartUsage(usage.id);
-                                }
-                              }}
-                              className="p-1 rounded hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 transition cursor-pointer"
-                              title="Hapus Catatan"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            {confirmDeleteUsageId === usage.id ? (
+                              <div className="inline-flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    logisticsStore.deleteSparePartUsage(usage.id);
+                                    setConfirmDeleteUsageId(null);
+                                  }}
+                                  className="px-2 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-bold cursor-pointer"
+                                >
+                                  Hapus
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteUsageId(null)}
+                                  className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-[10px] font-semibold cursor-pointer"
+                                >
+                                  Batal
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteUsageId(usage.id)}
+                                className="p-1 rounded hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 transition cursor-pointer"
+                                title="Hapus Catatan"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );

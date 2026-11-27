@@ -2,31 +2,21 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   ShieldCheck,
   Truck,
-  User,
   Calendar,
   AlertTriangle,
   CheckCircle2,
   Wrench,
   Search,
-  Filter,
   FileSpreadsheet,
   RefreshCw,
   Eye,
-  Clock,
-  Gauge,
-  Fuel,
-  Info,
   ChevronDown,
   ChevronRight,
-  ExternalLink,
   BookOpen,
-  Sparkles,
-  AlertOctagon,
   X,
-  FileText,
   Trash2
 } from 'lucide-react';
-import { DriverVehicleChecklist, VehicleChecklistItem } from '../types';
+import { DriverVehicleChecklist } from '../types';
 import { driverChecklistService } from '../services/driverChecklistService';
 import { MAINTENANCE_COMPONENT_RULES, getMaintenanceRuleForItem, MaintenanceComponentRule } from '../services/maintenanceGuidanceService';
 import { logisticsStore } from '../services/store';
@@ -252,10 +242,10 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
 
           <button
             onClick={handleExportCsv}
-            className="h-9 px-3.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition cursor-pointer"
+            className="h-9 px-3.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition cursor-pointer"
             title="Unduh laporan checklist ke CSV / Excel"
           >
-            <FileSpreadsheet className="w-4 h-4" />
+            <FileSpreadsheet className="w-4 h-4 text-blue-600 dark:text-blue-400" />
             <span>Ekspor CSV</span>
           </button>
         </div>
@@ -307,96 +297,83 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
       </div>
 
       {/* Filter & Fleet Selector Bar */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 space-y-2.5">
-        <div className="flex flex-col sm:flex-row gap-2.5">
-          <div className="flex-1 relative">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5 items-center">
+          <div className="lg:col-span-5 relative">
             <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Cari nomor polisi, inisial armada, nama driver, atau catatan..."
-              className="w-full h-10 pl-10 pr-8 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+              placeholder="Cari nopol, inisial armada, nama driver, atau catatan..."
+              className="w-full h-10 pl-10 pr-8 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-600"
             />
             {searchQuery && (
               <button
+                type="button"
                 onClick={() => setSearchQuery('')}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer"
+                aria-label="Hapus pencarian"
               >
                 <X className="w-4 h-4" />
               </button>
             )}
           </div>
 
-          <div className="flex items-center gap-1.5 h-10 bg-slate-50 dark:bg-slate-950 px-3 rounded-lg border border-slate-200 dark:border-slate-800 text-sm shrink-0">
-            <Calendar className="w-4 h-4 text-slate-500 shrink-0" />
+          <div className="lg:col-span-3">
+            <select
+              value={fleetFilter}
+              onChange={(e) => setFleetFilter(e.target.value)}
+              aria-label="Filter Armada"
+              className="w-full h-10 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 text-sm font-semibold rounded-lg px-3 focus:outline-none focus:border-blue-600 cursor-pointer"
+            >
+              <option value="all">Semua Armada ({uniqueFleets.length})</option>
+              {uniqueFleets.map(f => (
+                <option key={f.plate} value={f.plate}>
+                  {f.plate}{f.initialCode ? ` (${f.initialCode})` : ''} · {f.count}x
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="lg:col-span-2 flex items-center gap-1.5 h-10 bg-slate-50 dark:bg-slate-950 px-3 rounded-lg border border-slate-200 dark:border-slate-800 text-sm">
+            <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
             <input
               type="date"
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
-              className="bg-transparent text-slate-900 dark:text-white focus:outline-none font-mono text-sm cursor-pointer"
+              aria-label="Filter Tanggal"
+              className="w-full bg-transparent text-slate-900 dark:text-white focus:outline-none font-mono text-xs sm:text-sm cursor-pointer"
             />
-            {selectedDate && (
+          </div>
+
+          <div className="lg:col-span-2 flex items-center gap-2">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as any)}
+              aria-label="Filter Status Kelayakan"
+              className="w-full h-10 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 text-sm font-semibold rounded-lg px-3 focus:outline-none focus:border-blue-600 cursor-pointer"
+            >
+              <option value="all">Semua Status</option>
+              <option value="passed">Siap Jalan (Aman)</option>
+              <option value="warning">Perlu Servis</option>
+              <option value="failed">Kritis</option>
+            </select>
+            {(searchQuery || statusFilter !== 'all' || selectedDate || fleetFilter !== 'all') && (
               <button
-                onClick={() => setSelectedDate('')}
-                className="text-xs text-rose-600 dark:text-rose-400 hover:underline font-semibold ml-1 cursor-pointer"
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setStatusFilter('all');
+                  setSelectedDate('');
+                  setFleetFilter('all');
+                }}
+                className="h-10 px-3 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 cursor-pointer shrink-0"
               >
                 Reset
               </button>
             )}
           </div>
-
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as any)}
-            className="h-10 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 text-sm font-semibold rounded-lg px-3 focus:outline-none focus:border-blue-500 cursor-pointer shrink-0"
-          >
-            <option value="all">Semua Status</option>
-            <option value="passed">Siap Jalan (Aman)</option>
-            <option value="warning">Perlu Servis</option>
-            <option value="failed">Kritis</option>
-          </select>
-        </div>
-
-        {/* Pilihan Armada */}
-        <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center gap-1.5 flex-wrap">
-          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 mr-1">
-            Armada:
-          </span>
-          <button
-            type="button"
-            onClick={() => setFleetFilter('all')}
-            className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition cursor-pointer ${
-              fleetFilter === 'all'
-                ? 'bg-blue-600 text-white'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-            }`}
-          >
-            Semua ({uniqueFleets.length})
-          </button>
-
-          {uniqueFleets.map(f => {
-            const isSelected = fleetFilter === f.plate;
-            return (
-              <button
-                key={f.plate}
-                type="button"
-                onClick={() => setFleetFilter(isSelected ? 'all' : f.plate)}
-                className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition cursor-pointer flex items-center gap-1.5 ${
-                  isSelected
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-                }`}
-              >
-                <span className="font-mono font-bold">{f.plate}</span>
-                {f.initialCode && (
-                  <span className={`text-xs font-mono ${isSelected ? 'text-blue-100' : 'text-slate-500 dark:text-slate-400'}`}>
-                    ({f.initialCode})
-                  </span>
-                )}
-              </button>
-            );
-          })}
         </div>
       </div>
 
@@ -649,7 +626,7 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
 
       {/* MODAL RINCIAN LENGKAP 9 POIN CHECKLIST */}
       {selectedChecklistModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-50 bg-slate-950/60 flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-3xl w-full overflow-hidden flex flex-col max-h-[92vh]">
             <div className="px-5 py-4 bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
               <div>
@@ -762,7 +739,7 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
 
       {/* MODAL KATALOG STANDAR SERVIS ARMADA AKK */}
       {showCatalogModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-50 bg-slate-950/60 flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-4xl w-full overflow-hidden flex flex-col max-h-[92vh]">
             <div className="px-5 py-4 bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -868,7 +845,7 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
 
       {/* Modal Konfirmasi Hapus Laporan Checklist (Khusus Super Admin) */}
       {deleteConfirmChecklist && isSuperAdmin && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-50 bg-slate-950/60 flex items-center justify-center p-4 animate-in fade-in duration-150">
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-rose-500/40 rounded-2xl max-w-md w-full overflow-hidden">
             <div className="px-5 py-4 bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-2.5">

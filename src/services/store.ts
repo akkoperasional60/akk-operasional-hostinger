@@ -39,6 +39,7 @@ import {
   SecurityGateLog,
   ChatMessage
 } from '../types';
+import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 
 export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
   {
@@ -3926,10 +3927,10 @@ class LogisticsStore {
 
         // Priority 1: muat 4 data inti operasional terlebih dahulu agar UI tampil cepat tanpa membanjiri koneksi server
         let [fleetRes, crewRes, storeRes, scheduleRes] = await Promise.all([
-          fetch('/api/fleets', { credentials: 'same-origin', headers: authHeaders }),
-          fetch('/api/crews', { credentials: 'same-origin', headers: authHeaders }),
-          fetch('/api/stores', { credentials: 'same-origin', headers: authHeaders }),
-          fetch('/api/schedules/persisted', { credentials: 'same-origin', headers: authHeaders })
+          fetchWithTimeout('/api/fleets', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }),
+          fetchWithTimeout('/api/crews', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }),
+          fetchWithTimeout('/api/stores', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }),
+          fetchWithTimeout('/api/schedules/persisted', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 })
         ]);
 
         if (
@@ -3940,10 +3941,10 @@ class LogisticsStore {
           if (recovered) {
             authHeaders = this.buildSessionAuthHeaders();
             [fleetRes, crewRes, storeRes, scheduleRes] = await Promise.all([
-              fetch('/api/fleets', { credentials: 'same-origin', headers: authHeaders }),
-              fetch('/api/crews', { credentials: 'same-origin', headers: authHeaders }),
-              fetch('/api/stores', { credentials: 'same-origin', headers: authHeaders }),
-              fetch('/api/schedules/persisted', { credentials: 'same-origin', headers: authHeaders })
+              fetchWithTimeout('/api/fleets', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }),
+              fetchWithTimeout('/api/crews', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }),
+              fetchWithTimeout('/api/stores', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }),
+              fetchWithTimeout('/api/schedules/persisted', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 })
             ]);
           }
         }
@@ -3970,17 +3971,19 @@ class LogisticsStore {
           setTimeout(() => {
             void (async () => {
               try {
-                const [fuelRes, scanRes, rotationRes, adminSchedRes] = await Promise.all([
-                  fetch('/api/fuel-logs', { credentials: 'same-origin', headers: authHeaders }),
-                  fetch('/api/scanned-documents', { credentials: 'same-origin', headers: authHeaders }),
-                  fetch('/api/logistics/crew-rotation-state', { credentials: 'same-origin', headers: authHeaders }),
-                  fetch('/api/admin-schedules', { credentials: 'same-origin', headers: authHeaders })
+                const [fuelRes, scanRes, rotationRes, adminSchedRes, spareRes] = await Promise.all([
+                  fetchWithTimeout('/api/fuel-logs', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }),
+                  fetchWithTimeout('/api/scanned-documents', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }),
+                  fetchWithTimeout('/api/logistics/crew-rotation-state', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }),
+                  fetchWithTimeout('/api/admin-schedules', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }),
+                  fetchWithTimeout('/api/spare-parts', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }).catch(() => null)
                 ]);
-                const [fuelPayload, scanPayload, rotationPayload, adminSchedPayload] = await Promise.all([
+                const [fuelPayload, scanPayload, rotationPayload, adminSchedPayload, sparePayload] = await Promise.all([
                   fuelRes.ok ? fuelRes.json().catch(() => ({})) : Promise.resolve({}),
                   scanRes.ok ? scanRes.json().catch(() => ({})) : Promise.resolve({}),
                   rotationRes.ok ? rotationRes.json().catch(() => ({})) : Promise.resolve({}),
-                  adminSchedRes.ok ? adminSchedRes.json().catch(() => ({})) : Promise.resolve({})
+                  adminSchedRes.ok ? adminSchedRes.json().catch(() => ({})) : Promise.resolve({}),
+                  spareRes && spareRes.ok ? spareRes.json().catch(() => ({})) : Promise.resolve({})
                 ]);
                 let secondaryUpdated = false;
                 if (fuelRes.ok && Array.isArray(fuelPayload?.data)) {
@@ -4036,6 +4039,10 @@ class LogisticsStore {
                 }
                 if (adminSchedRes.ok && Array.isArray(adminSchedPayload?.schedules)) {
                   this.lastAdminScheduleWeeksList = adminSchedPayload.schedules;
+                  secondaryUpdated = true;
+                }
+                if (spareRes && spareRes.ok && sparePayload?.success) {
+                  this.applyRemoteSparePartsSnapshot(sparePayload);
                   secondaryUpdated = true;
                 }
                 if (secondaryUpdated) {
@@ -6838,6 +6845,51 @@ class LogisticsStore {
   // ==========================================
   // SPARE PARTS & ROUTINE MAINTENANCE METHODS
   // ==========================================
+  private applyRemoteSparePartsSnapshot(payload: any): void {
+    const isMysql = payload?.source === 'hostinger_mysql';
+    if (Array.isArray(payload?.parts)) {
+      if (isMysql) {
+        this.spareParts = payload.parts;
+      } else {
+        const partMap = new Map<string, SparePart>();
+        (payload.parts as SparePart[]).forEach(p => { if (p?.id) partMap.set(p.id, p); });
+        this.spareParts.forEach(p => { if (p?.id && !partMap.has(p.id)) partMap.set(p.id, p); });
+        this.spareParts = Array.from(partMap.values());
+      }
+      this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts, true);
+    }
+    if (Array.isArray(payload?.usages)) {
+      if (isMysql) {
+        this.sparePartUsages = payload.usages;
+      } else {
+        const usageMap = new Map<string, SparePartUsage>();
+        (payload.usages as SparePartUsage[]).forEach(u => { if (u?.id) usageMap.set(u.id, u); });
+        this.sparePartUsages.forEach(u => { if (u?.id && !usageMap.has(u.id)) usageMap.set(u.id, u); });
+        this.sparePartUsages = Array.from(usageMap.values());
+      }
+      this.saveToStorage(STORAGE_KEYS.SPARE_PART_USAGES, this.sparePartUsages, true);
+    }
+  }
+
+  public async refreshSparePartsFromServer(): Promise<void> {
+    if (typeof window === 'undefined' || !this.isAuthenticated()) return;
+    try {
+      const res = await fetchWithTimeout('/api/spare-parts', {
+        credentials: 'same-origin',
+        headers: this.buildSessionAuthHeaders(),
+        timeoutMs: 8000
+      });
+      if (!res.ok) return;
+      const payload = await res.json().catch(() => null);
+      if (payload?.success) {
+        this.applyRemoteSparePartsSnapshot(payload);
+        this.notify();
+      }
+    } catch {
+      // ignore background refresh error
+    }
+  }
+
   public getSpareParts(): SparePart[] {
     return [...this.spareParts];
   }
@@ -6845,7 +6897,8 @@ class LogisticsStore {
   public addSparePart(part: Omit<SparePart, 'id'>): SparePart {
     const newPart: SparePart = {
       ...part,
-      id: 'sp-' + Math.random().toString(36).substring(2, 9)
+      createdBy: part.createdBy || this.currentUser.fullName,
+      id: 'sp-' + Date.now().toString(36) + '-' + Math.random().toString(36).substring(2, 6)
     };
     this.spareParts = [newPart, ...this.spareParts];
     this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
@@ -6856,12 +6909,22 @@ class LogisticsStore {
       'tambah'
     );
     this.notify();
+
+    void fetchWithTimeout('/api/spare-parts', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(newPart),
+      timeoutMs: 8000
+    }).catch(() => {});
+
     return newPart;
   }
 
   public updateSparePart(id: string, updated: Partial<SparePart>): void {
     const existing = this.spareParts.find(p => p.id === id);
-    this.spareParts = this.spareParts.map(p => p.id === id ? { ...p, ...updated } : p);
+    const merged = existing ? { ...existing, ...updated } : { ...updated, id };
+    this.spareParts = this.spareParts.map(p => (p.id === id ? { ...p, ...updated } : p));
     this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
     if (existing) {
       this.logActivity(
@@ -6872,6 +6935,14 @@ class LogisticsStore {
       );
     }
     this.notify();
+
+    void fetchWithTimeout(`/api/spare-parts/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(merged),
+      timeoutMs: 8000
+    }).catch(() => {});
   }
 
   public deleteSparePart(id: string): void {
@@ -6886,6 +6957,13 @@ class LogisticsStore {
       );
     }
     this.notify();
+
+    void fetchWithTimeout(`/api/spare-parts/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders(),
+      timeoutMs: 8000
+    }).catch(() => {});
   }
 
   public restockSparePart(id: string, amount: number, notes?: string): void {
@@ -6893,7 +6971,7 @@ class LogisticsStore {
     if (!part) return;
     const newStock = part.stock + amount;
     const today = new Date().toISOString().substring(0, 10);
-    this.spareParts = this.spareParts.map(p => 
+    this.spareParts = this.spareParts.map(p =>
       p.id === id ? { ...p, stock: newStock, lastRestockDate: today, notes: notes || p.notes } : p
     );
     this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
@@ -6903,6 +6981,14 @@ class LogisticsStore {
       `Penambahan +${amount} ${part.unit} (Total kini: ${newStock} ${part.unit}). Catatan: ${notes || '-'}`
     );
     this.notify();
+
+    void fetchWithTimeout(`/api/spare-parts/${encodeURIComponent(id)}/restock`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ amount, notes }),
+      timeoutMs: 8000
+    }).catch(() => {});
   }
 
   public getSparePartUsages(fleetId?: string): SparePartUsage[] {
@@ -6915,7 +7001,8 @@ class LogisticsStore {
   public recordSparePartUsage(usage: Omit<SparePartUsage, 'id'>): SparePartUsage {
     const newUsage: SparePartUsage = {
       ...usage,
-      id: 'usg-' + Math.random().toString(36).substring(2, 9)
+      performedBy: usage.performedBy || this.currentUser.fullName,
+      id: 'usg-' + Date.now().toString(36) + '-' + Math.random().toString(36).substring(2, 6)
     };
 
     // 1. Simpan ke daftar riwayat pemakaian
@@ -6957,6 +7044,15 @@ class LogisticsStore {
     );
 
     this.notify();
+
+    void fetchWithTimeout('/api/spare-part-usages', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(newUsage),
+      timeoutMs: 8000
+    }).catch(() => {});
+
     return newUsage;
   }
 
@@ -6972,6 +7068,13 @@ class LogisticsStore {
       );
     }
     this.notify();
+
+    void fetchWithTimeout(`/api/spare-part-usages/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders(),
+      timeoutMs: 8000
+    }).catch(() => {});
   }
 
   public getFleetRoutineComponentsStatus(fleetId: string) {
@@ -7303,11 +7406,12 @@ class LogisticsStore {
     data: Omit<FuelLog, 'id' | 'createdAt' | 'ratioKmPerLiter' | 'costPerKm' | 'efficiencyStatus' | 'totalCost' | 'distanceKm' | 'targetRatio'>
   ): Promise<FuelLog> {
     const { newLog, fleet } = this.buildComputedNewFuelLog(data);
-    const res = await fetch('/api/fuel-logs', {
+    const res = await fetchWithTimeout('/api/fuel-logs', {
       method: 'POST',
       credentials: 'same-origin',
       headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(newLog)
+      body: JSON.stringify(newLog),
+      timeoutMs: 9000
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok || json?.success === false) {
@@ -7330,7 +7434,7 @@ class LogisticsStore {
     this.logActivity(
       'Pencatatan BBM Armada',
       `${savedLog.plateNumber} (${savedLog.initialCode || 'Armada'})`,
-      `Pengisian ${savedLog.liters} L ${savedLog.fuelType} (Rp ${savedLog.totalCost.toLocaleString('id-ID')}) - Rasio: ${savedLog.ratioKmPerLiter} KM/L [${savedLog.efficiencyStatus}]`,
+      `Pengisian ${savedLog.liters.toFixed(2)} L ${savedLog.fuelType} (Rp ${savedLog.totalCost.toLocaleString('id-ID')}) - Rasio: ${savedLog.ratioKmPerLiter} KM/L [${savedLog.efficiencyStatus}]`,
       'tambah'
     );
 
@@ -7344,11 +7448,12 @@ class LogisticsStore {
       throw new Error('Data catatan BBM tidak ditemukan.');
     }
 
-    const res = await fetch(`/api/fuel-logs/${encodeURIComponent(id)}`, {
+    const res = await fetchWithTimeout(`/api/fuel-logs/${encodeURIComponent(id)}`, {
       method: 'PUT',
       credentials: 'same-origin',
       headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(updatedLog)
+      body: JSON.stringify(updatedLog),
+      timeoutMs: 9000
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok || json?.success === false) {
@@ -7373,10 +7478,11 @@ class LogisticsStore {
 
   public async deleteFuelLogAsync(id: string): Promise<void> {
     const item = this.fuelLogs.find(l => l.id === id);
-    const res = await fetch(`/api/fuel-logs/${encodeURIComponent(id)}`, {
+    const res = await fetchWithTimeout(`/api/fuel-logs/${encodeURIComponent(id)}`, {
       method: 'DELETE',
       credentials: 'same-origin',
-      headers: this.buildSessionAuthHeaders()
+      headers: this.buildSessionAuthHeaders(),
+      timeoutMs: 8000
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok || json?.success === false) {

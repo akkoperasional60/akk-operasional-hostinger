@@ -233,23 +233,32 @@ export interface Schedule {
   crewOdometerEndAt?: string;
   departureValidation?: {
     summary: {
+      branchName?: string;
       driverName: string;
       helperName: string;
       fleetLabel: string;
+      departureTime?: string;
       areaName: string;
       recordedAt: string;
       recordedAtWib: string;
     };
-    checks: {
+    checks?: {
       waybillMatch: boolean;
       documentsReady: boolean;
     };
-    signatures: {
+    signerSelections?: {
+      spvLogistik?: string;
+      spvOperasional?: string;
+      security?: string;
+      crew?: string;
+    };
+    signatures?: {
       spvLogistik: string;
       spvOperasional: string;
       security: string;
       crew: string;
     };
+    signaturesAttached?: boolean;
     signedAt: string;
     signedBy?: string;
     gps?: { latitude: number; longitude: number; accuracy: number };
@@ -638,6 +647,7 @@ export interface SparePart {
   storageLocation: string;
   lastRestockDate: string;
   notes?: string;
+  createdBy?: string;
 }
 
 export interface SparePartUsage {

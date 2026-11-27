@@ -12,6 +12,7 @@ import {
 } from './crewModel';
 export { freshGps };
 import { validateCameraEvidence, type CameraEvidence } from './crewCaptureEvidence';
+import { fetchWithTimeout } from '../../utils/fetchWithTimeout';
 
 const CREW_CLAIM_LIVE_ENABLED = import.meta.env.VITE_AKK_ENABLE_CREW_CLAIM !== 'false';
 const syncListeners = new Set<() => void>();
@@ -123,17 +124,25 @@ async function connectCrewSse() {
 
 export function canClaimLive(): boolean { return CREW_CLAIM_LIVE_ENABLED; }
 
-async function jsonRequest(url: string, method: string, body: any): Promise<any> {
-  let response = await fetch(url, {
-    method, headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-    credentials: 'same-origin', cache: 'no-store', body: JSON.stringify(body)
+async function jsonRequest(url: string, method: string, body: any, timeoutMs = 8000): Promise<any> {
+  let response = await fetchWithTimeout(url, {
+    method,
+    headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    cache: 'no-store',
+    body: JSON.stringify(body),
+    timeoutMs
   });
   if (response.status === 401 && logisticsStore.isPreviewEnvironment()) {
     const recovered = await logisticsStore.ensurePreviewServerSession(true);
     if (recovered) {
-      response = await fetch(url, {
-        method, headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        credentials: 'same-origin', cache: 'no-store', body: JSON.stringify(body)
+      response = await fetchWithTimeout(url, {
+        method,
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        cache: 'no-store',
+        body: JSON.stringify(body),
+        timeoutMs
       });
     }
   }
@@ -169,10 +178,12 @@ export function listenCrewChanged(listener: () => void): () => void {
 }
 
 export async function getTripsForUser(user: UserProfile): Promise<FieldTrip[]> {
-  if (!isQaAccount(user)) {
-    await branchStore.syncFromServer().catch(() => {});
-  }
-  const all = isQaAccount(user) ? await fetchQaTrips() : await fetchLiveTrips();
+  const all = isQaAccount(user)
+    ? await fetchQaTrips()
+    : (await Promise.all([
+        branchStore.syncFromServer().catch(() => {}),
+        fetchLiveTrips()
+      ]))[1];
   const today = new Date();
   const earliest = new Date(today.getTime() - 90 * 86400000);
   const latest = new Date(today.getTime() + 60 * 86400000);
@@ -239,7 +250,6 @@ export async function recordKm(user: UserProfile, tripId: string, value: string)
   if (!isQaAccount(user)) {
     const gps = await freshGps();
     await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/task`, 'POST', { action:'km', value:String(num), gps });
-    void logisticsStore.hydrateOperationalDataFromHostinger(true);
     notifyCrewChanged();
     return;
   }
@@ -258,7 +268,6 @@ export async function recordEndKm(user: UserProfile, tripId: string, value: stri
   if (!isQaAccount(user)) {
     const gps = await freshGps();
     await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/task`, 'POST', { action: 'km_end', value: String(num), gps });
-    void logisticsStore.hydrateOperationalDataFromHostinger(true);
     notifyCrewChanged();
     return;
   }
@@ -403,12 +412,8 @@ export async function markTask(
     if (checklistError) throw new Error(checklistError);
   }
   if (task === 'waybill') {
-    if (
-      !departureValidation ||
-      !departureValidation.checks?.waybillMatch ||
-      !departureValidation.checks?.documentsReady
-    ) {
-      throw new Error('Lengkapi konfirmasi cek surat jalan dan dokumen terlebih dahulu.');
+    if (!departureValidation) {
+      throw new Error('Data Form Keluar belum lengkap.');
     }
     const sigKeys: Array<keyof DepartureValidationData['signatures']> = [
       'spvLogistik',
@@ -418,7 +423,7 @@ export async function markTask(
     ];
     for (const key of sigKeys) {
       const val = String(departureValidation.signatures?.[key] || '');
-      if (!val.startsWith('data:image/') || val.length < 120) {
+      if (!val.startsWith('data:image/') || val.length < 60) {
         throw new Error('Seluruh 4 tanda tangan digital pada Form Keluar wajib diisi lengkap.');
       }
     }
@@ -452,7 +457,12 @@ export async function markTask(
   notifyCrewChanged();
 }
 
-export async function moveTrip(user: UserProfile, tripId: string, next: 'going' | 'returned'): Promise<void> {
+export async function moveTrip(
+  user: UserProfile,
+  tripId: string,
+  next: 'going' | 'returned',
+  tripContext?: FieldTrip
+): Promise<void> {
   if (isQaAccount(user)) {
     const qaRes = await jsonRequest(`/api/crew-qa/trips/${encodeURIComponent(tripId)}/action`, 'POST', {
       action: next === 'going' ? 'depart' : 'arrive'
@@ -504,7 +514,7 @@ export async function moveTrip(user: UserProfile, tripId: string, next: 'going' 
     notifyCrewChanged();
     return;
   }
-  const live = (await fetchLiveTrips()).find(t => t.id === tripId);
+  const live = tripContext || (await fetchLiveTrips()).find(t => t.id === tripId);
   if (!live || !assertTripVisible(user, live)) throw new Error('Kiriman tidak ditemukan.');
   if (!slotForUser(live, user)) throw new Error('Kamu belum mengambil posisi pada kiriman ini.');
   if (!live.driver || !live.helper) throw new Error('Tim belum lengkap.');
@@ -529,6 +539,7 @@ export interface WorkReportExtra {
   issueItemName?: string;
   issueQty?: string;
   kendalaSubType?: 'jalan_rute' | 'antri_customer';
+  tripContext?: FieldTrip;
 }
 
 export async function submitWorkReport(
@@ -650,7 +661,7 @@ export async function submitWorkReport(
     notifyCrewChanged();
     return;
   }
-  const live = (await fetchLiveTrips()).find(t => t.id === tripId);
+  const live = extra?.tripContext || (await fetchLiveTrips()).find(t => t.id === tripId);
   if (!live || !assertTripVisible(user, live) || !slotForUser(live, user)) throw new Error('Kiriman tidak tersedia untuk akun ini.');
   const slot = slotForUser(live, user)!;
   const allowed = slot === 'driver' ? ['bbm','kendala'] : ['toko','kendala','retur','form_kirim'];
@@ -697,7 +708,7 @@ export async function submitWorkReport(
       status: 'submitted',
       source: 'crew_v65'
     }
-  });
+  }, 14000);
   void driverReportService.syncWithServer(true);
   notifyCrewChanged();
 }

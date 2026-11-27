@@ -1262,6 +1262,23 @@ async function startServer() {
         used_at DATETIME NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_prt_user_active (user_id, used_at, expires_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS spare_part_usages (
+        id VARCHAR(64) NOT NULL PRIMARY KEY,
+        fleet_id VARCHAR(64) NOT NULL,
+        plate_number VARCHAR(32) NOT NULL,
+        part_id VARCHAR(64) NULL,
+        part_name VARCHAR(191) NOT NULL,
+        category VARCHAR(64) NOT NULL,
+        quantity INT NOT NULL DEFAULT 1,
+        replacement_date VARCHAR(32) NOT NULL,
+        odometer_km INT NOT NULL DEFAULT 0,
+        total_cost DECIMAL(14,2) DEFAULT 0.00,
+        performed_by VARCHAR(191) NULL,
+        payload_json LONGTEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_spu_fleet_date (fleet_id, replacement_date),
+        INDEX idx_spu_category (category)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
     ];
     for (const sql of statements) {
@@ -1277,6 +1294,29 @@ async function startServer() {
         await mysqlQuery("ALTER TABLE fuel_logs ADD COLUMN payload_json LONGTEXT NULL");
       }
     } catch {}
+    try {
+      const spCols = await mysqlQuery<any[]>("SHOW COLUMNS FROM spare_parts LIKE 'payload_json'");
+      if (!Array.isArray(spCols) || spCols.length === 0) {
+        await mysqlQuery("ALTER TABLE spare_parts ADD COLUMN payload_json LONGTEXT NULL");
+      }
+    } catch {}
+    const indexStatements = [
+      "CREATE INDEX idx_schedules_status_date ON schedules (status, departure_date)",
+      "CREATE INDEX idx_fuel_logs_fleet_logged ON fuel_logs (fleet_id, logged_at)",
+      "CREATE INDEX idx_tracking_logs_fleet_created ON tracking_logs (fleet_id, created_at)",
+      "CREATE INDEX idx_scanned_docs_type_date ON scanned_documents (document_type, doc_date)",
+      "CREATE INDEX idx_spare_parts_category ON spare_parts (category)"
+    ];
+    for (const idxSql of indexStatements) {
+      try {
+        await mysqlQuery(idxSql);
+      } catch (err: any) {
+        const msg = String(err?.message || '');
+        if (!msg.includes('Duplicate key name') && err?.code !== 'ER_DUP_KEYNAME') {
+          console.warn('[Database Index Warning]', msg);
+        }
+      }
+    }
   };
 
   const ensureBootstrapAdmin = async (): Promise<void> => {
@@ -3638,6 +3678,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       ]);
     } catch (err: any) {
       console.warn('[Driver Reports Persist Warning]', err?.message || err);
+      throw err;
     }
   };
 
@@ -4784,17 +4825,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       await loadDriverReportsFromDbIfNeeded();
       const rows = [report, ...inMemoryDriverReports.filter((entry: any) => entry.id !== report.id)].slice(0, 1500);
       await persistDriverReportsToDb(rows);
-      if (isDatabaseConfigured()) {
-        // Legacy persistence suppresses DB errors. Do not report success to a crew
-        // member until their record is actually visible in the MySQL state.
-        const verifiedRows = await mysqlQuery<any[]>(
-          'SELECT state_json FROM app_state WHERE state_key=? LIMIT 1', ['driver_reports_payload']);
-        const latest = verifiedRows?.[0]?.state_json;
-        const persisted = typeof latest === 'string' ? JSON.parse(latest) : latest;
-        if (!Array.isArray(persisted) || !persisted.some((entry: any) => entry?.id === report.id)) {
-          throw new Error('Gagal memverifikasi laporan di database.');
-        }
-      }
       broadcastDriverReportEvent('report_upserted', report);
       broadcastCrewSyncEvent('crew_report', report?.scheduleId);
     },
@@ -6383,6 +6413,398 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     } catch (err: any) {
       console.error('[MySQL fuel_logs DELETE error]:', err?.message || err);
       return res.status(503).json({ success: false, error: err?.message || 'Gagal menghapus log BBM di MySQL' });
+    }
+  });
+
+  // REST API for Spare Parts & Component Usages (Centralized MySQL + cross-user visibility for Super Admin)
+  const requireSparePartsWrite = requireModuleWrite(
+    'logistics',
+    ['spareparts', 'maintenance_costs', 'fleets'],
+    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'koordinator_driver', 'pengiriman', 'warehouse_admin', 'koordinator_gudang']
+  );
+  let inMemorySpareParts: any[] = [];
+  let inMemorySparePartUsages: any[] = [];
+
+  const hydratePreviewSparePartsFromDisk = () => {
+    const savedParts = readPersistentAppState('spare_parts_v1');
+    if (inMemorySpareParts.length === 0 && Array.isArray(savedParts)) {
+      inMemorySpareParts = savedParts;
+    }
+    const savedUsages = readPersistentAppState('spare_part_usages_v1');
+    if (inMemorySparePartUsages.length === 0 && Array.isArray(savedUsages)) {
+      inMemorySparePartUsages = savedUsages;
+    }
+  };
+
+  app.get("/api/spare-parts", requireAuth, async (_req, res) => {
+    try {
+      if (isDatabaseConfigured()) {
+        const [partRows, usageRows] = await Promise.all([
+          mysqlQuery<any[]>("SELECT * FROM spare_parts ORDER BY created_at DESC"),
+          mysqlQuery<any[]>("SELECT * FROM spare_part_usages ORDER BY replacement_date DESC, created_at DESC")
+        ]);
+        const parts = (Array.isArray(partRows) ? partRows : []).map((r) => {
+          const extra = parseJsonColumn(r.payload_json) || {};
+          return {
+            ...extra,
+            id: r.id,
+            partNumber: extra.partNumber || r.code || '',
+            name: extra.name || r.name || '',
+            category: extra.category || r.category || 'lainnya',
+            stock: Number(extra.stock ?? r.stock ?? 0),
+            minStock: Number(extra.minStock ?? r.min_stock ?? 3),
+            costPerUnit: Number(extra.costPerUnit ?? r.unit_price ?? 0),
+            unit: extra.unit || 'Unit',
+            compatibleVehicles: extra.compatibleVehicles || 'Semua Armada',
+            storageLocation: extra.storageLocation || r.supplier || 'Gudang Logistik',
+            lastRestockDate: extra.lastRestockDate || (r.created_at ? String(r.created_at).slice(0, 10) : '')
+          };
+        });
+        const usages = (Array.isArray(usageRows) ? usageRows : []).map((r) => {
+          const extra = parseJsonColumn(r.payload_json) || {};
+          return {
+            ...extra,
+            id: r.id,
+            fleetId: extra.fleetId || r.fleet_id,
+            plateNumber: extra.plateNumber || r.plate_number,
+            partId: extra.partId || r.part_id || '',
+            partName: extra.partName || r.part_name,
+            category: extra.category || r.category,
+            quantity: Number(extra.quantity ?? r.quantity ?? 1),
+            replacementDate: extra.replacementDate || r.replacement_date,
+            odometerKm: Number(extra.odometerKm ?? r.odometer_km ?? 0),
+            totalCost: Number(extra.totalCost ?? r.total_cost ?? 0),
+            performedBy: extra.performedBy || r.performed_by || '-'
+          };
+        });
+        inMemorySpareParts = parts;
+        inMemorySparePartUsages = usages;
+        return res.json({ success: true, source: 'hostinger_mysql', parts, usages });
+      }
+      hydratePreviewSparePartsFromDisk();
+      return res.json({
+        success: true,
+        source: 'disk_fallback',
+        parts: inMemorySpareParts,
+        usages: inMemorySparePartUsages
+      });
+    } catch (err: any) {
+      if (isDatabaseConfigured()) {
+        return res.status(503).json({
+          success: false,
+          error: err?.message || 'Gagal membaca data sparepart dari MySQL'
+        });
+      }
+      hydratePreviewSparePartsFromDisk();
+      return res.json({
+        success: true,
+        source: 'disk_fallback',
+        parts: inMemorySpareParts,
+        usages: inMemorySparePartUsages
+      });
+    }
+  });
+
+  app.post("/api/spare-parts", requireSparePartsWrite, express.json({ limit: '5mb' }), async (req, res) => {
+    const body = req.body || {};
+    const name = String(body.name || '').trim();
+    if (!name) {
+      return res.status(400).json({ success: false, error: 'Nama sparepart wajib diisi.' });
+    }
+    const id = String(body.id || `sp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`).trim().slice(0, 64);
+    const code = String(body.partNumber || id).trim().slice(0, 50) || id.slice(0, 50);
+    const authUser = (req as any).authUser;
+    const actorName = String(authUser?.full_name || authUser?.fullName || body.createdBy || 'Staff Logistik').trim();
+    const record = {
+      ...body,
+      id,
+      name,
+      partNumber: code,
+      category: String(body.category || 'lainnya'),
+      unit: String(body.unit || 'Unit'),
+      stock: Math.max(0, Math.round(Number(body.stock) || 0)),
+      minStock: Math.max(0, Math.round(Number(body.minStock) || 0)),
+      costPerUnit: Math.max(0, Number(body.costPerUnit) || 0),
+      compatibleVehicles: String(body.compatibleVehicles || 'Semua Armada'),
+      storageLocation: String(body.storageLocation || 'Gudang Logistik'),
+      lastRestockDate: String(body.lastRestockDate || new Date().toISOString().slice(0, 10)),
+      createdBy: body.createdBy || actorName,
+      updatedAt: new Date().toISOString()
+    };
+
+    if (!isDatabaseConfigured()) {
+      hydratePreviewSparePartsFromDisk();
+      inMemorySpareParts = [record, ...inMemorySpareParts.filter((p) => p.id !== id)];
+      writePersistentAppState('spare_parts_v1', inMemorySpareParts);
+      return res.json({ success: true, source: 'disk_fallback', data: record });
+    }
+
+    try {
+      await mysqlQuery(
+        `INSERT INTO spare_parts (id, code, name, category, stock, min_stock, unit_price, supplier, payload_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           code=VALUES(code),
+           name=VALUES(name),
+           category=VALUES(category),
+           stock=VALUES(stock),
+           min_stock=VALUES(min_stock),
+           unit_price=VALUES(unit_price),
+           supplier=VALUES(supplier),
+           payload_json=VALUES(payload_json)`,
+        [
+          id,
+          code,
+          name.slice(0, 191),
+          record.category.slice(0, 100),
+          record.stock,
+          record.minStock,
+          record.costPerUnit,
+          record.storageLocation.slice(0, 191),
+          JSON.stringify(record)
+        ]
+      );
+      inMemorySpareParts = [record, ...inMemorySpareParts.filter((p) => p.id !== id)];
+      return res.json({ success: true, source: 'hostinger_mysql', data: record });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal menyimpan sparepart ke MySQL' });
+    }
+  });
+
+  app.put("/api/spare-parts/:id", requireSparePartsWrite, express.json({ limit: '5mb' }), async (req, res) => {
+    const id = String(req.params.id || '').trim().slice(0, 64);
+    const body = req.body || {};
+    if (!id) return res.status(400).json({ success: false, error: 'ID sparepart tidak valid.' });
+
+    if (!isDatabaseConfigured()) {
+      hydratePreviewSparePartsFromDisk();
+      const existing = inMemorySpareParts.find((p) => p.id === id) || {};
+      const updated = { ...existing, ...body, id, updatedAt: new Date().toISOString() };
+      inMemorySpareParts = inMemorySpareParts.some((p) => p.id === id)
+        ? inMemorySpareParts.map((p) => (p.id === id ? updated : p))
+        : [updated, ...inMemorySpareParts];
+      writePersistentAppState('spare_parts_v1', inMemorySpareParts);
+      return res.json({ success: true, source: 'disk_fallback', data: updated });
+    }
+
+    try {
+      const existingRows = await mysqlQuery<any[]>("SELECT * FROM spare_parts WHERE id = ? LIMIT 1", [id]);
+      const existingRow = Array.isArray(existingRows) && existingRows[0] ? existingRows[0] : null;
+      const existingPayload = existingRow ? (parseJsonColumn(existingRow.payload_json) || {}) : {};
+      const updated = {
+        ...existingPayload,
+        ...body,
+        id,
+        name: String(body.name ?? existingPayload.name ?? existingRow?.name ?? 'Sparepart').slice(0, 191),
+        partNumber: String(body.partNumber ?? existingPayload.partNumber ?? existingRow?.code ?? id).slice(0, 50),
+        category: String(body.category ?? existingPayload.category ?? existingRow?.category ?? 'lainnya').slice(0, 100),
+        stock: Math.max(0, Math.round(Number(body.stock ?? existingPayload.stock ?? existingRow?.stock ?? 0))),
+        minStock: Math.max(0, Math.round(Number(body.minStock ?? existingPayload.minStock ?? existingRow?.min_stock ?? 0))),
+        costPerUnit: Math.max(0, Number(body.costPerUnit ?? existingPayload.costPerUnit ?? existingRow?.unit_price ?? 0)),
+        storageLocation: String(body.storageLocation ?? existingPayload.storageLocation ?? existingRow?.supplier ?? 'Gudang Logistik').slice(0, 191),
+        updatedAt: new Date().toISOString()
+      };
+      await mysqlQuery(
+        `INSERT INTO spare_parts (id, code, name, category, stock, min_stock, unit_price, supplier, payload_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           code=VALUES(code),
+           name=VALUES(name),
+           category=VALUES(category),
+           stock=VALUES(stock),
+           min_stock=VALUES(min_stock),
+           unit_price=VALUES(unit_price),
+           supplier=VALUES(supplier),
+           payload_json=VALUES(payload_json)`,
+        [
+          id,
+          updated.partNumber,
+          updated.name,
+          updated.category,
+          updated.stock,
+          updated.minStock,
+          updated.costPerUnit,
+          updated.storageLocation,
+          JSON.stringify(updated)
+        ]
+      );
+      inMemorySpareParts = inMemorySpareParts.some((p) => p.id === id)
+        ? inMemorySpareParts.map((p) => (p.id === id ? updated : p))
+        : [updated, ...inMemorySpareParts];
+      return res.json({ success: true, source: 'hostinger_mysql', data: updated });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal memperbarui sparepart di MySQL' });
+    }
+  });
+
+  app.post("/api/spare-parts/:id/restock", requireSparePartsWrite, express.json({ limit: '2mb' }), async (req, res) => {
+    const id = String(req.params.id || '').trim().slice(0, 64);
+    const amount = Math.round(Number(req.body?.amount) || 0);
+    const notes = String(req.body?.notes || '').trim();
+    if (!id || amount <= 0) {
+      return res.status(400).json({ success: false, error: 'Jumlah restock harus lebih dari 0.' });
+    }
+    const today = new Date().toISOString().slice(0, 10);
+
+    if (!isDatabaseConfigured()) {
+      hydratePreviewSparePartsFromDisk();
+      let updatedPart: any = null;
+      inMemorySpareParts = inMemorySpareParts.map((p) => {
+        if (p.id !== id) return p;
+        updatedPart = { ...p, stock: Math.max(0, Number(p.stock || 0) + amount), lastRestockDate: today, notes: notes || p.notes };
+        return updatedPart;
+      });
+      writePersistentAppState('spare_parts_v1', inMemorySpareParts);
+      return res.json({ success: true, source: 'disk_fallback', data: updatedPart });
+    }
+
+    try {
+      const rows = await mysqlQuery<any[]>("SELECT * FROM spare_parts WHERE id = ? LIMIT 1", [id]);
+      const row = Array.isArray(rows) && rows[0] ? rows[0] : null;
+      if (!row) return res.status(404).json({ success: false, error: 'Master sparepart tidak ditemukan.' });
+      const extra = parseJsonColumn(row.payload_json) || {};
+      const nextStock = Math.max(0, Number(extra.stock ?? row.stock ?? 0) + amount);
+      const updated = {
+        ...extra,
+        id,
+        name: extra.name || row.name,
+        partNumber: extra.partNumber || row.code,
+        category: extra.category || row.category,
+        stock: nextStock,
+        lastRestockDate: today,
+        notes: notes || extra.notes || ''
+      };
+      await mysqlQuery(
+        "UPDATE spare_parts SET stock = ?, payload_json = ? WHERE id = ?",
+        [nextStock, JSON.stringify(updated), id]
+      );
+      inMemorySpareParts = inMemorySpareParts.map((p) => (p.id === id ? updated : p));
+      return res.json({ success: true, source: 'hostinger_mysql', data: updated });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal restock sparepart di MySQL' });
+    }
+  });
+
+  app.delete("/api/spare-parts/:id", requireSparePartsWrite, async (req, res) => {
+    const id = String(req.params.id || '').trim();
+    if (!isDatabaseConfigured()) {
+      hydratePreviewSparePartsFromDisk();
+      inMemorySpareParts = inMemorySpareParts.filter((p) => p.id !== id);
+      writePersistentAppState('spare_parts_v1', inMemorySpareParts);
+      return res.json({ success: true, source: 'disk_fallback' });
+    }
+    try {
+      await mysqlQuery("DELETE FROM spare_parts WHERE id = ?", [id]);
+      inMemorySpareParts = inMemorySpareParts.filter((p) => p.id !== id);
+      return res.json({ success: true, source: 'hostinger_mysql' });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal menghapus sparepart di MySQL' });
+    }
+  });
+
+  app.post("/api/spare-part-usages", requireSparePartsWrite, express.json({ limit: '5mb' }), async (req, res) => {
+    const body = req.body || {};
+    const id = String(body.id || `usg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`).trim().slice(0, 64);
+    const authUser = (req as any).authUser;
+    const actorName = String(authUser?.full_name || authUser?.fullName || body.performedBy || 'Staff Logistik').trim();
+    const record = {
+      ...body,
+      id,
+      fleetId: String(body.fleetId || ''),
+      plateNumber: String(body.plateNumber || '-'),
+      partId: String(body.partId || ''),
+      partName: String(body.partName || 'Komponen Rutin'),
+      category: String(body.category || 'lainnya'),
+      quantity: Math.max(1, Math.round(Number(body.quantity) || 1)),
+      unit: String(body.unit || 'Unit'),
+      replacementDate: String(body.replacementDate || new Date().toISOString().slice(0, 10)),
+      odometerKm: Math.max(0, Math.round(Number(body.odometerKm) || 0)),
+      totalCost: Math.max(0, Number(body.totalCost) || 0),
+      performedBy: String(body.performedBy || actorName),
+      createdAt: body.createdAt || new Date().toISOString()
+    };
+
+    if (!isDatabaseConfigured()) {
+      hydratePreviewSparePartsFromDisk();
+      inMemorySparePartUsages = [record, ...inMemorySparePartUsages.filter((u) => u.id !== id)];
+      if (record.partId) {
+        inMemorySpareParts = inMemorySpareParts.map((p) =>
+          p.id === record.partId ? { ...p, stock: Math.max(0, Number(p.stock || 0) - record.quantity) } : p
+        );
+        writePersistentAppState('spare_parts_v1', inMemorySpareParts);
+      }
+      writePersistentAppState('spare_part_usages_v1', inMemorySparePartUsages);
+      return res.json({ success: true, source: 'disk_fallback', data: record });
+    }
+
+    try {
+      await mysqlQuery(
+        `INSERT INTO spare_part_usages (id, fleet_id, plate_number, part_id, part_name, category, quantity, replacement_date, odometer_km, total_cost, performed_by, payload_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           fleet_id=VALUES(fleet_id),
+           plate_number=VALUES(plate_number),
+           part_id=VALUES(part_id),
+           part_name=VALUES(part_name),
+           category=VALUES(category),
+           quantity=VALUES(quantity),
+           replacement_date=VALUES(replacement_date),
+           odometer_km=VALUES(odometer_km),
+           total_cost=VALUES(total_cost),
+           performed_by=VALUES(performed_by),
+           payload_json=VALUES(payload_json)`,
+        [
+          id,
+          record.fleetId.slice(0, 64),
+          record.plateNumber.slice(0, 32),
+          record.partId ? record.partId.slice(0, 64) : null,
+          record.partName.slice(0, 191),
+          record.category.slice(0, 64),
+          record.quantity,
+          record.replacementDate.slice(0, 32),
+          record.odometerKm,
+          record.totalCost,
+          record.performedBy.slice(0, 191),
+          JSON.stringify(record)
+        ]
+      );
+
+      if (record.partId) {
+        const partRows = await mysqlQuery<any[]>("SELECT * FROM spare_parts WHERE id = ? LIMIT 1", [record.partId]);
+        if (Array.isArray(partRows) && partRows[0]) {
+          const pRow = partRows[0];
+          const extra = parseJsonColumn(pRow.payload_json) || {};
+          const nextStock = Math.max(0, Number(extra.stock ?? pRow.stock ?? 0) - record.quantity);
+          const nextPayload = { ...extra, id: record.partId, stock: nextStock };
+          await mysqlQuery("UPDATE spare_parts SET stock = ?, payload_json = ? WHERE id = ?", [
+            nextStock,
+            JSON.stringify(nextPayload),
+            record.partId
+          ]);
+        }
+      }
+
+      inMemorySparePartUsages = [record, ...inMemorySparePartUsages.filter((u) => u.id !== id)];
+      return res.json({ success: true, source: 'hostinger_mysql', data: record });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal menyimpan pemakaian sparepart ke MySQL' });
+    }
+  });
+
+  app.delete("/api/spare-part-usages/:id", requireSparePartsWrite, async (req, res) => {
+    const id = String(req.params.id || '').trim();
+    if (!isDatabaseConfigured()) {
+      hydratePreviewSparePartsFromDisk();
+      inMemorySparePartUsages = inMemorySparePartUsages.filter((u) => u.id !== id);
+      writePersistentAppState('spare_part_usages_v1', inMemorySparePartUsages);
+      return res.json({ success: true, source: 'disk_fallback' });
+    }
+    try {
+      await mysqlQuery("DELETE FROM spare_part_usages WHERE id = ?", [id]);
+      inMemorySparePartUsages = inMemorySparePartUsages.filter((u) => u.id !== id);
+      return res.json({ success: true, source: 'hostinger_mysql' });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal menghapus log sparepart di MySQL' });
     }
   });
 

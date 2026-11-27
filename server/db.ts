@@ -103,14 +103,23 @@ export function getDbPool(): mysql.Pool {
   return pool;
 }
 
-export async function query<T = any>(sql: string, params: any[] = []): Promise<T> {
+const DEFAULT_QUERY_TIMEOUT_MS = 8500;
+
+export async function query<T = any>(sql: string, params: any[] = [], timeoutMs: number = DEFAULT_QUERY_TIMEOUT_MS): Promise<T> {
   if (isCircuitOpen()) {
     throw new Error('Database circuit breaker active (using instant local cache)');
   }
 
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const p = getDbPool();
-    const [rows] = await p.execute(sql, params);
+    const execPromise = p.execute(sql, params);
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`MySQL query timeout after ${timeoutMs}ms`));
+      }, Math.max(1500, timeoutMs));
+    });
+    const [rows] = (await Promise.race([execPromise, timeoutPromise])) as [any, any];
     consecutiveFailures = 0;
     circuitOpenUntil = 0;
     localLoopbackRefusedInPreview = false;
@@ -118,6 +127,8 @@ export async function query<T = any>(sql: string, params: any[] = []): Promise<T
   } catch (err: any) {
     handleConnectionFailure(err);
     throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 

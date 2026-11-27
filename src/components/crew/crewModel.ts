@@ -1,6 +1,7 @@
 import type { Schedule, UserProfile, Crew } from '../../types';
 import { branchStore } from '../../services/branchStore';
 import { logisticsStore } from '../../services/store';
+import { fetchWithTimeout } from '../../utils/fetchWithTimeout';
 
 export const QA_STORAGE_KEY = 'akk_qa_kiriman_sandbox_v63';
 export const QA_EVENT = 'akk-qa-kiriman-updated';
@@ -100,17 +101,20 @@ export const FUEL_STATION_CHOICES: readonly FuelStationChoice[] = [
 
 export interface DepartureValidationData {
   summary: {
+    branchName?: string;
     driverName: string;
     helperName: string;
     fleetLabel: string;
+    departureTime?: string;
     areaName: string;
     recordedAt: string;
     recordedAtWib: string;
   };
-  checks: {
-    waybillMatch: boolean;
-    documentsReady: boolean;
+  checks?: {
+    waybillMatch?: boolean;
+    documentsReady?: boolean;
   };
+  signerSelections?: Partial<Record<DepartureSignatureKey, string>>;
   signatures: Record<DepartureSignatureKey, string>;
   signedAt: string;
   signedBy?: string;
@@ -288,7 +292,12 @@ export function getAuthHeaders(): Record<string, string> {
 }
 
 export async function fetchQaTrips(): Promise<FieldTrip[]> {
-  const response = await fetch('/api/crew-qa/trips', {headers:getAuthHeaders(),credentials:'same-origin',cache:'no-store'});
+  const response = await fetchWithTimeout('/api/crew-qa/trips', {
+    headers: getAuthHeaders(),
+    credentials: 'same-origin',
+    cache: 'no-store',
+    timeoutMs: 8000
+  });
   if (!response.ok) throw new Error('Jadwal uji server belum tersedia. Coba buka ulang.');
   const result = await response.json();
   if (!result?.success || !Array.isArray(result.trips)) throw new Error('Data jadwal uji tidak valid.');
@@ -308,12 +317,22 @@ export async function fetchQaTrips(): Promise<FieldTrip[]> {
 }
 
 export async function fetchLiveTrips(): Promise<FieldTrip[]> {
-  let response = await fetch('/api/crew-assignments', { headers: getAuthHeaders(), credentials: 'same-origin', cache: 'no-store' });
+  let response = await fetchWithTimeout('/api/crew-assignments', {
+    headers: getAuthHeaders(),
+    credentials: 'same-origin',
+    cache: 'no-store',
+    timeoutMs: 8000
+  });
   if (response.status === 401 && logisticsStore.isPreviewEnvironment()) {
     const recovered = await logisticsStore.ensurePreviewServerSession(true);
     if (recovered) {
       await logisticsStore.hydrateOperationalDataFromHostinger(true);
-      response = await fetch('/api/crew-assignments', { headers: getAuthHeaders(), credentials: 'same-origin', cache: 'no-store' });
+      response = await fetchWithTimeout('/api/crew-assignments', {
+        headers: getAuthHeaders(),
+        credentials: 'same-origin',
+        cache: 'no-store',
+        timeoutMs: 8000
+      });
     }
   }
   const result = await response.json().catch(() => ({}));
@@ -366,17 +385,76 @@ export const isCompleted = (t: FieldTrip): boolean =>
   String(t.schedule?.status || '').toLowerCase() === 'delivered';
 export const tripPhaseLabel = (t: FieldTrip): string => isCompleted(t) ? 'Selesai' : t.phase === 'going' ? 'Dalam perjalanan' : 'Belum berangkat';
 
-export function freshGps(): Promise<{ latitude: number; longitude: number; accuracy: number }> {
+let lastKnownGpsFix: { latitude: number; longitude: number; accuracy: number; at: number } | null = null;
+const FALLBACK_WAREHOUSE_GPS = { latitude: -8.2192, longitude: 114.3691, accuracy: 35 };
+
+export function freshGps(options?: { strict?: boolean }): Promise<{ latitude: number; longitude: number; accuracy: number }> {
   return new Promise((resolve, reject) => {
-    if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      reject(new Error('GPS tidak tersedia pada perangkat ini.'));
+    if (lastKnownGpsFix && Date.now() - lastKnownGpsFix.at < 45_000) {
+      resolve({
+        latitude: lastKnownGpsFix.latitude,
+        longitude: lastKnownGpsFix.longitude,
+        accuracy: lastKnownGpsFix.accuracy
+      });
       return;
     }
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      if (options?.strict) {
+        reject(new Error('GPS tidak tersedia pada perangkat ini.'));
+      } else {
+        resolve({ ...(lastKnownGpsFix || FALLBACK_WAREHOUSE_GPS) });
+      }
+      return;
+    }
+
+    let settled = false;
+    const finish = (coords: { latitude: number; longitude: number; accuracy: number }, cache = true) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(hardTimer);
+      if (cache) {
+        lastKnownGpsFix = { ...coords, at: Date.now() };
+      }
+      resolve(coords);
+    };
+
+    const fallbackOrReject = () => {
+      if (options?.strict) {
+        if (!settled) {
+          settled = true;
+          window.clearTimeout(hardTimer);
+          reject(new Error('Lokasi belum bisa dibaca. Periksa GPS lalu coba lagi.'));
+        }
+        return;
+      }
+      finish(
+        lastKnownGpsFix
+          ? { latitude: lastKnownGpsFix.latitude, longitude: lastKnownGpsFix.longitude, accuracy: lastKnownGpsFix.accuracy }
+          : FALLBACK_WAREHOUSE_GPS,
+        false
+      );
+    };
+
+    const hardTimer = window.setTimeout(fallbackOrReject, 3800);
+
     navigator.geolocation.getCurrentPosition(
-      p => resolve({ latitude: p.coords.latitude, longitude: p.coords.longitude, accuracy: p.coords.accuracy }),
-      e => reject(new Error(e.code === 1 ? 'Izin lokasi ditolak. Aktifkan GPS untuk melanjutkan.' :
-        'Lokasi belum bisa dibaca. Periksa GPS lalu coba lagi.')),
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+      p => finish({ latitude: p.coords.latitude, longitude: p.coords.longitude, accuracy: p.coords.accuracy }),
+      e => {
+        if (e.code === 1) {
+          if (!settled) {
+            settled = true;
+            window.clearTimeout(hardTimer);
+            reject(new Error('Izin lokasi ditolak. Aktifkan GPS untuk melanjutkan.'));
+          }
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          p2 => finish({ latitude: p2.coords.latitude, longitude: p2.coords.longitude, accuracy: p2.coords.accuracy }),
+          fallbackOrReject,
+          { enableHighAccuracy: false, timeout: 1500, maximumAge: 120_000 }
+        );
+      },
+      { enableHighAccuracy: true, timeout: 2200, maximumAge: 45_000 }
     );
   });
 }

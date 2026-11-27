@@ -1,5 +1,6 @@
 import { UserPermissions, UserRole } from '../types';
 import { getDefaultPermissionsForRole, MODERN_SUBMENU_KEYS_BY_MODULE, LEGACY_SUBMENU_KEY_MAP } from '../utils/rbac';
+import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 
 export interface BranchRecord {
   id: string;
@@ -129,9 +130,10 @@ class BranchStoreService {
     this.isSyncingFromServer = true;
     this.lastServerSyncAt = now;
     try {
-      const res = await fetch('/api/branch-state', {
+      const res = await fetchWithTimeout('/api/branch-state', {
         credentials: 'same-origin',
-        headers: this.getAuthHeaders()
+        headers: this.getAuthHeaders(),
+        timeoutMs: 8000
       });
       if (!res.ok) return;
       const json = await res.json();
@@ -205,10 +207,11 @@ class BranchStoreService {
   private async persistToServerNow(): Promise<void> {
     if (typeof window === 'undefined' || typeof fetch === 'undefined') return;
     try {
-      await fetch('/api/branch-state', {
+      await fetchWithTimeout('/api/branch-state', {
         method: 'PUT',
         credentials: 'same-origin',
         headers: this.getAuthHeaders(),
+        timeoutMs: 8000,
         body: JSON.stringify({
           branches: this.branches,
           userBranchPerms: this.userBranchPerms,

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Camera, CheckCircle2, LoaderCircle, MapPin, RefreshCw, RotateCcw, Smartphone, VideoOff } from 'lucide-react';
 import { Button, Dialog } from './CrewFieldUI';
 import { CAMERA_MAX_ACCURACY_METERS, CAMERA_MAX_DATA_URL, validateCameraEvidence, type CameraEvidence } from './crewCaptureEvidence';
+import { compressCanvasToJpegDataUrl } from '../../utils/imageCompression';
 
 interface Props { title?: string; onClose: () => void; onCapture: (value: CameraEvidence) => void; }
 
@@ -51,7 +52,7 @@ function getCapturePosition(): Promise<{ latitude: number; longitude: number; ac
 
     const safetyTimer = window.setTimeout(() => {
       finish(DEFAULT_WAREHOUSE_GPS);
-    }, 6500);
+    }, 3200);
 
     navigator.geolocation.getCurrentPosition(
       pos => {
@@ -74,24 +75,20 @@ function getCapturePosition(): Promise<{ latitude: number; longitude: number; ac
           () => {
             finish(DEFAULT_WAREHOUSE_GPS);
           },
-          { enableHighAccuracy: false, maximumAge: 120_000, timeout: 3500 }
+          { enableHighAccuracy: false, maximumAge: 120_000, timeout: 1500 }
         );
       },
-      { enableHighAccuracy: true, maximumAge: 30_000, timeout: 4000 }
+      { enableHighAccuracy: true, maximumAge: 45_000, timeout: 2200 }
     );
   });
 }
 
 function compressCanvasToJpeg(canvas: HTMLCanvasElement): string {
-  let jpeg = canvas.toDataURL('image/jpeg', 0.82);
-  for (const q of [0.7, 0.58, 0.45, 0.33, 0.25]) {
-    if (jpeg.length <= CAMERA_MAX_DATA_URL) break;
-    jpeg = canvas.toDataURL('image/jpeg', q);
-  }
-  if (jpeg.length > CAMERA_MAX_DATA_URL || !jpeg.startsWith('data:image/jpeg;base64,/')) {
+  try {
+    return compressCanvasToJpegDataUrl(canvas, 0.75, CAMERA_MAX_DATA_URL);
+  } catch {
     throw new Error('Foto gagal dikompresi. Ambil ulang.');
   }
-  return jpeg;
 }
 
 function captureJpeg(video: HTMLVideoElement): string {
@@ -101,7 +98,7 @@ function captureJpeg(video: HTMLVideoElement): string {
     throw new Error('Kamera belum siap. Tunggu 1 detik atau gunakan tombol "Gunakan Kamera HP".');
   }
   const canvas = document.createElement('canvas');
-  const scale = Math.min(1, 1280 / Math.max(rawW, rawH));
+  const scale = Math.min(1, 1024 / Math.max(rawW, rawH));
   canvas.width = Math.max(1, Math.round(rawW * scale));
   canvas.height = Math.max(1, Math.round(rawH * scale));
   const ctx = canvas.getContext('2d', { alpha: false });
@@ -126,7 +123,7 @@ function convertFileToJpeg(file: File): Promise<string> {
         try {
           const rawW = img.naturalWidth || img.width || 800;
           const rawH = img.naturalHeight || img.height || 600;
-          const scale = Math.min(1, 1280 / Math.max(rawW, rawH));
+          const scale = Math.min(1, 1024 / Math.max(rawW, rawH));
           const canvas = document.createElement('canvas');
           canvas.width = Math.max(1, Math.round(rawW * scale));
           canvas.height = Math.max(1, Math.round(rawH * scale));

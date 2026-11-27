@@ -108,7 +108,6 @@ export const CrewSystemTestSandbox: React.FC<CrewSystemTestSandboxProps> = ({ cu
 
   const [kmValue, setKmValue] = useState('');
   const [taskConfirm, setTaskConfirm] = useState<{ tripId: string; kind: 'inspection' | 'waybill' } | null>(null);
-  const [waybillChecks, setWaybillChecks] = useState<[boolean, boolean]>([false, false]);
   const [inspectionStatuses, setInspectionStatuses] = useState<Partial<Record<VehicleChecklistKey, string>>>({});
   const [inspectionPhotos, setInspectionPhotos] = useState<Partial<Record<VehicleChecklistKey, CameraEvidence>>>({});
   const [inspectionCameraKey, setInspectionCameraKey] = useState<VehicleChecklistKey | null>(null);
@@ -248,8 +247,6 @@ export const CrewSystemTestSandbox: React.FC<CrewSystemTestSandboxProps> = ({ cu
       setInspectionStatuses({});
       setInspectionPhotos({});
       setInspectionCameraKey(null);
-    } else {
-      setWaybillChecks([false, false]);
     }
     setTaskConfirm({ tripId: activeTrip.id, kind });
   };
@@ -287,12 +284,11 @@ export const CrewSystemTestSandbox: React.FC<CrewSystemTestSandboxProps> = ({ cu
       setNotice('Checklist 7 item & 4 foto bukti tersimpan.');
       return;
     }
-    if (!waybillChecks.every(Boolean)) return;
     setTrips(prev =>
       prev.map(t => (t.id === taskConfirm.tripId ? { ...t, waybillValidated: true } : t))
     );
     setTaskConfirm(null);
-    setNotice('Validasi surat jalan tersimpan.');
+    setNotice('Form Keluar & Validasi Keberangkatan tersimpan.');
   };
 
   const handleMove = (next: 'going' | 'returned') => {
@@ -848,23 +844,18 @@ export const CrewSystemTestSandbox: React.FC<CrewSystemTestSandboxProps> = ({ cu
               </>
             ) : (
               <>
-                <div className="cv66-checklist">
-                  {['Tujuan dan jumlah surat jalan sesuai', 'Dokumen lengkap dan siap dibawa'].map((label, i) => (
-                    <label key={label}>
-                      <input
-                        type="checkbox"
-                        checked={waybillChecks[i]}
-                        onChange={e => {
-                          const c = e.target.checked;
-                          setWaybillChecks(v => (i === 0 ? [c, v[1]] : [v[0], c]));
-                        }}
-                      />
-                      <span>{label}</span>
-                    </label>
-                  ))}
-                </div>
-                <Button disabled={!waybillChecks.every(Boolean)} onClick={handleSaveTask}>
-                  <Check size={18}/>Simpan
+                {activeTrip && (
+                  <div className="cv75-flat-card space-y-2 text-xs text-slate-700">
+                    <div>Cabang: <strong>{activeTrip.branchId === 'cab-sidoarjo' ? 'Sidoarjo' : 'Nusantara'}</strong></div>
+                    <div>Driver: <strong>{activeTrip.driver?.name || '-'}</strong></div>
+                    <div>Helper: <strong>{activeTrip.helper?.name || '-'}</strong></div>
+                    <div>Mobil Kiriman: <strong>{activeTrip.fleetLabel || '-'}</strong></div>
+                    <div>Jam Berangkat: <strong>{activeTrip.departureTime || '07:30'} WIB</strong></div>
+                    <div>Area Kirim: <strong>{activeTrip.area || '-'}</strong></div>
+                  </div>
+                )}
+                <Button onClick={handleSaveTask}>
+                  <Check size={18}/>Simpan Form Keluar
                 </Button>
               </>
             )}

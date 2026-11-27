@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 
-export const DEFAULT_API_TIMEOUT_MS = 9500;
+export const DEFAULT_API_TIMEOUT_MS = 8000;
 
 export class FetchTimeoutError extends Error {
   public readonly timeoutMs: number;

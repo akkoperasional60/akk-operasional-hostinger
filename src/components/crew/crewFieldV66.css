@@ -449,3 +449,14 @@ html.dark #akk-crew-v66 .cv75-invoice-card{background:#18283e;border-color:#2d40
 #akk-crew-v66 .cv75-pay-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:36px;padding:5px 8px;border-radius:9px!important;border:1px solid #cbd5e1!important;background:#ffffff!important;color:#334155!important;font-size:12px!important;font-weight:700!important}
 #akk-crew-v66 .cv75-pay-btn--active{border-color:#2563eb!important;background:#2563eb!important;color:#ffffff!important}
 
+#akk-crew-v66 .cv75-sig-select{width:100%;min-width:0;height:30px;padding:2px 8px!important;border-radius:8px!important;border:1px solid #e2e8f0!important;background:#f8fafc!important;color:#0f172a!important;font-size:11.5px!important;font-weight:600!important;line-height:1.2!important}
+html.dark #akk-crew-v66 .cv75-sig-select{background:#111e30!important;border-color:#34465d!important;color:#f1f5f9!important}
+
+#akk-crew-v66 .cv75-retry-btn{display:inline-flex!important;align-items:center;gap:4px;padding:4px 10px!important;border-radius:8px!important;border:1px solid currentColor!important;background:#ffffff!important;color:#be123c!important;font-size:12px!important;font-weight:700!important;white-space:nowrap;flex-shrink:0}
+#akk-crew-v66 .cv75-saving-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;font-size:11px!important;font-weight:700!important}
+
+#akk-crew-v66 .cv75-skeleton-stack{display:flex;flex-direction:column;gap:10px}
+#akk-crew-v66 .cv75-skeleton-card{display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:16px;background:var(--cv-surface);border:1px solid var(--cv-line)}
+#akk-crew-v66 .cv75-skeleton-bar{border-radius:8px;background:linear-gradient(90deg,#e2e8f0 25%,#f1f5f9 50%,#e2e8f0 75%);background-size:200% 100%;animation:cv75-shimmer 1.25s infinite linear}
+html.dark #akk-crew-v66 .cv75-skeleton-bar{background:linear-gradient(90deg,#25364c 25%,#314560 50%,#25364c 75%);background-size:200% 100%}
+@keyframes cv75-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}

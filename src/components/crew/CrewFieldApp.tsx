@@ -24,34 +24,12 @@ import { DepartureFormModal } from './DepartureFormModal';
 import { CrewFormKirimManifest } from './CrewFormKirimManifest';
 import { CrewArt } from './CrewIllustrations';
 import { validateCameraEvidence, type CameraEvidence } from './crewCaptureEvidence';
+import { compressImageToJpeg } from '../../utils/imageCompression';
+import { isRetryableRequestError } from '../../utils/fetchWithTimeout';
 import './crewFieldV66.css';
 
 async function compressImageFileToJpeg(file: File): Promise<string> {
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(new Error('Gagal membaca file foto.'));
-    reader.readAsDataURL(file);
-  });
-  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const el = new Image();
-    el.onload = () => resolve(el);
-    el.onerror = () => reject(new Error('Format gambar tidak didukung.'));
-    el.src = dataUrl;
-  });
-  const maxDim = 1024;
-  const scale = Math.min(1, maxDim / Math.max(img.width || 1, img.height || 1));
-  const w = Math.max(200, Math.round((img.width || 640) * scale));
-  const h = Math.max(200, Math.round((img.height || 480) * scale));
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Kanvas foto tidak tersedia.');
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, w, h);
-  ctx.drawImage(img, 0, 0, w, h);
-  return canvas.toDataURL('image/jpeg', 0.76);
+  return compressImageToJpeg(file, { maxWidth: 1024, maxHeight: 1024, quality: 0.75 });
 }
 
 async function buildEvidenceFromPhoto(photo: string): Promise<CameraEvidence> {
@@ -123,6 +101,8 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
   const refreshInFlight = useRef<Promise<void> | null>(null);
   const pendingRefresh = useRef(false);
   const mutationInFlight = useRef(false);
+  const retryActionRef = useRef<(() => void) | null>(null);
+  const [canRetry, setCanRetry] = useState(false);
   const selfActionAtRef = useRef(0);
   const prevActiveTripRef = useRef<{ id: string; phase: string } | null>(null);
   const selectedIdRef = useRef<string | null>(selectedId);
@@ -157,12 +137,17 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
           if (prev && Date.now() - selfActionAtRef.current > 2000) {
             const prevInNext = next.find(t => t.id === prev.id);
             if (prevInNext && prev.phase === 'waiting' && prevInNext.phase === 'going' && slotForUser(prevInNext, user)) {
-              setMessage('Kiriman sudah berangkat.');
+              setMessage('Kiriman sudah berangkat (Dalam perjalanan).');
             } else if (prevInNext && prevInNext.phase === 'returned' && slotForUser(prevInNext, user)) {
+              const mySlot = slotForUser(prevInNext, user);
               setScreen('riwayat');
               setExpandedHistory(prevInNext.id);
               setCameraOpen(false); setReportKind(null); setReportTripId(null); setReportNote(''); setReportEvidence(null);
-              setMessage('Kiriman selesai. Tiba di gudang tercatat.');
+              setMessage(
+                mySlot === 'driver' && !prevInNext.odometerEnd
+                  ? 'Kiriman tiba di gudang. Silakan input KM Akhir (Pulang).'
+                  : 'Kiriman selesai. Tiba di gudang tercatat.'
+              );
             } else if ((!prevInNext || (prevInNext.phase === 'waiting' && !slotForUser(prevInNext, user))) && !nextActive) {
               setScreen('kiriman');
               setSelectedId(null);
@@ -172,7 +157,11 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
           }
         }
       } catch (e) {
-        if (alive.current) setFault((e as Error)?.message || 'Gagal memuat jadwal.');
+        if (alive.current) {
+          setFault((e as Error)?.message || 'Gagal memuat jadwal.');
+          retryActionRef.current = () => { void refresh(false, false); };
+          setCanRetry(true);
+        }
         if (afterMutation) throw e;
       } finally {
         if (alive.current) { setLoading(false); setRefreshing(false); }
@@ -307,28 +296,71 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     setReturFakturEvidence(null);
     setReturBarangEvidence(null);
   };
-  const clearNotice = () => { setMessage(''); setFault(''); };
+  const clearNotice = () => {
+    setMessage('');
+    setFault('');
+    setCanRetry(false);
+    retryActionRef.current = null;
+  };
   const nav = (next: Screen) => { if (mutationInFlight.current) return; setScreen(next); resetReport(); clearNotice(); main.current?.scrollTo({top:0}); };
   const choose = (id: string, next: Screen = 'tugas') => { setSelectedId(id); setScreen(next); resetReport(); clearNotice(); };
-  const invoke = async (fn: () => Promise<void>, success: string, after?: () => void) => {
+  const invoke = async (
+    fn: () => Promise<void>,
+    success: string,
+    after?: () => void,
+    optimisticUpdate?: (prev: FieldTrip[]) => FieldTrip[]
+  ) => {
     if (mutationInFlight.current) return;
-    mutationInFlight.current = true; selfActionAtRef.current = Date.now(); setBusy(true); clearNotice();
+    mutationInFlight.current = true;
+    selfActionAtRef.current = Date.now();
+    setBusy(true);
+    clearNotice();
+
+    let snapshot: FieldTrip[] | null = null;
+    if (optimisticUpdate) {
+      setTrips(prev => {
+        snapshot = prev;
+        return optimisticUpdate(prev);
+      });
+    }
+
     try {
       await fn();
-      // The API has acknowledged the write. A subsequent read failure must not encourage a duplicate write.
       after?.();
-      try { await refresh(true, true); setMessage(success); }
-      catch { setFault('Tersimpan, tetapi jadwal belum dapat dimuat. Tekan muat ulang.'); }
-    } catch (e) { setFault((e as Error)?.message || 'Gagal menyimpan. Coba lagi.'); }
-    finally { mutationInFlight.current = false; setBusy(false); }
+      setMessage(success);
+      void refresh(true, true).catch(() => {
+        // Optimistic state + write succeeded; background poll will reconcile if silent refresh fails
+      });
+    } catch (e) {
+      if (snapshot !== null) {
+        setTrips(snapshot);
+      }
+      const errMsg = (e as Error)?.message || 'Gagal menyimpan. Coba lagi.';
+      setFault(errMsg);
+      if (isRetryableRequestError(e) || /timeout|waktu|jaringan|network|gagal/i.test(errMsg)) {
+        retryActionRef.current = () => {
+          void invoke(fn, success, after, optimisticUpdate);
+        };
+        setCanRetry(true);
+      }
+    } finally {
+      mutationInFlight.current = false;
+      setBusy(false);
+    }
   };
   const closeClaim = () => { if (mutationInFlight.current) return; setClaimId(null); setClaimPosition(null); clearNotice(); };
   const submitClaim = () => {
     if (!claimId || !claimPosition || !claimPositionAvailable || busy || mutationInFlight.current) return;
     const id = claimId, slot = claimPosition;
-    void invoke(() => claimTrip(user,id,slot), 'Kiriman berhasil diambil.', () => {
-      setClaimReceipt(id); setClaimId(null); setClaimPosition(null); choose(id);
-    });
+    const myActor = { id: user.id, name: user.fullName || 'Kru AKK' };
+    void invoke(
+      () => claimTrip(user, id, slot),
+      'Kiriman berhasil diambil.',
+      () => {
+        setClaimReceipt(id); setClaimId(null); setClaimPosition(null); choose(id);
+      },
+      prev => prev.map(t => (t.id === id ? { ...t, [slot]: myActor } : t))
+    );
   };
   const resetInspectionForm = () => {
     setInspectionStatuses({});
@@ -393,6 +425,7 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     e.preventDefault();
     if (!reportTrip || !reportKind || !slotForUser(reportTrip, user) || busy || cameraOpen) return;
     if (reportKind === 'form_kirim') return;
+    const targetTrip = reportTrip;
 
     if (reportKind === 'bbm') {
       const effectiveNote = reportNote.trim().length >= 3
@@ -411,10 +444,11 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
       const allPhotos = bbmPhotos.length > 0 ? bbmPhotos.map(p => p.photo) : [primaryEv.photo];
       void invoke(
         () =>
-          submitWorkReport(user, reportTrip.id, 'bbm', effectiveNote, primaryEv, {
+          submitWorkReport(user, targetTrip.id, 'bbm', effectiveNote, primaryEv, {
             fuelLocation,
             fuelUrgentReason: fuelLocation === 'SPBU Lain (Urgent)' ? fuelUrgentReason.trim() : undefined,
-            photoUrls: allPhotos
+            photoUrls: allPhotos,
+            tripContext: targetTrip
           }),
         'Laporan pengisian BBM tersimpan.',
         resetReport
@@ -438,8 +472,9 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
       }
       void invoke(
         () =>
-          submitWorkReport(user, reportTrip.id, 'toko', reportNote.trim(), reportEvidence, {
-            customerOutletName: outletName.trim()
+          submitWorkReport(user, targetTrip.id, 'toko', reportNote.trim(), reportEvidence, {
+            customerOutletName: outletName.trim(),
+            tripContext: targetTrip
           }),
         'Absen Toko berhasil tersimpan.',
         resetReport
@@ -474,12 +509,13 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
       }
       void invoke(
         () =>
-          submitWorkReport(user, reportTrip.id, 'retur', reportNote.trim(), evFaktur, {
+          submitWorkReport(user, targetTrip.id, 'retur', reportNote.trim(), evFaktur, {
             customerOutletName: outletName.trim(),
             invoiceNumber: returInvoice.trim() || undefined,
             issueItemName: returItemName.trim(),
             issueQty: returQty.trim() || undefined,
-            photoUrls: [evFaktur.photo, evBarang.photo]
+            photoUrls: [evFaktur.photo, evBarang.photo],
+            tripContext: targetTrip
           }),
         'Laporan Retur Barang (Foto Faktur & Barang) tersimpan.',
         resetReport
@@ -501,12 +537,13 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     const evidence = reportEvidence;
     void invoke(
       () =>
-        submitWorkReport(user, reportTrip.id, kind, reportNote.trim(), evidence, {
+        submitWorkReport(user, targetTrip.id, kind, reportNote.trim(), evidence, {
           kendalaSubType,
           customerOutletName:
             kendalaSubType === 'antri_customer' && outletName.trim()
               ? outletName.trim()
-              : undefined
+              : undefined,
+          tripContext: targetTrip
         }),
       'Laporan kendala tersimpan & diteruskan ke SPV.',
       resetReport
@@ -514,13 +551,22 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
   };
   const saveKm = (e: React.FormEvent) => {
     e.preventDefault(); if (!activeTrip || activeSlot !== 'driver' || activeTrip.odometerStart) return;
-    void invoke(() => recordKm(user,activeTrip.id,kmValue), 'KM awal tersimpan.', () => setKmValue(''));
+    const targetId = activeTrip.id;
+    const val = kmValue;
+    const numStr = String(Number(val));
+    void invoke(
+      () => recordKm(user, targetId, val),
+      'KM awal tersimpan.',
+      () => setKmValue(''),
+      prev => prev.map(t => (t.id === targetId ? { ...t, odometerStart: numStr } : t))
+    );
   };
   const saveEndKm = (trip: FieldTrip, e: React.FormEvent) => {
     e.preventDefault();
     if (slotForUser(trip, user) !== 'driver' || trip.odometerEnd) return;
     const rawValue = endKmByTrip[trip.id] || '';
     const minStartKm = Number(trip.odometerStart || 0);
+    const numStr = String(Number(rawValue));
     void invoke(
       () => recordEndKm(user, trip.id, rawValue, minStartKm),
       'KM akhir tersimpan. Jarak tempuh otomatis tercatat di Rekap KM & BBM.',
@@ -529,12 +575,40 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
           const next = { ...prev };
           delete next[trip.id];
           return next;
-        })
+        }),
+      prev => prev.map(t => (t.id === trip.id ? { ...t, odometerEnd: numStr } : t))
     );
   };
   const handleMove = (phase: 'going' | 'returned') => {
     if (!activeTrip || !activeSlot) return;
-    void invoke(() => moveTrip(user,activeTrip.id,phase), phase === 'going' ? 'Keberangkatan tercatat.' : 'Kiriman selesai.', phase === 'returned' ? () => {setScreen('riwayat'); setExpandedHistory(activeTrip.id); resetReport();} : undefined);
+    const targetTrip = activeTrip;
+    const targetId = activeTrip.id;
+    const nowIso = new Date().toISOString();
+    void invoke(
+      () => moveTrip(user, targetId, phase, targetTrip),
+      phase === 'going'
+        ? 'Keberangkatan tercatat (Dalam perjalanan).'
+        : activeSlot === 'driver' && !targetTrip.odometerEnd
+        ? 'Tiba di Gudang tercatat. Silakan masukkan KM Akhir (Pulang).'
+        : 'Kiriman selesai. Tiba di Gudang tercatat.',
+      phase === 'returned'
+        ? () => {
+            setScreen('riwayat');
+            setExpandedHistory(targetId);
+            resetReport();
+          }
+        : undefined,
+      prev =>
+        prev.map(t =>
+          t.id === targetId
+            ? {
+                ...t,
+                phase,
+                ...(phase === 'going' ? { departedAt: t.departedAt || nowIso } : { returnedAt: t.returnedAt || nowIso })
+              }
+            : t
+        )
+    );
   };
   const inspectionEntries = useMemo<InspectionChecklistEntry[]>(() =>
     VEHICLE_CHECKLIST_ITEMS.map(item => {
@@ -577,10 +651,12 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     : null;
   const saveCheck = (departureData?: DepartureValidationData) => {
     if (!taskConfirm) return;
-    const target = ongoing.find(t=>t.id===taskConfirm.tripId);
+    const targetId = taskConfirm.tripId;
+    const targetKind = taskConfirm.kind;
+    const target = ongoing.find(t=>t.id===targetId);
     const slot = target ? slotForUser(target,user) : null;
-    if (!target || slot !== (taskConfirm.kind === 'inspection' ? 'driver' : 'helper')) {setFault('Tugas tidak tersedia. Muat ulang jadwal.');return;}
-    if (taskConfirm.kind === 'inspection') {
+    if (!target || slot !== (targetKind === 'inspection' ? 'driver' : 'helper')) {setFault('Tugas tidak tersedia. Muat ulang jadwal.');return;}
+    if (targetKind === 'inspection') {
       if (!target.odometerStart) {
         setFault('Isi KM awal terlebih dahulu sebelum mengisi pemeriksaan armada.');
         return;
@@ -591,21 +667,48 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
         return;
       }
       void invoke(
-        () => markTask(user, taskConfirm.tripId, 'inspection', inspectionEntries),
+        () => markTask(user, targetId, 'inspection', inspectionEntries),
         'Pemeriksaan & foto armada tersimpan.',
-        () => { setTaskConfirm(null); resetInspectionForm(); }
+        () => { setTaskConfirm(null); resetInspectionForm(); },
+        prev => prev.map(t => (t.id === targetId ? { ...t, inspectionDone: true } : t))
       );
       return;
     }
     if (!departureData) return;
     void invoke(
-      () => markTask(user, taskConfirm.tripId, 'waybill', undefined, departureData),
+      () => markTask(user, targetId, 'waybill', undefined, departureData),
       'Form Keluar & 4 TTD tersimpan.',
-      () => setTaskConfirm(null)
+      () => setTaskConfirm(null),
+      prev => prev.map(t => (t.id === targetId ? { ...t, waybillValidated: true } : t))
     );
   };
-  const notice = fault ? <div className="cv66-notice cv66-notice--error" role="alert"><CloudOff size={18}/><span>{fault}</span><button type="button" aria-label="Tutup pesan" onClick={()=>setFault('')}><X size={17}/></button></div>
-    : message ? <div className="cv66-notice cv66-notice--success" role="status"><CheckCircle2 size={18}/><span>{message}</span><button type="button" aria-label="Tutup pesan" onClick={()=>setMessage('')}><X size={17}/></button></div> : null;
+  const notice = fault ? (
+    <div className="cv66-notice cv66-notice--error" role="alert">
+      <CloudOff size={18}/>
+      <span>{fault}</span>
+      {canRetry && retryActionRef.current && (
+        <button
+          type="button"
+          className="cv75-retry-btn"
+          disabled={busy || refreshing}
+          onClick={() => {
+            const act = retryActionRef.current;
+            clearNotice();
+            act?.();
+          }}
+        >
+          <RotateCcw size={13}/> Coba Lagi
+        </button>
+      )}
+      <button type="button" aria-label="Tutup pesan" onClick={clearNotice}><X size={17}/></button>
+    </div>
+  ) : message ? (
+    <div className="cv66-notice cv66-notice--success" role="status">
+      <CheckCircle2 size={18}/>
+      <span>{message}</span>
+      <button type="button" aria-label="Tutup pesan" onClick={() => setMessage('')}><X size={17}/></button>
+    </div>
+  ) : null;
   const tripPicker = ongoing.length > 1 && activeTrip ? <label className="cv66-picker"><span>Kiriman</span><select aria-label="Pilih kiriman" value={activeTrip.id} disabled={busy} onChange={e=>{setSelectedId(e.target.value);setKmValue('');resetReport();clearNotice();}}>{ongoing.map(t=><option key={t.id} value={t.id}>{t.area} - {shortDate(t.date)}</option>)}</select><ChevronDown size={17}/></label> : null;
 
   if (typeof document === 'undefined') return null;
@@ -613,11 +716,21 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     <div id="akk-crew-v66" className="cv66-root" data-testid="akk-crew-field-v65" data-version="71">
       <div className="cv66-shell">
         <header className="cv66-header"><div className="cv66-brand"><span className="cv66-brand-icon"><CrewArt name="truck" size={37}/></span><div className="cv66-brand-text"><span className="cv66-brand-title">AKK Pengiriman</span>{(qa || branchText) && <span className="cv66-brand-sub">{qa ? 'Simulasi' : branchText}</span>}</div></div>
-          <div className="cv66-header-actions"><button type="button" aria-label="Muat ulang jadwal" disabled={refreshing || busy} onClick={()=>void refresh()} className="cv66-icon-button"><RefreshCw size={20} className={refreshing ? 'cv66-spin' : ''}/></button><button type="button" aria-label="Akun" disabled={busy} onClick={()=>{clearNotice();setAccountOpen(true);}} className="cv66-avatar">{initials(user.fullName)}</button></div>
+          <div className="cv66-header-actions">{busy && <span className="cv75-saving-pill" aria-live="polite"><LoaderCircle size={13} className="cv66-spin"/>Menyimpan</span>}<button type="button" aria-label="Muat ulang jadwal" disabled={refreshing || busy} onClick={()=>void refresh()} className="cv66-icon-button"><RefreshCw size={20} className={refreshing ? 'cv66-spin' : ''}/></button><button type="button" aria-label="Akun" disabled={busy} onClick={()=>{clearNotice();setAccountOpen(true);}} className="cv66-avatar">{initials(user.fullName)}</button></div>
         </header>
         {!modalOpen && notice}
         <main ref={main} className="cv66-main" id="akk-crew-main-content" aria-busy={loading}>
-          {loading ? <div className="cv66-loading" role="status"><LoaderCircle size={24} className="cv66-spin"/>Memuat kiriman...</div> : !loadedOnce.current ? <Empty icon={CloudOff} title="Jadwal gagal dimuat" action={{label:'Muat Ulang',run:()=>void refresh()}}/> :
+          {loading ? (
+            <div className="cv75-skeleton-stack" role="status" aria-label="Memuat daftar kiriman">
+              {[0, 1, 2].map(idx => (
+                <div key={idx} className="cv75-skeleton-card">
+                  <div className="cv75-skeleton-bar" style={{ width: '42%', height: 12 }} />
+                  <div className="cv75-skeleton-bar" style={{ width: '74%', height: 18 }} />
+                  <div className="cv75-skeleton-bar" style={{ width: '58%', height: 13 }} />
+                </div>
+              ))}
+            </div>
+          ) : !loadedOnce.current ? <Empty icon={CloudOff} title="Jadwal gagal dimuat" action={{label:'Muat Ulang',run:()=>void refresh()}}/> :
           <AnimatePresence mode="wait" initial={false}>
             <motion.div className="cv66-screen" key={screen} initial={reduced ? false : {opacity:0,y:8}} animate={{opacity:1,y:0}} exit={reduced ? {opacity:1} : {opacity:0,y:-3}} transition={{duration:reduced ? 0 : .19,ease:[.2,.7,.3,1]}}>
               {screen === 'kiriman' && <>
