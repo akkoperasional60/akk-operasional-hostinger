@@ -3,7 +3,6 @@ import { DriverShiftCheckin, ShiftVerificationMethod } from '../types';
 import { driverReportService, getLocalDateStr } from './driverReportService';
 import { logisticsStore } from './store';
 import { getUserRoleDisplayTitle } from '../utils/rbac';
-import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 
 const SHIFTS_STORAGE_KEY = 'akk_driver_shifts_v2';
 const PINS_STORAGE_KEY = 'akk_driver_pins_v2';
@@ -152,10 +151,9 @@ class DriverShiftService {
     if (typeof window === 'undefined' || typeof fetch === 'undefined' || this.isSyncing) return;
     this.isSyncing = true;
     try {
-      const res = await fetchWithTimeout('/api/driver-shifts', {
+      const res = await fetch('/api/driver-shifts', {
         credentials: 'include',
-        headers: this.getAuthHeaders(),
-        timeoutMs: 8000
+        headers: this.getAuthHeaders()
       });
       if (!res.ok) return;
       const data = await res.json();
@@ -232,11 +230,10 @@ class DriverShiftService {
     this.memoryShifts = trimmed;
     if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
       try {
-        const res = await fetchWithTimeout('/api/driver-shifts', {
+        const res = await fetch('/api/driver-shifts', {
           method: 'POST',
           credentials: 'include',
           headers: this.getAuthHeaders(),
-          timeoutMs: 8000,
           body: JSON.stringify({ shifts: trimmed })
         });
         return res.ok;
@@ -262,11 +259,10 @@ class DriverShiftService {
   private writePinsMap(pins: Record<string, string>): void {
     this.memoryPins = { ...pins };
     if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
-      fetchWithTimeout('/api/driver-shifts', {
+      fetch('/api/driver-shifts', {
         method: 'POST',
         credentials: 'include',
         headers: this.getAuthHeaders(),
-        timeoutMs: 8000,
         body: JSON.stringify({ pins: this.memoryPins })
       }).catch(() => {});
     }
@@ -1029,11 +1025,10 @@ class DriverShiftService {
 
     // Persist attendance to Hostinger MySQL
     try {
-      const response = await fetchWithTimeout('/api/attendance', {
+      const response = await fetch('/api/attendance', {
         method: 'POST',
         headers: this.getAuthHeaders(),
         credentials: 'include',
-        timeoutMs: 8000,
         body: JSON.stringify({
           crewId: params.driverId,
           date: dateStr,
@@ -1310,11 +1305,10 @@ class DriverShiftService {
         const q = new URLSearchParams();
         if (driverName) q.set('driverName', driverName);
         if (dateStr) q.set('date', dateStr);
-        fetchWithTimeout(`/api/driver-shifts/${encodeURIComponent(cleanId)}?${q.toString()}`, {
+        fetch(`/api/driver-shifts/${encodeURIComponent(cleanId)}?${q.toString()}`, {
           method: 'DELETE',
           credentials: 'include',
-          headers: this.getAuthHeaders(),
-          timeoutMs: 8000
+          headers: this.getAuthHeaders()
         }).catch(() => {});
         window.dispatchEvent(new CustomEvent('driver-shift-updated'));
       }

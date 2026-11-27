@@ -5,7 +5,6 @@ import {
 } from '../types';
 import { getLocalDateStr } from './driverReportService';
 import { safeSetItem } from './store';
-import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 
 const STORAGE_KEY = 'akk_driver_vehicle_checklists_v4';
 
@@ -183,11 +182,10 @@ class DriverChecklistService {
     this.isSyncing = true;
     this.lastSyncAt = nowMs;
     try {
-      const res = await fetchWithTimeout('/api/fleet-checklists', {
+      const res = await fetch('/api/fleet-checklists', {
         method: 'GET',
         credentials: 'same-origin',
-        headers: this.getAuthHeaders(),
-        timeoutMs: 8000
+        headers: this.getAuthHeaders()
       });
       if (!res.ok) {
         return this.loadAllChecklists();
@@ -223,11 +221,10 @@ class DriverChecklistService {
       // Push any unsynced local checklists to server
       for (const localChk of unsyncedLocal.slice(0, 10)) {
         try {
-          await fetchWithTimeout('/api/fleet-checklists', {
+          await fetch('/api/fleet-checklists', {
             method: 'POST',
             credentials: 'same-origin',
             headers: this.getAuthHeaders(),
-            timeoutMs: 8000,
             body: JSON.stringify({ checklist: { ...localChk, synced: true } })
           });
         } catch {}
@@ -289,11 +286,10 @@ class DriverChecklistService {
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('driver-checklist-updated'));
-        void fetchWithTimeout('/api/fleet-checklists', {
+        void fetch('/api/fleet-checklists', {
           method: 'POST',
           credentials: 'same-origin',
           headers: this.getAuthHeaders(),
-          timeoutMs: 8000,
           body: JSON.stringify({ checklist: normalizedChecklist })
         }).catch(err => console.warn('[DriverChecklistService] Sync to server failed:', err));
       }
@@ -376,11 +372,10 @@ class DriverChecklistService {
       this.memoryChecklists = filtered;
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('driver-checklist-updated'));
-        void fetchWithTimeout(`/api/fleet-checklists/${encodeURIComponent(cleanId)}`, {
+        void fetch(`/api/fleet-checklists/${encodeURIComponent(cleanId)}`, {
           method: 'DELETE',
           credentials: 'same-origin',
-          headers: this.getAuthHeaders(),
-          timeoutMs: 8000
+          headers: this.getAuthHeaders()
         }).catch(() => {});
       }
       return true;

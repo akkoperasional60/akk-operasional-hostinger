@@ -18,16 +18,12 @@ function isLoopbackDbHost(): boolean {
   return !host || host === 'localhost' || host === '127.0.0.1' || host === '::1';
 }
 
-function getMissingDatabaseEnvVars(): string[] {
-  const missing: string[] = [];
-  if (!String(process.env.DB_NAME || '').trim()) missing.push('DB_NAME');
-  if (!String(process.env.DB_USER || '').trim()) missing.push('DB_USER');
-  if (!String(process.env.DB_PASSWORD || '').trim()) missing.push('DB_PASSWORD');
-  return missing;
-}
-
 function hasDatabaseEnvVars(): boolean {
-  return getMissingDatabaseEnvVars().length === 0;
+  return Boolean(
+    String(process.env.DB_NAME || '').trim() &&
+    String(process.env.DB_USER || '').trim() &&
+    String(process.env.DB_PASSWORD || '').trim()
+  );
 }
 
 export function isDatabaseConfigured(): boolean {
@@ -39,49 +35,6 @@ export function isDatabaseConfigured(): boolean {
 
 export function isCircuitOpen(): boolean {
   return Date.now() < circuitOpenUntil;
-}
-
-export interface CircuitBreakerStatus {
-  isOpen: boolean;
-  remainingSeconds: number;
-  consecutiveFailures: number;
-  localLoopbackRefusedInPreview: boolean;
-  configured: boolean;
-  missingEnvVars: string[];
-  host: string;
-  port: number;
-  database: string;
-}
-
-export function getCircuitBreakerStatus(): CircuitBreakerStatus {
-  const remainingMs = Math.max(0, circuitOpenUntil - Date.now());
-  const missingEnvVars = getMissingDatabaseEnvVars();
-  return {
-    isOpen: remainingMs > 0,
-    remainingSeconds: Math.ceil(remainingMs / 1000),
-    consecutiveFailures,
-    localLoopbackRefusedInPreview,
-    configured: isDatabaseConfigured(),
-    missingEnvVars,
-    host: String(process.env.DB_HOST || 'localhost').trim() || 'localhost',
-    port: Number(process.env.DB_PORT) || 3306,
-    database: String(process.env.DB_NAME || '').trim()
-  };
-}
-
-export async function resetCircuitBreaker(resetPool: boolean = false): Promise<void> {
-  circuitOpenUntil = 0;
-  consecutiveFailures = 0;
-  localLoopbackRefusedInPreview = false;
-  if (resetPool && pool) {
-    const oldPool = pool;
-    pool = null;
-    try {
-      await oldPool.end();
-    } catch {
-      // ignore pool shutdown errors
-    }
-  }
 }
 
 function handleConnectionFailure(err: any): void {
@@ -113,7 +66,10 @@ function handleConnectionFailure(err: any): void {
 }
 
 function assertDatabaseConfig(): void {
-  const missing = getMissingDatabaseEnvVars();
+  const missing: string[] = [];
+  if (!String(process.env.DB_NAME || '').trim()) missing.push('DB_NAME');
+  if (!String(process.env.DB_USER || '').trim()) missing.push('DB_USER');
+  if (!String(process.env.DB_PASSWORD || '').trim()) missing.push('DB_PASSWORD');
   if (missing.length > 0) {
     throw new Error(`Database belum dikonfigurasi: ${missing.join(', ')}`);
   }
@@ -147,23 +103,14 @@ export function getDbPool(): mysql.Pool {
   return pool;
 }
 
-const DEFAULT_QUERY_TIMEOUT_MS = 8500;
-
-export async function query<T = any>(sql: string, params: any[] = [], timeoutMs: number = DEFAULT_QUERY_TIMEOUT_MS): Promise<T> {
+export async function query<T = any>(sql: string, params: any[] = []): Promise<T> {
   if (isCircuitOpen()) {
     throw new Error('Database circuit breaker active (using instant local cache)');
   }
 
-  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const p = getDbPool();
-    const execPromise = p.execute(sql, params);
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        reject(new Error(`MySQL query timeout after ${timeoutMs}ms`));
-      }, Math.max(1500, timeoutMs));
-    });
-    const [rows] = (await Promise.race([execPromise, timeoutPromise])) as [any, any];
+    const [rows] = await p.execute(sql, params);
     consecutiveFailures = 0;
     circuitOpenUntil = 0;
     localLoopbackRefusedInPreview = false;
@@ -171,28 +118,15 @@ export async function query<T = any>(sql: string, params: any[] = [], timeoutMs:
   } catch (err: any) {
     handleConnectionFailure(err);
     throw err;
-  } finally {
-    if (timer) clearTimeout(timer);
   }
 }
 
-export async function testConnection(): Promise<{
-  success: boolean;
-  configured: boolean;
-  circuitOpen: boolean;
-  remainingSeconds: number;
-  missingEnvVars: string[];
-  message: string;
-}> {
-  const missingEnvVars = getMissingDatabaseEnvVars();
-  if (missingEnvVars.length > 0) {
+export async function testConnection(): Promise<{ success: boolean; configured: boolean; message: string }> {
+  if (!hasDatabaseEnvVars()) {
     return {
       success: false,
       configured: false,
-      circuitOpen: isCircuitOpen(),
-      remainingSeconds: getCircuitBreakerStatus().remainingSeconds,
-      missingEnvVars,
-      message: `Database belum dikonfigurasi: ${missingEnvVars.join(', ')} belum diatur di environment variables.`
+      message: 'Database belum dikonfigurasi: DB_NAME, DB_USER, DB_PASSWORD belum diatur di environment variables.'
     };
   }
   try {
@@ -208,21 +142,14 @@ export async function testConnection(): Promise<{
     return {
       success: true,
       configured: true,
-      circuitOpen: false,
-      remainingSeconds: 0,
-      missingEnvVars: [],
-      message: `Terhubung ke MySQL pada ${host}:${port}`
+      message: `Connected successfully at ${host}:${port}`
     };
   } catch (err: any) {
     handleConnectionFailure(err);
-    const status = getCircuitBreakerStatus();
     return {
       success: false,
       configured: !localLoopbackRefusedInPreview,
-      circuitOpen: status.isOpen,
-      remainingSeconds: status.remainingSeconds,
-      missingEnvVars,
-      message: `Koneksi database belum tersedia: ${err?.message || err}`
+      message: `Database connection unavailable: ${err?.message || err}`
     };
   }
 }
