@@ -3765,9 +3765,9 @@ class LogisticsStore {
     return existing;
   }
 
-  private lastAuthError: { status: number; message: string } | null = null;
+  private lastAuthError: { status: number; message: string; code?: string; circuitBreakerOpen?: boolean } | null = null;
 
-  public getLastAuthError(): { status: number; message: string } | null {
+  public getLastAuthError(): { status: number; message: string; code?: string; circuitBreakerOpen?: boolean } | null {
     return this.lastAuthError;
   }
 
@@ -3822,10 +3822,11 @@ class LogisticsStore {
   public async loginUserRemote(identifier: string, password: string): Promise<UserProfile | null> {
     this.lastAuthError = null;
     try {
-      const response = await fetch('/api/auth/login', {
+      const response = await fetchWithTimeout('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
+        timeoutMs: 9000,
         body: JSON.stringify({ identifier: identifier.trim(), password })
       });
       const payload = await response.json().catch(() => ({}));
@@ -3835,6 +3836,8 @@ class LogisticsStore {
 
         this.lastAuthError = {
           status: response.status,
+          code: payload?.code ? String(payload.code) : undefined,
+          circuitBreakerOpen: Boolean(payload?.circuitBreaker?.isOpen || payload?.code === 'DB_CIRCUIT_OPEN'),
           message: String(payload?.error || 'Gagal memproses login ke server.')
         };
         return null;
@@ -3843,6 +3846,10 @@ class LogisticsStore {
       if (!remote?.id) {
         const previewFallback = this.tryPreviewLoginFallback(identifier, password);
         if (previewFallback) return previewFallback;
+        this.lastAuthError = {
+          status: 500,
+          message: 'Respons akun dari server tidak lengkap. Silakan coba lagi.'
+        };
         return null;
       }
 
@@ -3897,9 +3904,13 @@ class LogisticsStore {
       const previewFallback = this.tryPreviewLoginFallback(identifier, password);
       if (previewFallback) return previewFallback;
 
+      const isTimeout = Boolean(err?.name === 'AbortError' || String(err?.message || '').toLowerCase().includes('timeout'));
       this.lastAuthError = {
-        status: 503,
-        message: 'Tidak dapat terhubung ke server autentikasi. Periksa koneksi jaringan atau status server.'
+        status: isTimeout ? 504 : 503,
+        code: isTimeout ? 'REQUEST_TIMEOUT' : 'NETWORK_ERROR',
+        message: isTimeout
+          ? 'Permintaan login melebihi batas waktu (9 detik). Periksa koneksi lalu coba lagi.'
+          : 'Tidak dapat terhubung ke server autentikasi. Periksa koneksi jaringan atau status server.'
       };
       console.warn('[Hostinger Auth] Login gagal:', err);
       return null;
@@ -4362,15 +4373,24 @@ class LogisticsStore {
     department?: string;
     password: string;
   }): Promise<UserProfile | null> {
+    this.lastAuthError = null;
     try {
-      const response = await fetch('/api/auth/register', {
+      const response = await fetchWithTimeout('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
+        timeoutMs: 9000,
         body: JSON.stringify(data)
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload?.user?.id) return null;
+      if (!response.ok || !payload?.user?.id) {
+        this.lastAuthError = {
+          status: response.status,
+          code: payload?.code ? String(payload.code) : undefined,
+          message: String(payload?.error || 'Pendaftaran akun gagal diproses oleh server.')
+        };
+        return null;
+      }
       const remote = payload.user;
       const user: UserProfile = {
         id: remote.id,
@@ -4387,7 +4407,14 @@ class LogisticsStore {
       this.saveToStorage(STORAGE_KEYS.USERS, this.users);
       this.notify();
       return user;
-    } catch (err) {
+    } catch (err: any) {
+      const isTimeout = Boolean(err?.name === 'AbortError' || String(err?.message || '').toLowerCase().includes('timeout'));
+      this.lastAuthError = {
+        status: isTimeout ? 504 : 503,
+        message: isTimeout
+          ? 'Permintaan pendaftaran melebihi batas waktu. Silakan coba lagi.'
+          : 'Tidak dapat terhubung ke server pendaftaran.'
+      };
       console.warn('[Hostinger Auth] Registrasi gagal:', err);
       return null;
     }

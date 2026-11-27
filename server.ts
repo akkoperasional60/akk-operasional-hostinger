@@ -6,7 +6,14 @@ import zlib from "zlib";
 import dotenv from "dotenv";
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import * as XLSX from "xlsx";
-import { query as mysqlQuery, testConnection as testMysqlConnection, isDatabaseConfigured } from "./server/db";
+import {
+  query as mysqlQuery,
+  testConnection as testMysqlConnection,
+  isDatabaseConfigured,
+  isCircuitOpen,
+  getCircuitBreakerStatus,
+  resetCircuitBreaker
+} from "./server/db";
 import { registerCrewClaimRoutes } from './server/crewClaims';
 import { registerCrewQaRoutes, setCrewQaChangedListener } from './server/crewQa';
 
@@ -333,16 +340,72 @@ async function startServer() {
   });
 
   // Hostinger MySQL Connection & Health Check API
-  app.get("/api/db-status", async (_req, res) => {
-    const configured = isDatabaseConfigured();
-    const testResult = configured ? await testMysqlConnection() : { success: false, configured: false, message: 'Hostinger MySQL belum dikonfigurasi: DB_NAME, DB_USER, DB_PASSWORD belum diisi di environment variables.' };
-    res.status(200).json({
+  const buildDbHealthPayload = async (forceCheck: boolean = true) => {
+    const cbStatus = getCircuitBreakerStatus();
+    if (!forceCheck && cbStatus.isOpen) {
+      return {
+        dbEngine: "Hostinger MySQL/MariaDB (mysql2)",
+        configured: cbStatus.configured,
+        dbHost: cbStatus.host,
+        dbPort: cbStatus.port,
+        dbName: cbStatus.database || '-',
+        hasUserConfigured: Boolean(String(process.env.DB_USER || '').trim()),
+        hasPasswordConfigured: Boolean(String(process.env.DB_PASSWORD || '').trim()),
+        missingEnvVars: cbStatus.missingEnvVars,
+        circuitBreaker: {
+          isOpen: cbStatus.isOpen,
+          remainingSeconds: cbStatus.remainingSeconds,
+          consecutiveFailures: cbStatus.consecutiveFailures
+        },
+        success: false,
+        message: cbStatus.localLoopbackRefusedInPreview
+          ? 'Mode preview aktif tanpa server MySQL lokal.'
+          : 'Database sedang dalam mode pemulihan sementara (circuit breaker aktif).'
+      };
+    }
+
+    const testResult = cbStatus.configured || forceCheck ? await testMysqlConnection() : {
+      success: false,
+      configured: false,
+      circuitOpen: cbStatus.isOpen,
+      remainingSeconds: cbStatus.remainingSeconds,
+      missingEnvVars: cbStatus.missingEnvVars,
+      message: 'Database belum dikonfigurasi: DB_NAME, DB_USER, DB_PASSWORD belum diisi di environment variables.'
+    };
+    const updatedCb = getCircuitBreakerStatus();
+    return {
       dbEngine: "Hostinger MySQL/MariaDB (mysql2)",
-      configured,
-      hasPasswordConfigured: Boolean(process.env.DB_PASSWORD),
+      configured: testResult.configured,
+      dbHost: updatedCb.host,
+      dbPort: updatedCb.port,
+      dbName: updatedCb.database || '-',
+      hasUserConfigured: Boolean(String(process.env.DB_USER || '').trim()),
+      hasPasswordConfigured: Boolean(String(process.env.DB_PASSWORD || '').trim()),
+      missingEnvVars: testResult.missingEnvVars,
+      circuitBreaker: {
+        isOpen: updatedCb.isOpen,
+        remainingSeconds: updatedCb.remainingSeconds,
+        consecutiveFailures: updatedCb.consecutiveFailures
+      },
       success: testResult.success,
-      message: testResult.success ? 'Database Hostinger terhubung' : (testResult.message || 'Database Hostinger belum dapat diakses')
-    });
+      message: testResult.success ? 'Database terhubung normal' : (testResult.message || 'Database belum dapat diakses')
+    };
+  };
+
+  app.get("/api/db-status", async (_req, res) => {
+    const payload = await buildDbHealthPayload(false);
+    res.status(200).json(payload);
+  });
+
+  app.get("/api/health/db", async (_req, res) => {
+    const payload = await buildDbHealthPayload(true);
+    res.status(payload.success ? 200 : 503).json(payload);
+  });
+
+  app.post("/api/db-reconnect", async (_req, res) => {
+    await resetCircuitBreaker(true);
+    const payload = await buildDbHealthPayload(true);
+    res.status(payload.success ? 200 : 503).json(payload);
   });
 
   const parseJsonColumn = (raw: any): any => {
@@ -1512,10 +1575,20 @@ async function startServer() {
       if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT') || errMsg.includes('circuit breaker'))) {
         return handlePreviewLogin(loginIdentifier, cleanPass, req, res);
       }
+      const cbStatus = getCircuitBreakerStatus();
       console.warn('[Auth MySQL Warning]', errMsg);
       return res.status(503).json({
         success: false,
-        error: `Database Hostinger belum dapat diakses (${errMsg || 'Koneksi MySQL gagal'}). Periksa DB_NAME, DB_USER, dan DB_PASSWORD di Hostinger.`
+        code: isCircuitOpen() ? 'DB_CIRCUIT_OPEN' : 'DB_UNAVAILABLE',
+        circuitBreaker: {
+          isOpen: cbStatus.isOpen,
+          remainingSeconds: cbStatus.remainingSeconds,
+          consecutiveFailures: cbStatus.consecutiveFailures,
+          missingEnvVars: cbStatus.missingEnvVars
+        },
+        error: isCircuitOpen()
+          ? 'Koneksi database sedang memulihkan diri. Klik "Coba Hubungkan Ulang" atau tunggu beberapa detik.'
+          : 'Database belum dapat diakses saat ini. Periksa konfigurasi DB_NAME, DB_USER, dan DB_PASSWORD.'
       });
     }
   });

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AkkLogo } from './AkkLogo';
 import {
   LogIn,
@@ -10,6 +10,7 @@ import {
   Clock,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   Eye,
   EyeOff,
   Lock,
@@ -17,18 +18,37 @@ import {
   Send,
   RefreshCw,
   ShieldCheck,
-  X
+  Database,
+  ChevronDown
 } from 'lucide-react';
-import { UserRole, UserProfile } from '../types';
+import { UserProfile } from '../types';
 import { logisticsStore } from '../services/store';
+import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 
 const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
-const USERNAME_REGEX = /^[a-zA-Z0-9._\-\s]{3,40}$/;
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_DURATION_SECONDS = 60;
 const STORAGE_FAILED_KEY = 'akk_auth_v4_failed_attempts';
 const STORAGE_LOCKOUT_KEY = 'akk_auth_v4_lockout_until';
+
+interface DbHealthState {
+  checked: boolean;
+  success: boolean;
+  configured: boolean;
+  dbHost: string;
+  dbPort: number;
+  dbName: string;
+  hasUserConfigured: boolean;
+  hasPasswordConfigured: boolean;
+  missingEnvVars: string[];
+  circuitBreaker: {
+    isOpen: boolean;
+    remainingSeconds: number;
+    consecutiveFailures: number;
+  };
+  message: string;
+}
 
 interface LoginPageProps {
   onLoginSuccess: (user: UserProfile) => void;
@@ -43,12 +63,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
+  // Database Health & Circuit Breaker State
+  const [dbHealth, setDbHealth] = useState<DbHealthState | null>(null);
+  const [isReconnectingDb, setIsReconnectingDb] = useState(false);
+  const [showAdminDbDetails, setShowAdminDbDetails] = useState(false);
+  const [dbRestoredNotice, setDbRestoredNotice] = useState(false);
+
   // Register Form State
   const [registerData, setRegisterData] = useState({
     fullName: '',
     email: '',
     phone: '',
-    role: 'unassigned' as UserRole,
     department: 'Logistik',
     password: '',
     confirmPassword: ''
@@ -95,6 +120,84 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
   const [countdown, setCountdown] = useState<number>(0);
 
+  const checkDbStatus = async () => {
+    try {
+      const res = await fetchWithTimeout('/api/db-status', {
+        credentials: 'same-origin',
+        timeoutMs: 4500
+      });
+      const data = await res.json().catch(() => null);
+      if (data && typeof data === 'object') {
+        setDbHealth({
+          checked: true,
+          success: Boolean(data.success),
+          configured: Boolean(data.configured),
+          dbHost: String(data.dbHost || 'localhost'),
+          dbPort: Number(data.dbPort || 3306),
+          dbName: String(data.dbName || '-'),
+          hasUserConfigured: Boolean(data.hasUserConfigured),
+          hasPasswordConfigured: Boolean(data.hasPasswordConfigured),
+          missingEnvVars: Array.isArray(data.missingEnvVars) ? data.missingEnvVars : [],
+          circuitBreaker: {
+            isOpen: Boolean(data.circuitBreaker?.isOpen),
+            remainingSeconds: Number(data.circuitBreaker?.remainingSeconds || 0),
+            consecutiveFailures: Number(data.circuitBreaker?.consecutiveFailures || 0)
+          },
+          message: String(data.message || '')
+        });
+      }
+    } catch {
+      // Keep login usable if status probe times out
+    }
+  };
+
+  useEffect(() => {
+    void checkDbStatus();
+  }, []);
+
+  const handleReconnectDatabase = async () => {
+    setIsReconnectingDb(true);
+    setDbRestoredNotice(false);
+    try {
+      const res = await fetchWithTimeout('/api/db-reconnect', {
+        method: 'POST',
+        credentials: 'same-origin',
+        timeoutMs: 7000
+      });
+      const data = await res.json().catch(() => null);
+      if (data && typeof data === 'object') {
+        const connected = Boolean(data.success);
+        setDbHealth({
+          checked: true,
+          success: connected,
+          configured: Boolean(data.configured),
+          dbHost: String(data.dbHost || 'localhost'),
+          dbPort: Number(data.dbPort || 3306),
+          dbName: String(data.dbName || '-'),
+          hasUserConfigured: Boolean(data.hasUserConfigured),
+          hasPasswordConfigured: Boolean(data.hasPasswordConfigured),
+          missingEnvVars: Array.isArray(data.missingEnvVars) ? data.missingEnvVars : [],
+          circuitBreaker: {
+            isOpen: Boolean(data.circuitBreaker?.isOpen),
+            remainingSeconds: Number(data.circuitBreaker?.remainingSeconds || 0),
+            consecutiveFailures: Number(data.circuitBreaker?.consecutiveFailures || 0)
+          },
+          message: String(data.message || '')
+        });
+        if (connected) {
+          setDbRestoredNotice(true);
+          if (errorMsg.toLowerCase().includes('database') || errorMsg.toLowerCase().includes('koneksi')) {
+            setErrorMsg('');
+          }
+        }
+      }
+    } catch {
+      setErrorMsg('Gagal menghubungi server untuk menyambungkan ulang database.');
+    } finally {
+      setIsReconnectingDb(false);
+    }
+  };
+
   useEffect(() => {
     const updateCountdown = () => {
       const now = Date.now();
@@ -138,7 +241,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     setSuccessMsg('');
 
     if (isLocked) {
-      setErrorMsg(`Akses login sedang dikunci sementara karena ${MAX_FAILED_ATTEMPTS} kali percobaan gagal. Silakan tunggu ${countdown} detik.`);
+      setErrorMsg(`Akses login dikunci sementara selama ${countdown} detik karena ${MAX_FAILED_ATTEMPTS} kali percobaan gagal.`);
       return;
     }
     if (!trimmedInput) {
@@ -156,19 +259,22 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     if (!user) {
       setIsLoading(false);
       const authError = logisticsStore.getLastAuthError();
-      if (authError && (authError.status === 503 || authError.status === 403)) {
+      if (authError && (authError.status === 503 || authError.status === 504 || authError.status === 403 || authError.status === 429)) {
         setErrorMsg(authError.message);
+        if (authError.status === 503 || authError.circuitBreakerOpen) {
+          void checkDbStatus();
+        }
         return;
       }
       const nextFailed = failedAttempts + 1;
       setFailedAttempts(nextFailed);
       try { localStorage.setItem(STORAGE_FAILED_KEY, String(nextFailed)); } catch {}
       if (nextFailed >= MAX_FAILED_ATTEMPTS) {
-        const lockoutTime = Date.now() + (LOCKOUT_DURATION_SECONDS * 1000);
+        const lockoutTime = Date.now() + LOCKOUT_DURATION_SECONDS * 1000;
         setLockoutUntil(lockoutTime);
         setCountdown(LOCKOUT_DURATION_SECONDS);
         try { localStorage.setItem(STORAGE_LOCKOUT_KEY, String(lockoutTime)); } catch {}
-        setErrorMsg(`Terlalu banyak percobaan gagal (${MAX_FAILED_ATTEMPTS}x). Demi keamanan, login dikunci sementara selama ${LOCKOUT_DURATION_SECONDS} detik.`);
+        setErrorMsg(`Terlalu banyak percobaan gagal (${MAX_FAILED_ATTEMPTS}x). Login dikunci sementara selama ${LOCKOUT_DURATION_SECONDS} detik.`);
       } else {
         setErrorMsg(`${authError?.message || 'Email / Username atau Password salah.'} (Sisa kesempatan: ${MAX_FAILED_ATTEMPTS - nextFailed}x).`);
       }
@@ -186,7 +292,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     setTimeout(() => {
       setIsLoading(false);
       onLoginSuccess(user);
-    }, 350);
+    }, 250);
   };
 
   const handleRegister = async (e: React.FormEvent) => {
@@ -222,7 +328,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     setIsLoading(false);
 
     if (!newUser) {
-      setErrorMsg('Pendaftaran gagal. Email mungkin sudah terdaftar atau database Hostinger belum dapat diakses.');
+      const authError = logisticsStore.getLastAuthError();
+      setErrorMsg(
+        authError?.message ||
+        'Pendaftaran gagal. Email mungkin sudah terdaftar atau database belum dapat diakses.'
+      );
+      if (authError?.status === 503) {
+        void checkDbStatus();
+      }
       return;
     }
 
@@ -247,9 +360,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
     setIsSendingRecovery(true);
     try {
-      const response = await fetch('/api/auth/forgot-password/request', {
+      const response = await fetchWithTimeout('/api/auth/forgot-password/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        timeoutMs: 9000,
         body: JSON.stringify({ identifier: cleanId })
       });
       const data = await response.json().catch(() => null);
@@ -307,9 +421,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
     setIsVerifyingRecovery(true);
     try {
-      const response = await fetch('/api/auth/forgot-password/verify', {
+      const response = await fetchWithTimeout('/api/auth/forgot-password/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        timeoutMs: 9000,
         body: JSON.stringify({
           identifier: recoveryInput.trim(),
           code: cleanCode,
@@ -336,7 +451,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       setLoginPassword('');
       setTab('login');
       setSuccessMsg(
-        data.message || 'Kata sandi baru berhasil disimpan melalui verifikasi WhatsApp. Silakan masuk dengan password baru Anda.'
+        data.message || 'Kata sandi baru berhasil disimpan. Silakan masuk dengan password baru Anda.'
       );
     } catch {
       setErrorMsg('Gagal menghubungi server untuk memverifikasi kode WhatsApp.');
@@ -345,26 +460,25 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     }
   };
 
+  const showDbWarningBanner = Boolean(dbHealth && dbHealth.checked && !dbHealth.success);
 
   return (
-    <div className="min-h-screen bg-[#f3f6fb] dark:bg-[#111d2c] flex items-center justify-center p-4 selection:bg-[#1764db] selection:text-white font-sans antialiased">
-      {/* Centered Portal Card */}
-      <div className="w-full max-w-[460px] rounded-[24px] overflow-hidden shadow-xl shadow-[#18375d]/8 border border-[#e4eaf2] dark:border-[#2b3b50] bg-white dark:bg-[#192a40] transition-all">
-        {/* Portal Driver Gradient Hero Header */}
-        <div className="relative overflow-hidden bg-gradient-to-br from-[#1454c2] via-[#1768db] to-[#3597ef] px-6 pt-7 pb-6 text-center text-white">
-          <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full border-[22px] border-white/10" />
-          {/* Logo & Brand Monogram */}
-          <div className="inline-flex items-center justify-center rounded-[18px] bg-white px-4 py-2.5 shadow-sm mb-3 relative z-10">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-4 selection:bg-blue-600 selection:text-white font-sans antialiased">
+      {/* Centered Flat Portal Card */}
+      <div className="w-full max-w-[460px] rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+        {/* Clean Flat Header */}
+        <div className="px-6 pt-6 pb-5 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center">
+          <div className="flex justify-center mb-2.5">
             <AkkLogo size="md" showText={true} showSubtitle={false} />
           </div>
 
-          <p className="text-[#e2edff] text-xs leading-relaxed max-w-sm mx-auto font-medium relative z-10">
-            Portal Akses Logistik Terintegrasi &amp; Pengiriman Luar Pulau PT Anugrah Kemasan Kreatif.
+          <p className="text-slate-500 dark:text-slate-400 text-xs leading-relaxed max-w-xs mx-auto">
+            Portal Akses Logistik Terintegrasi &amp; Pengiriman PT Anugrah Kemasan Kreatif.
           </p>
 
           {/* Segmented Tab Switcher */}
           {tab === 'forgot' ? (
-            <div className="flex items-center justify-between mt-5 max-w-xs mx-auto px-1 relative z-10">
+            <div className="flex items-center justify-between mt-5 pt-3.5 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="button"
                 onClick={() => {
@@ -373,24 +487,24 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   setErrorMsg('');
                   setSuccessMsg('');
                 }}
-                className="inline-flex items-center gap-1.5 text-xs text-white/90 hover:text-white font-semibold transition-colors cursor-pointer group"
+                className="inline-flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 hover:text-blue-600 font-semibold transition-colors cursor-pointer group"
               >
                 <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
                 <span>Kembali ke Masuk</span>
               </button>
-              <span className="text-xs font-bold px-3 py-1 rounded-full bg-white/15 text-white">
-                Lupa Password
+              <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                Reset Password
               </span>
             </div>
           ) : (
-            <div className="flex items-center justify-center gap-1.5 mt-5 bg-white/15 backdrop-blur-xs p-1.5 rounded-full max-w-[330px] mx-auto relative z-10">
+            <div className="grid grid-cols-2 gap-1 mt-5 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
               <button
                 type="button"
                 onClick={() => { setTab('login'); setErrorMsg(''); setSuccessMsg(''); }}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
                   tab === 'login'
-                    ? 'bg-white text-[#1764db] shadow-sm'
-                    : 'text-white/90 hover:text-white hover:bg-white/10'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <LogIn className="w-3.5 h-3.5" />
@@ -400,10 +514,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               <button
                 type="button"
                 onClick={() => { setTab('register'); setErrorMsg(''); setSuccessMsg(''); }}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
                   tab === 'register'
-                    ? 'bg-white text-[#1764db] shadow-sm'
-                    : 'text-white/90 hover:text-white hover:bg-white/10'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <UserPlus className="w-3.5 h-3.5" />
@@ -413,33 +527,110 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
           )}
         </div>
 
+        {/* Database Status & Circuit Breaker Banner */}
+        {showDbWarningBanner && dbHealth && (
+          <div className="mx-6 mt-5 p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/80 text-xs space-y-2.5">
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-amber-950 dark:text-amber-200">
+                  {dbHealth.circuitBreaker.isOpen
+                    ? 'Koneksi database sedang dipulihkan sementara'
+                    : 'Server database belum terhubung'}
+                </div>
+                <p className="text-amber-800 dark:text-amber-300/90 mt-0.5 leading-relaxed">
+                  {!dbHealth.configured && dbHealth.missingEnvVars.length > 0
+                    ? `Variabel konfigurasi (${dbHealth.missingEnvVars.join(', ')}) belum aktif. Sistem memakai mode cache lokal.`
+                    : 'Autentikasi database utama sedang terganggu. Anda dapat mencoba menghubungkan ulang atau hubungi admin.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-amber-200/70 dark:border-amber-800/60">
+              <button
+                type="button"
+                onClick={() => setShowAdminDbDetails(prev => !prev)}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-800 dark:text-amber-300 hover:text-amber-950 cursor-pointer"
+              >
+                <Database className="w-3.5 h-3.5" />
+                <span>Info Teknis Admin</span>
+                <ChevronDown className={`w-3 h-3 transition-transform ${showAdminDbDetails ? 'rotate-180' : ''}`} />
+              </button>
+
+              <button
+                type="button"
+                disabled={isReconnectingDb}
+                onClick={handleReconnectDatabase}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 hover:bg-amber-100/60 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-60"
+              >
+                <RefreshCw className={`w-3 h-3 ${isReconnectingDb ? 'animate-spin' : ''}`} />
+                <span>{isReconnectingDb ? 'Menghubungkan...' : 'Coba Hubungkan Ulang'}</span>
+              </button>
+            </div>
+
+            {showAdminDbDetails && (
+              <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-amber-200/80 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-300 space-y-1 font-mono">
+                <div className="flex justify-between gap-2">
+                  <span>Host / Port:</span>
+                  <span className="font-semibold text-slate-900 dark:text-white">{dbHealth.dbHost}:{dbHealth.dbPort}</span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span>DB_NAME:</span>
+                  <span className="font-semibold text-slate-900 dark:text-white">{dbHealth.dbName || '(kosong)'}</span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span>DB_USER / DB_PASSWORD:</span>
+                  <span className="font-semibold text-slate-900 dark:text-white">
+                    {dbHealth.hasUserConfigured ? 'Terisi' : 'Kosong'} / {dbHealth.hasPasswordConfigured ? 'Terisi' : 'Kosong'}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span>Circuit Breaker:</span>
+                  <span className="font-semibold text-amber-700 dark:text-amber-400">
+                    {dbHealth.circuitBreaker.isOpen
+                      ? `Aktif (${dbHealth.circuitBreaker.remainingSeconds}s)`
+                      : 'Siap'}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {dbRestoredNotice && dbHealth?.success && (
+          <div className="mx-6 mt-5 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="font-semibold">Koneksi database berhasil dipulihkan. Silakan masuk ke akun Anda.</span>
+          </div>
+        )}
+
         {/* Alert Banners */}
         {isLocked && (
-          <div className="mx-6 mt-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start gap-2.5">
+          <div className="mx-6 mt-4 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs flex items-start gap-2.5">
             <Lock className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
             <div>
               <strong>Akses Dibekukan:</strong> Terlalu banyak percobaan gagal. Silakan tunggu{' '}
-              <span className="font-mono font-bold text-rose-900">{countdown} detik</span>.
+              <span className="font-mono font-bold text-rose-900 dark:text-rose-200 tabular-nums">{countdown} detik</span>.
             </div>
           </div>
         )}
 
         {!isLocked && errorMsg && (
-          <div className="mx-6 mt-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
-            <span>{errorMsg}</span>
+          <div className="mx-6 mt-4 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+            <span className="leading-relaxed">{errorMsg}</span>
           </div>
         )}
 
         {successMsg && (
-          <div className="mx-6 mt-4 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
+          <div className="mx-6 mt-4 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
             <span className="font-semibold">{successMsg}</span>
           </div>
         )}
 
         {/* Card Body */}
-        <div className="p-6 sm:p-7 bg-white dark:bg-[#192a40]">
+        <div className="p-6 sm:p-7 bg-white dark:bg-slate-900">
           {tab === 'login' ? (
             /* ======================================================== */
             /* TAB 1: MASUK (LOGIN)                                      */
@@ -451,18 +642,19 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   Email / Username
                 </label>
                 <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
                     required
+                    autoComplete="username"
                     disabled={isLocked || isLoading}
-                    placeholder="Masukkan email (nama@domain.com) atau username (Budiono, admin, dll)"
+                    placeholder="nama@domain.com atau username"
                     value={loginEmail}
                     onChange={(e) => {
                       setLoginEmail(e.target.value);
                       if (errorMsg) setErrorMsg('');
                     }}
-                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition disabled:opacity-50"
+                    className="w-full pl-10 pr-3.5 py-2.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:bg-white dark:focus:bg-slate-950 focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15 transition-colors disabled:opacity-50"
                   />
                 </div>
               </div>
@@ -480,30 +672,32 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                       setErrorMsg('');
                       setSuccessMsg('');
                     }}
-                    className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 font-semibold transition cursor-pointer"
+                    className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 font-semibold transition-colors cursor-pointer"
                   >
                     Lupa Password?
                   </button>
                 </div>
                 <div className="relative">
-                  <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                  <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
+                    autoComplete="current-password"
                     disabled={isLocked || isLoading}
-                    placeholder="••••••••"
+                    placeholder="Masukkan password"
                     value={loginPassword}
                     onChange={(e) => {
                       setLoginPassword(e.target.value);
                       if (errorMsg) setErrorMsg('');
                     }}
-                    className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition disabled:opacity-50"
+                    className="w-full pl-10 pr-10 py-2.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:bg-white dark:focus:bg-slate-950 focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15 transition-colors disabled:opacity-50"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer p-0.5"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer p-1"
                     title={showPassword ? 'Sembunyikan password' : 'Lihat password'}
+                    aria-label={showPassword ? 'Sembunyikan password' : 'Lihat password'}
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -514,12 +708,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               <button
                 type="submit"
                 disabled={isLocked || isLoading}
-                className="w-full mt-2 py-3 rounded-full bg-gradient-to-r from-[#1764db] to-[#247beb] hover:brightness-95 text-white font-bold text-xs shadow-sm shadow-[#1764db]/20 flex items-center justify-center gap-2 transition active:scale-[0.99] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full mt-1 py-2.5 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isLoading ? (
                   <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Memproses Masuk...</span>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Masuk...</span>
                   </>
                 ) : (
                   <>
@@ -540,14 +734,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   Nama Lengkap
                 </label>
                 <div className="relative">
-                  <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                  <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
                     required
                     placeholder="Contoh: Bayu Dimas Permana"
                     value={registerData.fullName}
                     onChange={(e) => setRegisterData({ ...registerData, fullName: e.target.value })}
-                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
+                    className="w-full pl-10 pr-3.5 py-2.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:bg-white dark:focus:bg-slate-950 focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15 transition-colors"
                   />
                 </div>
               </div>
@@ -562,7 +756,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     placeholder="nama@gmail.com"
                     value={registerData.email}
                     onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
+                    className="w-full px-3.5 py-2.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:bg-white dark:focus:bg-slate-950 focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15 transition-colors"
                   />
                 </div>
                 <div>
@@ -572,7 +766,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     placeholder="+62 812-..."
                     value={registerData.phone}
                     onChange={(e) => setRegisterData({ ...registerData, phone: e.target.value })}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
+                    className="w-full px-3.5 py-2.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:bg-white dark:focus:bg-slate-950 focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15 transition-colors"
                   />
                 </div>
               </div>
@@ -584,10 +778,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
-                    placeholder="Minimal 6 karakter"
+                    minLength={8}
+                    placeholder="Min. 8 karakter"
                     value={registerData.password}
                     onChange={(e) => setRegisterData({ ...registerData, password: e.target.value })}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
+                    className="w-full px-3.5 py-2.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:bg-white dark:focus:bg-slate-950 focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15 transition-colors"
                   />
                 </div>
                 <div>
@@ -596,15 +791,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     <input
                       type={showPassword ? 'text' : 'password'}
                       required
+                      minLength={8}
                       placeholder="Ulangi password"
                       value={registerData.confirmPassword}
                       onChange={(e) => setRegisterData({ ...registerData, confirmPassword: e.target.value })}
-                      className="w-full pl-3.5 pr-9 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
+                      className="w-full pl-3.5 pr-9 py-2.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:bg-white dark:focus:bg-slate-950 focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15 transition-colors"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer p-0.5"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer p-1"
+                      aria-label={showPassword ? 'Sembunyikan password' : 'Lihat password'}
                     >
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
@@ -613,11 +810,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               </div>
 
               {/* Prosedur Verifikasi Akun AKK Box */}
-              <div className="p-3 rounded-xl bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200/80 dark:border-blue-800/60 text-slate-700 dark:text-slate-300 text-[11px] leading-relaxed flex items-start gap-2.5">
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 text-xs leading-relaxed flex items-start gap-2.5">
                 <Clock className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
                 <div>
-                  <strong className="block text-blue-900 dark:text-blue-300 font-bold">Prosedur Verifikasi Akun AKK:</strong>
-                  Pendaftaran akun baru wajib disetujui (di-approve) oleh Super Admin PT Anugrah Kemasan Kreatif sebelum mendapatkan otorisasi akses menu.
+                  <strong className="block text-slate-900 dark:text-white font-semibold">Prosedur Verifikasi Akun AKK:</strong>
+                  Akun baru wajib disetujui oleh Super Admin PT Anugrah Kemasan Kreatif sebelum mendapatkan otorisasi akses menu.
                 </div>
               </div>
 
@@ -625,10 +822,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full py-3 rounded-full bg-gradient-to-r from-[#1764db] to-[#247beb] hover:brightness-95 text-white font-bold text-xs shadow-sm shadow-[#1764db]/20 flex items-center justify-center gap-2 transition active:scale-[0.99] cursor-pointer disabled:opacity-50"
+                className="w-full py-2.5 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
               >
                 {isLoading ? (
-                  <span>Mengirimkan Pendaftaran...</span>
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Mengirim Pendaftaran...</span>
+                  </>
                 ) : (
                   <span>Kirim Pendaftaran Akun</span>
                 )}
@@ -641,13 +841,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             <div className="space-y-4">
               {recoveryStep === 'request' ? (
                 <form onSubmit={handleRequestRecovery} className="space-y-4">
-                  <div className="p-3.5 rounded-xl bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 text-slate-700 dark:text-slate-200 text-xs leading-relaxed flex items-start gap-2.5">
-                    <Phone className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                  <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 text-xs leading-relaxed flex items-start gap-2.5">
+                    <Phone className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
                     <div>
-                      <strong className="block text-emerald-800 dark:text-emerald-300 font-bold mb-0.5">
-                        Verifikasi Langsung via WhatsApp Terdaftar
+                      <strong className="block text-slate-900 dark:text-white font-semibold mb-0.5">
+                        Verifikasi via WhatsApp Terdaftar
                       </strong>
-                      Masukkan <strong>Email</strong>, <strong>Username</strong>, atau <strong>No. WhatsApp</strong> akun terdaftar. Kode OTP 6-digit akan dikirim langsung ke WhatsApp user Anda.
+                      Masukkan <strong>Email</strong>, <strong>Username</strong>, atau <strong>No. WhatsApp</strong> akun terdaftar. Kode OTP 6-digit akan dikirim ke WhatsApp Anda.
                     </div>
                   </div>
 
@@ -666,14 +866,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                         if (errorMsg) setErrorMsg('');
                         if (successMsg) setSuccessMsg('');
                       }}
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white text-xs focus:outline-none focus:bg-white focus:border-blue-500 disabled:opacity-50"
+                      className="w-full px-3.5 py-2.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:bg-white dark:focus:bg-slate-950 focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15 disabled:opacity-50"
                     />
                   </div>
 
                   <button
                     type="submit"
                     disabled={isSendingRecovery}
-                    className="w-full py-3 rounded-full bg-gradient-to-r from-[#1764db] to-[#247beb] hover:brightness-95 text-white font-bold text-xs shadow-sm shadow-[#1764db]/20 flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="w-full py-2.5 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {isSendingRecovery ? (
                       <>
@@ -690,19 +890,19 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                 </form>
               ) : (
                 <form onSubmit={handleVerifyRecovery} className="space-y-3.5">
-                  <div className="p-3.5 rounded-xl bg-emerald-50/90 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 space-y-1.5 text-xs">
+                  <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-1.5 text-xs">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="inline-flex items-center gap-1.5 font-bold text-emerald-800 dark:text-emerald-300">
-                        <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                      <span className="inline-flex items-center gap-1.5 font-semibold text-slate-900 dark:text-white">
+                        <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                         <span>Terkirim ke WhatsApp User</span>
                       </span>
-                      <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200">
+                      <span className="font-mono text-[11px] font-semibold px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 tabular-nums">
                         {recoveryExpiresIn > 0 ? `Berlaku ${formatMmSs(recoveryExpiresIn)}` : 'Kedaluwarsa'}
                       </span>
                     </div>
                     <div className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center justify-between">
                       <span>Akun: <strong>{recoveryAccountName || recoveryInput}</strong></span>
-                      <span className="font-mono font-bold text-slate-800 dark:text-white">{recoveryMaskedPhone || '-'}</span>
+                      <span className="font-mono font-semibold text-slate-900 dark:text-white">{recoveryMaskedPhone || '-'}</span>
                     </div>
                   </div>
 
@@ -716,13 +916,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                       required
                       maxLength={6}
                       disabled={isVerifyingRecovery}
-                      placeholder="Masukkan 6 digit OTP dari WA"
+                      placeholder="Masukkan 6 digit OTP"
                       value={recoveryCode}
                       onChange={(e) => {
                         setRecoveryCode(e.target.value.replace(/\D/g, '').slice(0, 6));
                         if (errorMsg) setErrorMsg('');
                       }}
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-sm font-mono font-bold tracking-[0.35em] text-center focus:outline-none focus:bg-white focus:border-blue-500"
+                      className="w-full px-3.5 py-2.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-sm font-mono font-bold tracking-[0.35em] text-center focus:outline-none focus:bg-white dark:focus:bg-slate-950 focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15"
                     />
                   </div>
 
@@ -737,15 +937,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                           required
                           minLength={8}
                           disabled={isVerifyingRecovery}
-                          placeholder="Minimal 8 karakter"
+                          placeholder="Min. 8 karakter"
                           value={newPassword}
                           onChange={(e) => setNewPassword(e.target.value)}
-                          className="w-full pl-3.5 pr-9 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white text-xs focus:outline-none focus:bg-white focus:border-blue-500"
+                          className="w-full pl-3.5 pr-9 py-2.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:bg-white dark:focus:bg-slate-950 focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15"
                         />
                         <button
                           type="button"
                           onClick={() => setShowNewPassword(!showNewPassword)}
-                          className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer p-0.5"
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer p-1"
+                          aria-label={showNewPassword ? 'Sembunyikan password baru' : 'Lihat password baru'}
                         >
                           {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
@@ -763,7 +964,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                         placeholder="Konfirmasi password"
                         value={confirmNewPassword}
                         onChange={(e) => setConfirmNewPassword(e.target.value)}
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white text-xs focus:outline-none focus:bg-white focus:border-blue-500"
+                        className="w-full px-3.5 py-2.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:bg-white dark:focus:bg-slate-950 focus:border-blue-600 focus:ring-2 focus:ring-blue-600/15"
                       />
                     </div>
                   </div>
@@ -773,7 +974,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                       type="button"
                       disabled={isSendingRecovery || recoveryResendCooldown > 0}
                       onClick={() => requestWhatsAppOtp(recoveryInput)}
-                      className="px-4 py-3 rounded-full bg-[#e9f2ff] dark:bg-[#253e64] text-[#1764db] dark:text-[#c5dbff] hover:brightness-95 font-bold text-xs transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                      className="px-3.5 py-2.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                     >
                       {recoveryResendCooldown > 0
                         ? `Kirim Ulang (${recoveryResendCooldown}s)`
@@ -782,7 +983,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     <button
                       type="submit"
                       disabled={isVerifyingRecovery}
-                      className="flex-1 py-3 rounded-full bg-gradient-to-r from-[#1764db] to-[#247beb] hover:brightness-95 text-white font-bold text-xs shadow-sm shadow-[#1764db]/20 flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-60"
+                      className="flex-1 py-2.5 px-4 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60"
                     >
                       {isVerifyingRecovery ? (
                         <>
@@ -792,7 +993,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                       ) : (
                         <>
                           <CheckCircle2 className="w-4 h-4" />
-                          <span>Simpan Kata Sandi Baru</span>
+                          <span>Simpan Password Baru</span>
                         </>
                       )}
                     </button>
