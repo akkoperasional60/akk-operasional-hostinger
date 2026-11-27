@@ -8867,6 +8867,95 @@ Kembalikan HANYA JSON valid:
     }
   });
 
+  app.post('/api/form-kirim/import-excel', express.json({ limit: '25mb' }), async (req, res) => {
+    try {
+      const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+      if (rawItems.length === 0) {
+        return res.status(400).json({ success: false, error: 'Daftar faktur hasil impor kosong.' });
+      }
+      const mode = req.body?.mode === 'append' ? 'append' : 'replace_all';
+      const existingItems = Array.isArray(inMemoryFormKirimWorkspace?.invoiceItems)
+        ? inMemoryFormKirimWorkspace.invoiceItems
+        : [];
+      const mergedInvoiceItems = mode === 'append' ? [...existingItems, ...rawItems] : rawItems;
+
+      const nextWorkspace = {
+        selectedAreaKirim: String(
+          req.body?.selectedAreaKirim || inMemoryFormKirimWorkspace?.selectedAreaKirim || ''
+        )
+          .trim()
+          .toUpperCase(),
+        tanggalKirim: String(
+          req.body?.tanggalKirim || inMemoryFormKirimWorkspace?.tanggalKirim || ''
+        ).trim(),
+        activeSavedRecordId:
+          req.body?.activeSavedRecordId !== undefined
+            ? req.body.activeSavedRecordId
+            : inMemoryFormKirimWorkspace?.activeSavedRecordId || null,
+        viewMode: req.body?.viewMode === 'saved_preview' ? 'saved_preview' : 'edit',
+        invoiceItems: mergedInvoiceItems,
+        updatedAt: new Date().toISOString()
+      };
+
+      await persistFormKirimWorkspaceToDbAndDisk(nextWorkspace);
+      broadcastCrewSyncEvent('form_kirim_workspace');
+      return res.json({
+        success: true,
+        workspace: inMemoryFormKirimWorkspace,
+        importedCount: rawItems.length,
+        totalCount: mergedInvoiceItems.length,
+        source: isDatabaseConfigured() ? 'hostinger_mysql' : 'disk_database'
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Gagal mengimpor data Form Kirim' });
+    }
+  });
+
+  app.put('/api/form-kirim/:id', express.json({ limit: '25mb' }), async (req, res) => {
+    try {
+      const targetId = String(req.params.id || '').trim();
+      if (!targetId) {
+        return res.status(400).json({ success: false, error: 'ID Form Kirim wajib diisi.' });
+      }
+      const incoming = req.body?.record || req.body;
+      if (!incoming || typeof incoming !== 'object') {
+        return res.status(400).json({ success: false, error: 'Payload Form Kirim tidak valid.' });
+      }
+
+      const idx = inMemoryFormKirimRecords.findIndex((r: any) => r.id === targetId);
+      const existingRec = idx !== -1 ? inMemoryFormKirimRecords[idx] : null;
+      const mergedRecord = mergeFormKirimRecord(existingRec, {
+        ...incoming,
+        id: targetId
+      });
+
+      const nextList =
+        idx !== -1
+          ? inMemoryFormKirimRecords.map((r: any, i: number) => (i === idx ? mergedRecord : r))
+          : [mergedRecord, ...inMemoryFormKirimRecords];
+
+      await persistFormKirimToDbAndDisk(sanitizeFormKirimRecords(nextList));
+
+      if (req.body?.workspace && typeof req.body.workspace === 'object' && Array.isArray(req.body.workspace.invoiceItems)) {
+        await persistFormKirimWorkspaceToDbAndDisk({
+          ...req.body.workspace,
+          updatedAt: new Date().toISOString()
+        });
+      }
+
+      broadcastCrewSyncEvent('form_kirim_update', targetId);
+      return res.json({
+        success: true,
+        record: mergedRecord,
+        records: inMemoryFormKirimRecords,
+        workspace: inMemoryFormKirimWorkspace,
+        source: isDatabaseConfigured() ? 'hostinger_mysql' : 'disk_database'
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Gagal memperbarui Form Kirim' });
+    }
+  });
+
   app.patch('/api/form-kirim/:id/driver', express.json({ limit: '25mb' }), async (req, res) => {
     try {
       const targetId = String(req.params.id || '').trim();

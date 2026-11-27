@@ -22,8 +22,6 @@ import {
   X
 } from 'lucide-react';
 import {
-  BarChart,
-  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -31,8 +29,7 @@ import {
   ResponsiveContainer,
   Legend,
   AreaChart,
-  Area,
-  Cell
+  Area
 } from 'recharts';
 import {
   FuelLog,
@@ -164,10 +161,9 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
   const [formGasStation, setFormGasStation] = useState<string>('SPBU Farly');
   const [isGasStationDropdownOpen, setIsGasStationDropdownOpen] = useState<boolean>(false);
   const [formRouteTrip, setFormRouteTrip] = useState<string>('');
-  const [formCargoLoadTon, setFormCargoLoadTon] = useState<string>('');
-  const [formNotes, setFormNotes] = useState<string>('');
   const [formError, setFormError] = useState<string>('');
   const [isSavingFuelLog, setIsSavingFuelLog] = useState<boolean>(false);
+  const [hoveredChartFleetId, setHoveredChartFleetId] = useState<string | null>(null);
 
   // Dropdown popovers inside modal / overview
   const [activeModalDropdown, setActiveModalDropdown] = useState<
@@ -906,8 +902,6 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     setFormStartOdo('');
     setFormEndOdo('');
     setFormGasStation('SPBU Farly');
-    setFormCargoLoadTon('');
-    setFormNotes('');
     setFleetSearchFilter('');
     setDriverSearchFilter('');
     setHelperSearchFilter('');
@@ -936,8 +930,6 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     setFormStartOdo(String(log.startOdometerKm || ''));
     setFormEndOdo(String(log.endOdometerKm || ''));
     setFormGasStation(log.gasStation || 'SPBU Farly');
-    setFormCargoLoadTon(log.cargoLoadTon ? String(log.cargoLoadTon) : '');
-    setFormNotes(log.notes || '');
     setFleetSearchFilter('');
     setDriverSearchFilter('');
     setHelperSearchFilter('');
@@ -1075,8 +1067,8 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       endOdometerKm: endKm,
       gasStation: formGasStation,
       routeTrip: formRouteTrip || undefined,
-      cargoLoadTon: formCargoLoadTon ? Number(formCargoLoadTon) : undefined,
-      notes: formNotes || undefined
+      cargoLoadTon: editingLogObj?.cargoLoadTon,
+      notes: editingLogObj?.notes
     };
 
     setIsSavingFuelLog(true);
@@ -1415,7 +1407,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
             { id: 'overview', label: 'Analisis Efisiensi' },
             { id: 'liter_km', label: `L/KM Unit (${fleetSummaries.length})` },
             { id: 'km_recap', label: 'Rekap KM Berangkat & Pulang' },
-            { id: 'weekly_report', label: 'Rekapitulasi Mingguan' },
+            { id: 'weekly_report', label: 'Rekapitulasi BBM' },
             { id: 'leaderboard', label: `Eco-Driver (${driverScores.length})` },
             { id: 'logs', label: `Audit Riwayat BBM (${reconciledLogs.length})` }
           ].map(tab => (
@@ -1490,7 +1482,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
           {/* CHARTS ROW: BAR COMPARISON + AREA TREND */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-            {/* Bar Chart: Aktual L/KM vs Target Pabrikan */}
+            {/* Bullet / Dot-Plot Comparison: Aktual L/KM vs Target Pabrikan */}
             <div className="lg:col-span-6 bg-white border border-slate-200 rounded-xl p-5 flex flex-col gap-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
                 <div>
@@ -1498,7 +1490,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     Komparasi Aktual L/KM vs Target
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Angka lebih rendah berarti konsumsi solar per kilometer lebih hemat.
+                    Garis vertikal menandai batas Target L/KM; posisi titik lebih kiri berarti konsumsi lebih hemat.
                   </p>
                 </div>
 
@@ -1506,7 +1498,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   value={comparisonSelectedFleetId}
                   onChange={e => setComparisonSelectedFleetId(e.target.value)}
                   aria-label="Filter unit grafik L/KM"
-                  className="px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-600 cursor-pointer"
+                  className="px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-600 cursor-pointer shrink-0"
                 >
                   <option value="all">Semua Armada ({unitLKmAnalysis.length})</option>
                   {unitLKmAnalysis.map(u => (
@@ -1517,78 +1509,177 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                 </select>
               </div>
 
-              <div className="h-80 w-full">
-                {lKmComparisonChartData.every(d => d.aktualLKm === 0) ? (
-                  <div className="h-full flex items-center justify-center text-sm text-slate-500 border border-dashed border-slate-200 rounded-lg">
-                    Belum ada data pengisian BBM pada cabang ini untuk ditampilkan di grafik.
-                  </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={lKmComparisonChartData}
-                      layout="vertical"
-                      margin={{ top: 6, right: 20, left: 8, bottom: 6 }}
-                      barGap={3}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={true} vertical={false} />
-                      <XAxis
-                        type="number"
-                        stroke="#64748b"
-                        tick={{ fontSize: 11, fill: '#475569' }}
-                        domain={[0, 'auto']}
-                        tickFormatter={v => `${v}`}
-                      />
-                      <YAxis
-                        type="category"
-                        dataKey="unit"
-                        interval={0}
-                        stroke="#64748b"
-                        width={82}
-                        tick={{ fontSize: 11, fill: '#0f172a', fontWeight: 600 }}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: '#ffffff',
-                          borderColor: '#cbd5e1',
-                          borderRadius: '8px',
-                          fontSize: '12px',
-                          color: '#0f172a',
-                          boxShadow: 'none'
-                        }}
-                        formatter={(val: unknown, name: unknown, item: { payload?: { aktualKmL?: number; targetKmL?: number } }) => {
-                          const num = Number(val ?? 0) || 0;
-                          const isActual = String(name ?? '') === 'aktualLKm' || String(name ?? '').includes('Aktual');
-                          const ratio = isActual ? item?.payload?.aktualKmL : item?.payload?.targetKmL;
-                          return [
-                            `${num.toFixed(4)} L/KM (${ratio || 0} KM/L)`,
-                            isActual ? 'Aktual L/KM' : 'Target Maks L/KM'
-                          ];
-                        }}
-                        labelFormatter={(label, payload) => {
-                          const p = payload?.[0]?.payload;
-                          return p ? `${label} · ${p.plate} (${p.tipe})` : String(label);
-                        }}
-                      />
-                      <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }} />
-                      <Bar dataKey="aktualLKm" name="Aktual L/KM" fill="#2563eb" radius={[0, 4, 4, 0]} barSize={8}>
-                        {lKmComparisonChartData.map((entry, idx) => (
-                          <Cell
-                            key={`cell-akt-${idx}`}
-                            fill={
-                              entry.aktualLKm <= 0
-                                ? '#cbd5e1'
-                                : entry.aktualLKm <= entry.targetLKm
-                                ? '#16a34a'
-                                : '#dc2626'
-                            }
-                          />
-                        ))}
-                      </Bar>
-                      <Bar dataKey="targetLKm" name="Target L/KM" fill="#94a3b8" radius={[0, 4, 4, 0]} barSize={8} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
+              {lKmComparisonChartData.every(d => d.aktualLKm === 0) ? (
+                <div className="h-80 flex items-center justify-center text-sm text-slate-500 border border-dashed border-slate-200 rounded-lg">
+                  Belum ada data pengisian BBM pada cabang ini untuk ditampilkan di grafik.
+                </div>
+              ) : (
+                (() => {
+                  const visibleRows = lKmComparisonChartData.filter(
+                    d => d.aktualLKm > 0 || comparisonSelectedFleetId !== 'all'
+                  );
+                  const rawMax = Math.max(
+                    0.2,
+                    ...visibleRows.map(d => Math.max(d.aktualLKm, d.targetLKm) * 1.15)
+                  );
+                  const scaleMax = Math.ceil(rawMax * 20) / 20; // crisp 0.05 L/KM intervals
+                  const axisTicks = [0, 0.25, 0.5, 0.75, 1].map(ratio =>
+                    Number((scaleMax * ratio).toFixed(2))
+                  );
+
+                  return (
+                    <div className="flex flex-col gap-3">
+                      <div className="flex flex-wrap items-center gap-4 text-[11px] font-medium text-slate-600">
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 inline-block" />
+                          <span>Aktual &le; Target (Hemat)</span>
+                        </span>
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full bg-red-600 inline-block" />
+                          <span>Aktual &gt; Target (Boros)</span>
+                        </span>
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="w-0.5 h-3.5 bg-slate-800 inline-block" />
+                          <span>Batas Target L/KM</span>
+                        </span>
+                      </div>
+
+                      <div className="max-h-[268px] overflow-y-auto pr-1 space-y-2">
+                        {visibleRows.map(entry => {
+                          const hasReading = entry.aktualLKm > 0;
+                          const isEfficient = hasReading && entry.aktualLKm <= entry.targetLKm;
+                          const actualPct = Math.min(100, Math.max(0, (entry.aktualLKm / scaleMax) * 100));
+                          const targetPct = Math.min(100, Math.max(0, (entry.targetLKm / scaleMax) * 100));
+                          const diffLeft = Math.min(actualPct, targetPct);
+                          const diffWidth = Math.abs(actualPct - targetPct);
+                          const diffPctVsTarget =
+                            entry.targetLKm > 0 && hasReading
+                              ? Number((((entry.aktualLKm - entry.targetLKm) / entry.targetLKm) * 100).toFixed(1))
+                              : 0;
+                          const isHovered = hoveredChartFleetId === entry.fleetId;
+                          const isSelected = comparisonSelectedFleetId === entry.fleetId;
+
+                          return (
+                            <div
+                              key={entry.fleetId}
+                              onMouseEnter={() => setHoveredChartFleetId(entry.fleetId)}
+                              onMouseLeave={() => setHoveredChartFleetId(null)}
+                              onClick={() =>
+                                setComparisonSelectedFleetId(prev =>
+                                  prev === entry.fleetId ? 'all' : entry.fleetId
+                                )
+                              }
+                              className={`relative flex items-center gap-3 px-2.5 py-2 rounded-lg border transition cursor-pointer ${
+                                isSelected
+                                  ? 'bg-blue-50/70 border-blue-200'
+                                  : isHovered
+                                  ? 'bg-slate-50 border-slate-200'
+                                  : 'bg-white border-transparent hover:border-slate-200'
+                              }`}
+                            >
+                              <div className="w-20 sm:w-24 shrink-0">
+                                <div className="text-xs font-bold text-slate-900 truncate">{entry.unit}</div>
+                                <div className="text-[11px] text-slate-500 truncate">{entry.tipe}</div>
+                              </div>
+
+                              <div className="flex-1 relative h-7 flex items-center min-w-[120px]">
+                                <div className="w-full h-1.5 bg-slate-100 rounded-full relative">
+                                  {hasReading && (
+                                    <div
+                                      className={`absolute top-0 h-1.5 rounded-full ${
+                                        isEfficient ? 'bg-emerald-200' : 'bg-red-200'
+                                      }`}
+                                      style={{ left: `${diffLeft}%`, width: `${Math.max(diffWidth, 0.5)}%` }}
+                                    />
+                                  )}
+                                </div>
+
+                                {entry.targetLKm > 0 && (
+                                  <div
+                                    className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-0.5 h-5 bg-slate-800 z-10"
+                                    style={{ left: `${targetPct}%` }}
+                                  />
+                                )}
+
+                                {hasReading && (
+                                  <div
+                                    className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full border-2 border-white z-20 ${
+                                      isEfficient ? 'bg-emerald-600' : 'bg-red-600'
+                                    }`}
+                                    style={{ left: `${actualPct}%` }}
+                                  />
+                                )}
+
+                                {isHovered && (
+                                  <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-1.5 z-30 w-60 bg-white border border-slate-200 rounded-lg p-2.5 text-xs pointer-events-none">
+                                    <div className="font-bold text-slate-900">
+                                      {entry.unit} · {entry.plate}
+                                    </div>
+                                    <div className="text-[11px] text-slate-500 mt-0.5">
+                                      Driver: {entry.driverName} · Area: {entry.areaKirim}
+                                    </div>
+                                    <div className="mt-1.5 pt-1.5 border-t border-slate-100 space-y-0.5 font-mono tabular-nums text-[11px]">
+                                      <div className="flex justify-between">
+                                        <span className="text-slate-500">Aktual:</span>
+                                        <span className={`font-bold ${isEfficient ? 'text-emerald-700' : 'text-red-600'}`}>
+                                          {hasReading ? `${entry.aktualLKm.toFixed(4)} L/KM (${entry.aktualKmL} KM/L)` : 'Belum ada data'}
+                                        </span>
+                                      </div>
+                                      <div className="flex justify-between">
+                                        <span className="text-slate-500">Target Maks:</span>
+                                        <span className="font-semibold text-slate-800">
+                                          {entry.targetLKm.toFixed(4)} L/KM ({entry.targetKmL} KM/L)
+                                        </span>
+                                      </div>
+                                      {hasReading && (
+                                        <div className="flex justify-between">
+                                          <span className="text-slate-500">Selisih:</span>
+                                          <span className={`font-semibold ${isEfficient ? 'text-emerald-700' : 'text-red-600'}`}>
+                                            {diffPctVsTarget > 0 ? `+${diffPctVsTarget}% Boros` : `${Math.abs(diffPctVsTarget)}% Hemat`}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="w-28 sm:w-32 shrink-0 text-right font-mono tabular-nums">
+                                <div
+                                  className={`text-xs font-bold ${
+                                    !hasReading
+                                      ? 'text-slate-400'
+                                      : isEfficient
+                                      ? 'text-emerald-700'
+                                      : 'text-red-600'
+                                  }`}
+                                >
+                                  {hasReading ? `${entry.aktualLKm.toFixed(3)} L/KM` : 'Belum ada'}
+                                </div>
+                                <div className="text-[11px] text-slate-500">
+                                  Tgt {entry.targetLKm > 0 ? entry.targetLKm.toFixed(3) : '-'} · {entry.aktualKmL || 0} KM/L
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div className="flex items-center gap-3 px-2.5 pt-2 border-t border-slate-100">
+                        <div className="w-20 sm:w-24 shrink-0 text-[10px] font-semibold text-slate-400 uppercase tracking-wide">
+                          Skala L/KM
+                        </div>
+                        <div className="flex-1 flex items-center justify-between text-[11px] font-mono tabular-nums text-slate-500">
+                          {axisTicks.map(tick => (
+                            <span key={tick}>{tick.toFixed(2)}</span>
+                          ))}
+                        </div>
+                        <div className="w-28 sm:w-32 shrink-0" />
+                      </div>
+                    </div>
+                  );
+                })()
+              )}
             </div>
 
             {/* Area Chart: Tren Konsumsi BBM & Jarak Tempuh */}
@@ -2064,133 +2155,134 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
             <table className="w-full text-left text-sm text-slate-700">
               <thead className="bg-slate-50 text-xs font-semibold text-slate-500 border-b border-slate-200 whitespace-nowrap">
                 <tr>
-                  <th className="py-3 px-3.5">Tanggal</th>
-                  <th className="py-3 px-3.5">Armada</th>
-                  <th className="py-3 px-3.5">Driver &amp; Helper</th>
-                  <th className="py-3 px-3.5">Area &amp; SPBU</th>
-                  <th className="py-3 px-3.5 text-right">Volume &amp; Biaya</th>
-                  <th className="py-3 px-3.5 text-right">KM Awal – Akhir</th>
-                  <th className="py-3 px-3.5 text-right">Jarak (KM)</th>
-                  <th className="py-3 px-3.5 text-right">Rasio</th>
-                  <th className="py-3 px-3.5 text-center">Status</th>
-                  <th className="py-3 px-3.5 text-center">Aksi</th>
+                  <th className="py-3 px-4">Tanggal</th>
+                  <th className="py-3 px-4">Armada</th>
+                  <th className="py-3 px-4">Driver</th>
+                  <th className="py-3 px-4">Area &amp; SPBU</th>
+                  <th className="py-3 px-4 text-right">Volume &amp; Biaya</th>
+                  <th className="py-3 px-4 text-right">Jarak (KM)</th>
+                  <th className="py-3 px-4 text-right">Rasio</th>
+                  <th className="py-3 px-4 text-center">Status</th>
+                  <th className="py-3 px-4 text-center">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {paginatedLogs.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="py-12 text-center text-sm text-slate-500">
+                    <td colSpan={9} className="py-12 text-center text-sm text-slate-500">
                       Tidak ada catatan BBM yang sesuai filter pencarian.
                     </td>
                   </tr>
                 ) : (
-                  paginatedLogs.map(log => (
-                    <tr key={log.id} className="hover:bg-slate-50/80 transition">
-                      <td className="py-3 px-3.5 font-mono tabular-nums text-xs text-slate-700 whitespace-nowrap">
-                        {log.date}
-                      </td>
-                      <td className="py-3 px-3.5 whitespace-nowrap">
-                        <div className="font-semibold text-slate-900">{log.initialCode || log.plateNumber}</div>
-                        <div className="text-xs text-slate-500 font-mono">{log.plateNumber}</div>
-                      </td>
-                      <td className="py-3 px-3.5 whitespace-nowrap">
-                        <div className="font-medium text-slate-900 text-xs">{log.driverName}</div>
-                        {log.helperName && (
-                          <div className="text-xs text-slate-500">Helper: {log.helperName}</div>
-                        )}
-                      </td>
-                      <td className="py-3 px-3.5 max-w-[190px]">
-                        <div className="text-xs font-medium text-slate-800 truncate">{log.routeTrip || '-'}</div>
-                        <div className="text-xs text-slate-500 truncate">{log.gasStation}</div>
-                      </td>
-                      <td className="py-3 px-3.5 text-right font-mono tabular-nums whitespace-nowrap">
-                        <div className="font-semibold text-slate-900 text-xs">
-                          {log.liters} L · {log.fuelType}
-                        </div>
-                        <div className="text-xs text-slate-500">
-                          Rp {log.totalCost.toLocaleString('id-ID')}
-                        </div>
-                      </td>
-                      <td className="py-3 px-3.5 text-right font-mono tabular-nums text-xs text-slate-600 whitespace-nowrap">
-                        {log.startOdometerKm.toLocaleString('id-ID')} – {log.endOdometerKm.toLocaleString('id-ID')}
-                      </td>
-                      <td className="py-3 px-3.5 text-right font-mono tabular-nums whitespace-nowrap">
-                        <div className="font-bold text-blue-600">{log.distanceKm.toLocaleString('id-ID')} KM</div>
-                        <div className="text-[11px] font-sans text-slate-500">
-                          {log.distanceSource === 'portal' ? 'Portal KM' : 'Input BBM'}
-                        </div>
-                      </td>
-                      <td className="py-3 px-3.5 text-right font-mono tabular-nums whitespace-nowrap">
-                        <div className="font-bold text-slate-900 text-xs">{log.ratioKmPerLiter} KM/L</div>
-                        <div className="text-[11px] text-slate-500">
-                          {log.distanceKm > 0 ? (log.liters / log.distanceKm).toFixed(3) : '0'} L/KM
-                        </div>
-                      </td>
-                      <td className="py-3 px-3.5 text-center whitespace-nowrap">
-                        <span
-                          className={`px-2 py-0.5 rounded-md text-xs font-semibold border inline-block ${
-                            log.efficiencyStatus === 'Sangat Efisien'
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                              : log.efficiencyStatus === 'Efisien / Normal'
-                              ? 'bg-blue-50 text-blue-700 border-blue-200'
-                              : log.efficiencyStatus === 'Boros'
-                              ? 'bg-amber-50 text-amber-700 border-amber-200'
-                              : 'bg-red-50 text-red-700 border-red-200'
-                          }`}
+                  paginatedLogs.map(log => {
+                    const lPerKm = log.distanceKm > 0 ? (log.liters / log.distanceKm).toFixed(3) : '0.000';
+                    return (
+                      <tr key={log.id} className="hover:bg-slate-50/80 transition">
+                        <td className="py-3.5 px-4 font-mono tabular-nums text-xs text-slate-700 whitespace-nowrap">
+                          {log.date}
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <span className="font-semibold text-slate-900">{log.initialCode || log.plateNumber}</span>
+                          <span className="text-xs text-slate-500 font-mono ml-1.5">{log.plateNumber}</span>
+                        </td>
+                        <td
+                          className="py-3.5 px-4 text-xs font-medium text-slate-800 whitespace-nowrap"
+                          title={log.helperName ? `Driver: ${log.driverName} · Helper: ${log.helperName}` : log.driverName}
                         >
-                          {log.efficiencyStatus}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3.5 text-center whitespace-nowrap">
-                        {confirmDeleteId === log.id ? (
-                          <div className="inline-flex items-center gap-1">
-                            <button
-                              type="button"
-                              disabled={deletingLogId === log.id}
-                              onClick={() => handleDeleteLog(log.id)}
-                              className="px-2 py-1 rounded bg-red-600 hover:bg-red-700 text-white text-xs font-semibold cursor-pointer"
-                            >
-                              {deletingLogId === log.id ? '...' : 'Hapus'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setConfirmDeleteId(null)}
-                              className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer"
-                            >
-                              Batal
-                            </button>
+                          {log.driverName}
+                        </td>
+                        <td className="py-3.5 px-4 max-w-[210px]">
+                          <div className="text-xs text-slate-800 truncate">
+                            <span className="font-medium">{log.routeTrip || '-'}</span>
+                            <span className="text-slate-400 mx-1">·</span>
+                            <span className="text-slate-500">{log.gasStation}</span>
                           </div>
-                        ) : (
-                          <div className="inline-flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => setSelectedLogForDetail(log)}
-                              className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 cursor-pointer"
-                              title="Lihat Slip Detail"
-                            >
-                              <FileText className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => openEditFuelModal(log)}
-                              className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-blue-600 cursor-pointer"
-                              title="Edit Catatan"
-                            >
-                              <Edit className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setConfirmDeleteId(log.id)}
-                              className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-red-50 text-red-600 cursor-pointer"
-                              title="Hapus Catatan"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                        <td className="py-3.5 px-4 text-right font-mono tabular-nums whitespace-nowrap text-xs">
+                          <span className="font-semibold text-slate-900">{log.liters} L</span>
+                          <span className="text-slate-400 mx-1">·</span>
+                          <span className="text-slate-600">Rp {log.totalCost.toLocaleString('id-ID')}</span>
+                        </td>
+                        <td
+                          className="py-3.5 px-4 text-right font-mono tabular-nums whitespace-nowrap text-xs"
+                          title={`Odometer: ${log.startOdometerKm.toLocaleString('id-ID')} – ${log.endOdometerKm.toLocaleString('id-ID')} KM`}
+                        >
+                          <span className="font-bold text-blue-600">{log.distanceKm.toLocaleString('id-ID')} KM</span>
+                          {log.distanceSource === 'portal' && (
+                            <span className="ml-1.5 text-[11px] font-sans font-semibold text-slate-500">(Portal)</span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 text-right font-mono tabular-nums whitespace-nowrap text-xs">
+                          <span className="font-bold text-slate-900">{log.ratioKmPerLiter} KM/L</span>
+                          <span className="text-slate-400 mx-1">/</span>
+                          <span className="text-slate-500">{lPerKm} L/KM</span>
+                        </td>
+                        <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                          <span
+                            className={`px-2.5 py-0.5 rounded-md text-xs font-semibold border inline-block ${
+                              log.efficiencyStatus === 'Sangat Efisien'
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : log.efficiencyStatus === 'Efisien / Normal'
+                                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                : log.efficiencyStatus === 'Boros'
+                                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                : 'bg-red-50 text-red-700 border-red-200'
+                            }`}
+                          >
+                            {log.efficiencyStatus}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                          {confirmDeleteId === log.id ? (
+                            <div className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                disabled={deletingLogId === log.id}
+                                onClick={() => handleDeleteLog(log.id)}
+                                className="px-2 py-1 rounded bg-red-600 hover:bg-red-700 text-white text-xs font-semibold cursor-pointer"
+                              >
+                                {deletingLogId === log.id ? '...' : 'Hapus'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteId(null)}
+                                className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold cursor-pointer"
+                              >
+                                Batal
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedLogForDetail(log)}
+                                className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 cursor-pointer"
+                                title="Lihat Slip Detail"
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openEditFuelModal(log)}
+                                className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-blue-600 cursor-pointer"
+                                title="Edit Catatan"
+                              >
+                                <Edit className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteId(log.id)}
+                                className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-red-50 text-red-600 cursor-pointer"
+                                title="Hapus Catatan"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -2599,8 +2691,8 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   />
                 </div>
 
-                {/* Area Tujuan & Muatan */}
-                <div className="relative">
+                {/* Area / Rute Pengiriman */}
+                <div className="relative sm:col-span-2">
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Area / Rute Pengiriman</label>
                   <button
                     type="button"
@@ -2642,30 +2734,6 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     </div>
                   )}
                 </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Muatan (Ton, Opsional)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    placeholder="Contoh: 3.5"
-                    value={formCargoLoadTon}
-                    onChange={e => setFormCargoLoadTon(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm font-mono text-slate-900 focus:outline-none focus:border-blue-600"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Catatan Tambahan</label>
-                <input
-                  type="text"
-                  placeholder="Contoh: Antre muat atau kondisi jalan..."
-                  value={formNotes}
-                  onChange={e => setFormNotes(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-blue-600"
-                />
               </div>
 
               {/* Live Calculation Summary */}

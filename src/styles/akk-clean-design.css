@@ -129,17 +129,17 @@ body.akk-clean-ui #root main {
   isolation: isolate;
 }
 
-/* Portal Driver Card Geometry & Soft Depth (excludes isolated dark scanner, crew portal, leaflet, flat schedule, flat validation, flat reports, flat threeway, flat docs, flat fuel, flat kpi) */
-body.akk-clean-ui #root main :where(.rounded-2xl):not(#akk-crew-v66):not(#akk-crew-v66 *):not(.wms-handheld-dark):not(.wms-handheld-dark *):not(.leaflet-container *):not(.akk-flat-schedule):not(.akk-flat-schedule *):not(.akk-flat-validation):not(.akk-flat-validation *):not(.akk-flat-reports):not(.akk-flat-reports *):not(.akk-flat-threeway):not(.akk-flat-threeway *):not(.akk-flat-docs):not(.akk-flat-docs *):not(.akk-flat-fuel):not(.akk-flat-fuel *):not(.akk-flat-kpi):not(.akk-flat-kpi *) {
+/* Portal Driver Card Geometry & Soft Depth (excludes isolated dark scanner, crew portal, leaflet, flat schedule, flat validation, flat reports, flat threeway, flat docs, flat fuel, flat kpi, flat formkirim) */
+body.akk-clean-ui #root main :where(.rounded-2xl):not(#akk-crew-v66):not(#akk-crew-v66 *):not(.wms-handheld-dark):not(.wms-handheld-dark *):not(.leaflet-container *):not(.akk-flat-schedule):not(.akk-flat-schedule *):not(.akk-flat-validation):not(.akk-flat-validation *):not(.akk-flat-reports):not(.akk-flat-reports *):not(.akk-flat-threeway):not(.akk-flat-threeway *):not(.akk-flat-docs):not(.akk-flat-docs *):not(.akk-flat-fuel):not(.akk-flat-fuel *):not(.akk-flat-kpi):not(.akk-flat-kpi *):not(.akk-flat-formkirim):not(.akk-flat-formkirim *) {
   border-radius: 19px;
 }
-body.akk-clean-ui #root main :where(div.rounded-xl, section.rounded-xl, article.rounded-xl):not(#akk-crew-v66):not(#akk-crew-v66 *):not(.wms-handheld-dark):not(.wms-handheld-dark *):not(.leaflet-container *):not(.akk-flat-schedule):not(.akk-flat-schedule *):not(.akk-flat-validation):not(.akk-flat-validation *):not(.akk-flat-reports):not(.akk-flat-reports *):not(.akk-flat-threeway):not(.akk-flat-threeway *):not(.akk-flat-docs):not(.akk-flat-docs *):not(.akk-flat-fuel):not(.akk-flat-fuel *):not(.akk-flat-kpi):not(.akk-flat-kpi *):not([class*='w-7']):not([class*='w-8']):not([class*='w-9']):not([class*='w-10']):not([class*='w-11']):not([class*='w-12']) {
+body.akk-clean-ui #root main :where(div.rounded-xl, section.rounded-xl, article.rounded-xl):not(#akk-crew-v66):not(#akk-crew-v66 *):not(.wms-handheld-dark):not(.wms-handheld-dark *):not(.leaflet-container *):not(.akk-flat-schedule):not(.akk-flat-schedule *):not(.akk-flat-validation):not(.akk-flat-validation *):not(.akk-flat-reports):not(.akk-flat-reports *):not(.akk-flat-threeway):not(.akk-flat-threeway *):not(.akk-flat-docs):not(.akk-flat-docs *):not(.akk-flat-fuel):not(.akk-flat-fuel *):not(.akk-flat-kpi):not(.akk-flat-kpi *):not(.akk-flat-formkirim):not(.akk-flat-formkirim *):not([class*='w-7']):not([class*='w-8']):not([class*='w-9']):not([class*='w-10']):not([class*='w-11']):not([class*='w-12']) {
   border-radius: 17px;
 }
-body.akk-clean-ui #root main :where(.shadow-2xl, .shadow-xl):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule):not(.akk-flat-schedule *):not(.akk-flat-validation):not(.akk-flat-validation *):not(.akk-flat-reports):not(.akk-flat-reports *):not(.akk-flat-threeway):not(.akk-flat-threeway *):not(.akk-flat-docs):not(.akk-flat-docs *):not(.akk-flat-fuel):not(.akk-flat-fuel *):not(.akk-flat-kpi):not(.akk-flat-kpi *) {
+body.akk-clean-ui #root main :where(.shadow-2xl, .shadow-xl):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule):not(.akk-flat-schedule *):not(.akk-flat-validation):not(.akk-flat-validation *):not(.akk-flat-reports):not(.akk-flat-reports *):not(.akk-flat-threeway):not(.akk-flat-threeway *):not(.akk-flat-docs):not(.akk-flat-docs *):not(.akk-flat-fuel):not(.akk-flat-fuel *):not(.akk-flat-kpi):not(.akk-flat-kpi *):not(.akk-flat-formkirim):not(.akk-flat-formkirim *) {
   box-shadow: var(--akk-ui-shadow-elevated);
 }
-body.akk-clean-ui #root main :where(.shadow-md, .shadow-sm, .shadow-xs, .shadow-2xs):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule):not(.akk-flat-schedule *):not(.akk-flat-validation):not(.akk-flat-validation *):not(.akk-flat-reports):not(.akk-flat-reports *):not(.akk-flat-threeway):not(.akk-flat-threeway *):not(.akk-flat-docs):not(.akk-flat-docs *):not(.akk-flat-fuel):not(.akk-flat-fuel *):not(.akk-flat-kpi):not(.akk-flat-kpi *) {
+body.akk-clean-ui #root main :where(.shadow-md, .shadow-sm, .shadow-xs, .shadow-2xs):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule):not(.akk-flat-schedule *):not(.akk-flat-validation):not(.akk-flat-validation *):not(.akk-flat-reports):not(.akk-flat-reports *):not(.akk-flat-threeway):not(.akk-flat-threeway *):not(.akk-flat-docs):not(.akk-flat-docs *):not(.akk-flat-fuel):not(.akk-flat-fuel *):not(.akk-flat-kpi):not(.akk-flat-kpi *):not(.akk-flat-formkirim):not(.akk-flat-formkirim *) {
   box-shadow: var(--akk-ui-shadow);
 }
 
@@ -151,7 +151,7 @@ body.akk-clean-ui #root main :where(
   button[class*='px-4'],
   button[class*='px-5'],
   button[class*='px-6']
-):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.leaflet-container *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *):not([class*='grid-cols-7'] button):not([class*='rounded-md']):not([class*='rounded-sm']) {
+):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.leaflet-container *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *):not(.akk-flat-formkirim *):not([class*='grid-cols-7'] button):not([class*='rounded-md']):not([class*='rounded-sm']) {
   border-radius: 999px !important;
 }
 
@@ -159,7 +159,7 @@ body.akk-clean-ui #root main :where(
   button[class*='bg-blue-600'],
   button[class*='bg-indigo-600'],
   button[class*='bg-cyan-600']
-):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *):not([class*='grid-cols-7'] button) {
+):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *):not(.akk-flat-formkirim *):not([class*='grid-cols-7'] button) {
   background-image: linear-gradient(105deg, #1764db, #247beb) !important;
   background-color: #1764db !important;
   border-color: transparent !important;
@@ -173,13 +173,13 @@ body.akk-clean-ui #root main :where(
   button[class*='bg-blue-600'],
   button[class*='bg-indigo-600'],
   button[class*='bg-cyan-600']
-):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *):not(:disabled):hover {
+):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *):not(.akk-flat-formkirim *):not(:disabled):hover {
   filter: brightness(0.96);
   box-shadow: 0 6px 16px rgba(23, 100, 219, .24) !important;
   transform: translateY(-1px);
 }
 
-body.akk-clean-ui #root main :where(button[class*='bg-emerald-600']):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *) {
+body.akk-clean-ui #root main :where(button[class*='bg-emerald-600']):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *):not(.akk-flat-formkirim *) {
   background-image: linear-gradient(105deg, #08774e, #109464) !important;
   background-color: #08774e !important;
   border-color: transparent !important;
@@ -189,12 +189,12 @@ body.akk-clean-ui #root main :where(button[class*='bg-emerald-600']):not(#akk-cr
   box-shadow: 0 3px 10px rgba(8, 119, 78, .18) !important;
   transition: filter .16s ease, box-shadow .16s ease, transform .16s ease;
 }
-body.akk-clean-ui #root main :where(button[class*='bg-emerald-600']):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *):not(:disabled):hover {
+body.akk-clean-ui #root main :where(button[class*='bg-emerald-600']):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *):not(.akk-flat-formkirim *):not(:disabled):hover {
   filter: brightness(0.96);
   box-shadow: 0 6px 16px rgba(8, 119, 78, .24) !important;
   transform: translateY(-1px);
 }
-body.akk-clean-ui #root main :where(button[class*='bg-blue-600'], button[class*='bg-emerald-600'], button[class*='bg-indigo-600'], button[class*='bg-cyan-600']):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *):not(:disabled):active {
+body.akk-clean-ui #root main :where(button[class*='bg-blue-600'], button[class*='bg-emerald-600'], button[class*='bg-indigo-600'], button[class*='bg-cyan-600']):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *):not(.akk-flat-formkirim *):not(:disabled):active {
   transform: translateY(0);
 }
 
@@ -204,30 +204,30 @@ body.akk-clean-ui #root main :where(
   .bg-gradient-to-br[class*='from-blue-600'],
   .bg-gradient-to-r[class*='from-indigo-600'],
   .bg-gradient-to-br[class*='from-indigo-600']
-):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *) {
+):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *):not(.akk-flat-formkirim *) {
   background-image: linear-gradient(120deg, #1454c2 0%, #1768db 65%, #3597ef 100%) !important;
 }
 
 /* Portal Driver Pill Search Bars & Clean Inputs */
-body.akk-clean-ui #root main :where(input[placeholder*='Cari'], input[type='search']):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *) {
+body.akk-clean-ui #root main :where(input[placeholder*='Cari'], input[type='search']):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *):not(.akk-flat-formkirim *) {
   border-radius: 999px !important;
 }
-body.akk-clean-ui #root main :where(input:not([type='checkbox']):not([type='radio']):not([placeholder*='Cari']):not([type='search']), select, textarea):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *) {
+body.akk-clean-ui #root main :where(input:not([type='checkbox']):not([type='radio']):not([placeholder*='Cari']):not([type='search']), select, textarea):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *):not(.akk-flat-formkirim *) {
   border-radius: 13px;
 }
 
 /* Portal Driver Modal Dialogs */
-body.akk-clean-ui div.fixed.inset-0 > :where(div, section):not(#akk-crew-v66):not(.akk-clean-mobile-layer *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel):not(.akk-flat-fuel *):not(.akk-flat-kpi):not(.akk-flat-kpi *) {
+body.akk-clean-ui div.fixed.inset-0 > :where(div, section):not(#akk-crew-v66):not(.akk-clean-mobile-layer *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel):not(.akk-flat-fuel *):not(.akk-flat-kpi):not(.akk-flat-kpi *):not(.akk-flat-formkirim):not(.akk-flat-formkirim *) {
   border-radius: 24px;
 }
 
 /* Portal Driver Data Tables */
-body.akk-clean-ui #root main :where(thead th):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *) {
+body.akk-clean-ui #root main :where(thead th):not(#akk-crew-v66 *):not(.wms-handheld-dark *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *):not(.akk-flat-formkirim *) {
   background-color: var(--akk-ui-subtle);
   color: var(--akk-ui-muted);
   border-bottom: 1px solid var(--akk-ui-border);
 }
-body.akk-clean-ui #root main :where(tbody tr):not([aria-selected='true']):not(#akk-crew-v66 *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *):hover {
+body.akk-clean-ui #root main :where(tbody tr):not([aria-selected='true']):not(#akk-crew-v66 *):not(.akk-flat-schedule *):not(.akk-flat-validation *):not(.akk-flat-reports *):not(.akk-flat-threeway *):not(.akk-flat-docs *):not(.akk-flat-fuel *):not(.akk-flat-kpi *):not(.akk-flat-formkirim *):hover {
   background-color: rgba(23, 100, 219, .045);
 }
 
@@ -732,6 +732,51 @@ html.dark body.akk-clean-ui .akk-flat-kpi :where(thead th) {
   background-color: #1e293b;
   color: #94a3b8;
   border-bottom: 1px solid #24344d;
+}
+
+/* Flat / Modern Clean Design scope for Form Kirim Barang */
+body.akk-clean-ui #root main .akk-flat-formkirim :where(.rounded-2xl, .rounded-xl, .rounded-3xl),
+body.akk-clean-ui .akk-flat-formkirim :where(.rounded-2xl, .rounded-xl, .rounded-3xl) {
+  box-shadow: none !important;
+}
+body.akk-clean-ui #root main .akk-flat-formkirim :where(
+  button[class*='px-2.5'],
+  button[class*='px-3'],
+  button[class*='px-3.5'],
+  button[class*='px-4'],
+  button[class*='px-5'],
+  button[class*='px-6']
+):not([class*='rounded-full']),
+body.akk-clean-ui .akk-flat-formkirim :where(
+  button[class*='px-2.5'],
+  button[class*='px-3'],
+  button[class*='px-3.5'],
+  button[class*='px-4'],
+  button[class*='px-5'],
+  button[class*='px-6']
+):not([class*='rounded-full']) {
+  border-radius: 10px !important;
+}
+body.akk-clean-ui #root main .akk-flat-formkirim :where(button[class*='bg-blue-600']),
+body.akk-clean-ui .akk-flat-formkirim :where(button[class*='bg-blue-600']) {
+  background-image: none !important;
+  background-color: #2563eb !important;
+  border-color: #1d4ed8 !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+body.akk-clean-ui #root main .akk-flat-formkirim :where(button[class*='bg-blue-600']):not(:disabled):hover,
+body.akk-clean-ui .akk-flat-formkirim :where(button[class*='bg-blue-600']):not(:disabled):hover {
+  background-color: #1d4ed8 !important;
+  filter: none !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+body.akk-clean-ui #root main .akk-flat-formkirim :where(input:not([type='checkbox']):not([type='radio']), select, textarea),
+body.akk-clean-ui .akk-flat-formkirim :where(input:not([type='checkbox']):not([type='radio']), select, textarea) {
+  border-radius: 10px !important;
+  box-shadow: none !important;
 }
 
 body.akk-clean-ui #root main :where(label) { letter-spacing: -.005em; }

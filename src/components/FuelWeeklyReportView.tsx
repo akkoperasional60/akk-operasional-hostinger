@@ -9,14 +9,16 @@ import {
   ChevronRight,
   MapPin,
   X,
-  RotateCcw
+  RotateCcw,
+  ArrowUpDown
 } from 'lucide-react';
-import { FuelLog } from '../types';
+import { EfficiencyStatus, FuelLog } from '../types';
 import {
   computeFleetRangeSummaries,
   exportFuelReportToExcel,
   exportFuelReportToPDF,
-  formatRupiah
+  formatRupiah,
+  WeeklyFleetFuelSummary
 } from '../utils/fuelReportGenerator';
 
 interface FuelWeeklyReportViewProps {
@@ -75,6 +77,8 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
     return new Date();
   });
   const [selectedSpbu, setSelectedSpbu] = useState<'all' | 'Farly' | 'Gajah Mada' | 'SPBU Lain'>('all');
+  const [sortOrder, setSortOrder] = useState<'efficient_first' | 'wasteful_first' | 'unit_asc' | 'distance_desc'>('efficient_first');
+  const [statusFilter, setStatusFilter] = useState<'all' | EfficiencyStatus>('all');
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportError, setExportError] = useState<string>('');
 
@@ -154,11 +158,94 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
     [filteredLogs, activePeriodLabel, rangeStart, rangeEnd]
   );
 
+  const normalizePlate = (raw?: string) => String(raw || '').replace(/\s+/g, '').toUpperCase();
+
+  const buildEfficiencyReason = useMemo(() => {
+    const logsByPlate = new Map<string, FuelLog[]>();
+    filteredLogs.forEach(l => {
+      const key = normalizePlate(l.plateNumber) || l.fleetId;
+      const existing = logsByPlate.get(key) || [];
+      existing.push(l);
+      logsByPlate.set(key, existing);
+    });
+
+    const map: Record<string, string> = {};
+    fleetSummaries.forEach(f => {
+      if (f.refuelCount === 0 || f.totalDistanceKm <= 0 || f.avgKmPerLiter <= 0) {
+        map[f.id] = 'Belum ada data jarak & pengisian BBM pada periode ini.';
+        return;
+      }
+
+      const key = normalizePlate(f.plateNumber) || f.fleetId;
+      const unitLogs = logsByPlate.get(key) || [];
+      const routeCounts = new Map<string, number>();
+      unitLogs.forEach(l => {
+        const rt = (l.routeTrip || '').trim();
+        if (rt && rt !== '-') routeCounts.set(rt, (routeCounts.get(rt) || 0) + 1);
+      });
+      const topRoutes = Array.from(routeCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 2)
+        .map(([r]) => r);
+      const routeContext = topRoutes.length > 0 ? ` Rute dominan: ${topRoutes.join(', ')}.` : '';
+
+      const diffPct = Math.abs(f.variancePercent);
+      const avgTripKm = Math.round(f.totalDistanceKm / Math.max(1, f.refuelCount));
+
+      if (f.status === 'Sangat Efisien') {
+        map[f.id] = `${f.avgKmPerLiter} KM/L (+${diffPct}% di atas target ${f.targetRatio} KM/L, rata-rata ${avgTripKm} KM/isi). Tarikan stabil & rute lancar.${routeContext}`;
+      } else if (f.status === 'Efisien / Normal') {
+        const sign = f.variancePercent >= 0 ? '+' : '';
+        map[f.id] = `${f.avgKmPerLiter} KM/L (${sign}${f.variancePercent}% vs target ${f.targetRatio} KM/L). Konsumsi wajar sesuai standar pabrikan.${routeContext}`;
+      } else if (f.status === 'Boros') {
+        map[f.id] = `${f.avgKmPerLiter} KM/L (${diffPct}% di bawah target ${f.targetRatio} KM/L). Terindikasi rute padat/antre, muatan berat, atau idling mesin tinggi.${routeContext}`;
+      } else {
+        map[f.id] = `${f.avgKmPerLiter} KM/L (${diffPct}% jauh di bawah target ${f.targetRatio} KM/L). Perlu cek filter solar, injektor, atau akurasi KM odometer.${routeContext}`;
+      }
+    });
+    return map;
+  }, [fleetSummaries, filteredLogs]);
+
+  const displayedFleetSummaries = useMemo(() => {
+    const filtered = statusFilter === 'all'
+      ? [...fleetSummaries]
+      : fleetSummaries.filter(f => f.status === statusFilter);
+
+    const hasValidRatio = (f: WeeklyFleetFuelSummary) => f.refuelCount > 0 && f.totalDistanceKm > 0 && f.avgKmPerLiter > 0;
+
+    return filtered.sort((a, b) => {
+      if (sortOrder === 'unit_asc') {
+        return (a.initialCode || a.plateNumber).localeCompare(b.initialCode || b.plateNumber);
+      }
+      if (sortOrder === 'distance_desc') {
+        return b.totalDistanceKm - a.totalDistanceKm;
+      }
+
+      const aValid = hasValidRatio(a);
+      const bValid = hasValidRatio(b);
+      if (aValid !== bValid) return aValid ? -1 : 1;
+
+      if (sortOrder === 'efficient_first') {
+        // Higher positive variance vs target & lower L/KM ratio first
+        if (b.variancePercent !== a.variancePercent) {
+          return b.variancePercent - a.variancePercent;
+        }
+        return a.avgLiterPerKm - b.avgLiterPerKm;
+      }
+
+      // wasteful_first: most negative variance & highest L/KM first
+      if (a.variancePercent !== b.variancePercent) {
+        return a.variancePercent - b.variancePercent;
+      }
+      return b.avgLiterPerKm - a.avgLiterPerKm;
+    });
+  }, [fleetSummaries, statusFilter, sortOrder]);
+
   const activeMetrics = useMemo(() => {
-    const totalLiters = Number(fleetSummaries.reduce((sum, f) => sum + f.totalLiters, 0).toFixed(1));
-    const totalCost = fleetSummaries.reduce((sum, f) => sum + f.totalCost, 0);
-    const totalDistance = fleetSummaries.reduce((sum, f) => sum + f.totalDistanceKm, 0);
-    const totalRefuels = fleetSummaries.reduce((sum, f) => sum + f.refuelCount, 0);
+    const totalLiters = Number(displayedFleetSummaries.reduce((sum, f) => sum + f.totalLiters, 0).toFixed(1));
+    const totalCost = displayedFleetSummaries.reduce((sum, f) => sum + f.totalCost, 0);
+    const totalDistance = displayedFleetSummaries.reduce((sum, f) => sum + f.totalDistanceKm, 0);
+    const totalRefuels = displayedFleetSummaries.reduce((sum, f) => sum + f.refuelCount, 0);
     const avgKmPerLiter = totalLiters > 0 && totalDistance > 0
       ? Number((totalDistance / totalLiters).toFixed(2))
       : 0;
@@ -176,7 +263,7 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
       avgLiterPerKm,
       avgCostPerKm
     };
-  }, [fleetSummaries]);
+  }, [displayedFleetSummaries]);
 
   const handleDayClick = (iso: string) => {
     if (!rangeStart || (rangeStart && rangeEnd)) {
@@ -220,9 +307,17 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
     setRangeStart('');
     setRangeEnd('');
     setSelectedSpbu('all');
+    setStatusFilter('all');
+    setSortOrder('efficient_first');
   };
 
-  const hasActiveFilter = selectedMonth !== 'all' || selectedYear !== 'all' || Boolean(rangeStart) || selectedSpbu !== 'all';
+  const hasActiveFilter =
+    selectedMonth !== 'all' ||
+    selectedYear !== 'all' ||
+    Boolean(rangeStart) ||
+    selectedSpbu !== 'all' ||
+    statusFilter !== 'all' ||
+    sortOrder !== 'efficient_first';
 
   const periodSlug = rangeStart
     ? `${rangeStart}_${rangeEnd || rangeStart}`
@@ -233,7 +328,7 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
     setExportError('');
     try {
       exportFuelReportToPDF({
-        fleetSummaries,
+        fleetSummaries: displayedFleetSummaries,
         driverSummaries: [],
         filterWeekKey: periodSlug,
         filterWeekLabel: activePeriodLabel,
@@ -252,9 +347,10 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
     setExportError('');
     try {
       exportFuelReportToExcel({
-        fleetSummaries,
+        fleetSummaries: displayedFleetSummaries,
         driverSummaries: [],
         detailedLogs: filteredLogs,
+        efficiencyNotesByFleetId: buildEfficiencyReason,
         filterWeekKey: periodSlug,
         filterWeekLabel: activePeriodLabel
       });
@@ -284,10 +380,10 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
             <h3 className="text-lg font-bold text-slate-900">
-              Rekapitulasi Konsumsi BBM Armada
+              Rekapitulasi BBM Armada
             </h3>
             <p className="text-sm text-slate-500 mt-0.5">
-              Pilih bulan, tahun, atau rentang tanggal kalender untuk rekap per unit armada.
+              Urutkan unit dari paling efisien ke boros beserta alasan kondisi konsumsi BBM per periode.
             </p>
           </div>
 
@@ -518,6 +614,38 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
               <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
             </div>
 
+            <div className="relative min-w-[185px]">
+              <ArrowUpDown className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
+              <select
+                value={sortOrder}
+                onChange={(e) => setSortOrder(e.target.value as typeof sortOrder)}
+                aria-label="Urutkan Efisiensi"
+                className="w-full pl-9 pr-8 py-2 rounded-lg bg-white border border-slate-200 text-sm text-slate-800 font-medium focus:outline-none focus:border-blue-600 cursor-pointer appearance-none"
+              >
+                <option value="efficient_first">Terefisien ke Boros</option>
+                <option value="wasteful_first">Boros ke Terefisien</option>
+                <option value="distance_desc">Jarak Tempuh Terjauh</option>
+                <option value="unit_asc">Urutan Kode Armada</option>
+              </select>
+              <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
+            </div>
+
+            <div className="relative min-w-[175px]">
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+                aria-label="Filter Status Efisiensi"
+                className="w-full pl-3.5 pr-8 py-2 rounded-lg bg-white border border-slate-200 text-sm text-slate-800 font-medium focus:outline-none focus:border-blue-600 cursor-pointer appearance-none"
+              >
+                <option value="all">Semua Status Efisiensi</option>
+                <option value="Sangat Efisien">Sangat Efisien</option>
+                <option value="Efisien / Normal">Efisien / Normal</option>
+                <option value="Boros">Boros</option>
+                <option value="Kritis / Potensi Anomali">Kritis / Anomali</option>
+              </select>
+              <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
+            </div>
+
             {hasActiveFilter && (
               <button
                 type="button"
@@ -579,14 +707,21 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
         </div>
       </div>
 
-      {/* TABLE: REKAP PER ARMADA */}
+      {/* TABLE: REKAPITULASI BBM PER ARMADA */}
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-        <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between">
+        <div className="px-5 py-3.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
           <div className="text-sm font-bold text-slate-900">
-            Rekapitulasi Per Armada ({fleetSummaries.length} Unit)
+            Rekapitulasi BBM Per Armada ({displayedFleetSummaries.length} Unit)
           </div>
           <span className="text-xs text-slate-500 tabular-nums">
-            {filteredLogs.length} transaksi BBM
+            {sortOrder === 'efficient_first'
+              ? 'Urutan: Terefisien ke Boros'
+              : sortOrder === 'wasteful_first'
+              ? 'Urutan: Boros ke Terefisien'
+              : sortOrder === 'distance_desc'
+              ? 'Urutan: Jarak Terjauh'
+              : 'Urutan: Kode Armada'}{' '}
+            · {filteredLogs.length} transaksi BBM
           </span>
         </div>
 
@@ -605,35 +740,37 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
                 <th className="py-3 px-3.5 text-right">Liter / KM</th>
                 <th className="py-3 px-3.5 text-right">Target</th>
                 <th className="py-3 px-3.5 text-center">Status</th>
+                <th className="py-3 px-3.5 min-w-[260px]">Keterangan Efisiensi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {fleetSummaries.length === 0 ? (
+              {displayedFleetSummaries.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="py-12 text-center text-slate-500 text-sm">
-                    Tidak ada data konsumsi BBM armada untuk periode yang dipilih.
+                  <td colSpan={12} className="py-12 text-center text-slate-500 text-sm">
+                    Tidak ada data konsumsi BBM armada untuk periode &amp; filter yang dipilih.
                   </td>
                 </tr>
               ) : (
-                fleetSummaries.map((f, i) => (
+                displayedFleetSummaries.map((f, i) => (
                   <tr key={f.id} className="hover:bg-slate-50/80 transition">
-                    <td className="py-3 px-3.5 text-slate-400 text-xs tabular-nums whitespace-nowrap">{i + 1}</td>
-                    <td className="py-3 px-3.5 whitespace-nowrap">
+                    <td className="py-3.5 px-3.5 text-slate-400 text-xs font-mono tabular-nums whitespace-nowrap">
+                      {i + 1}
+                    </td>
+                    <td className="py-3.5 px-3.5 whitespace-nowrap">
                       <div className="font-semibold text-slate-900">{f.initialCode || f.plateNumber}</div>
                       <div className="text-xs text-slate-500 font-mono">{f.plateNumber}</div>
                     </td>
-                    <td className="py-3 px-3.5 text-slate-600 text-xs whitespace-nowrap">{f.vehicleType}</td>
-                    <td className="py-3 px-3.5 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap">{f.refuelCount}x</td>
-                    <td className="py-3 px-3.5 text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">{f.totalLiters} L</td>
-                    <td className="py-3 px-3.5 text-right font-mono tabular-nums font-semibold text-blue-600 whitespace-nowrap">{f.totalDistanceKm.toLocaleString('id-ID')}</td>
-                    <td className="py-3 px-3.5 text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">{formatRupiah(f.totalCost)}</td>
-                    <td className="py-3 px-3.5 text-right font-mono tabular-nums font-bold text-slate-900 whitespace-nowrap">{f.avgKmPerLiter}</td>
-                    <td className="py-3 px-3.5 text-right font-mono tabular-nums whitespace-nowrap">
-                      <div className="font-semibold text-slate-900">{f.avgLiterPerKm}</div>
-                      <div className="text-[11px] text-slate-500">{f.avgLiterPer100Km} L/100KM</div>
+                    <td className="py-3.5 px-3.5 text-slate-600 text-xs whitespace-nowrap">{f.vehicleType}</td>
+                    <td className="py-3.5 px-3.5 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap">{f.refuelCount}x</td>
+                    <td className="py-3.5 px-3.5 text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">{f.totalLiters} L</td>
+                    <td className="py-3.5 px-3.5 text-right font-mono tabular-nums font-semibold text-blue-600 whitespace-nowrap">{f.totalDistanceKm.toLocaleString('id-ID')}</td>
+                    <td className="py-3.5 px-3.5 text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">{formatRupiah(f.totalCost)}</td>
+                    <td className="py-3.5 px-3.5 text-right font-mono tabular-nums font-bold text-slate-900 whitespace-nowrap">{f.avgKmPerLiter}</td>
+                    <td className="py-3.5 px-3.5 text-right font-mono tabular-nums whitespace-nowrap">
+                      <span className="font-semibold text-slate-900">{f.avgLiterPerKm}</span>
                     </td>
-                    <td className="py-3 px-3.5 text-right font-mono tabular-nums text-slate-500 text-xs whitespace-nowrap">{f.targetRatio}</td>
-                    <td className="py-3 px-3.5 text-center whitespace-nowrap">
+                    <td className="py-3.5 px-3.5 text-right font-mono tabular-nums text-slate-500 text-xs whitespace-nowrap">{f.targetRatio}</td>
+                    <td className="py-3.5 px-3.5 text-center whitespace-nowrap">
                       <span className={`px-2.5 py-1 rounded-md text-xs font-semibold border inline-block ${
                         f.status === 'Sangat Efisien'
                           ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
@@ -645,6 +782,9 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
                       }`}>
                         {f.status}
                       </span>
+                    </td>
+                    <td className="py-3.5 px-3.5 text-xs text-slate-600 leading-relaxed max-w-sm">
+                      {buildEfficiencyReason[f.id]}
                     </td>
                   </tr>
                 ))

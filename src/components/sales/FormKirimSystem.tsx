@@ -33,12 +33,15 @@ import {
   Landmark,
   PenTool,
   RefreshCw,
-  Truck
+  Truck,
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
 import {
   formKirimStore,
   FormKirimRecord,
   FormKirimInvoiceItem,
+  FormKirimSyncState,
   SAMPLE_NUSANTARA_ARGO_INVOICE_ITEMS
 } from '../../services/formKirimStore';
 import { branchStore, BranchRecord } from '../../services/branchStore';
@@ -194,16 +197,16 @@ const ModernAreaDropdown: React.FC<ModernAreaDropdownProps> = ({
           setIsOpen(prev => !prev);
           setSearch('');
         }}
-        className={`flex items-center justify-between gap-2.5 min-w-[220px] max-w-[290px] px-3.5 py-2 rounded-xl border text-xs font-bold transition shadow-xs cursor-pointer ${
+        className={`flex items-center justify-between gap-2.5 min-w-[215px] max-w-[290px] px-3.5 py-2 rounded-xl border text-xs font-semibold transition cursor-pointer ${
           isOpen
-            ? 'border-blue-500 ring-2 ring-blue-500/20 bg-white dark:bg-slate-900'
-            : 'border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-950 hover:border-blue-400 hover:bg-white dark:hover:bg-slate-900'
+            ? 'border-blue-600 ring-2 ring-blue-600/15 bg-white dark:bg-slate-900'
+            : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-600'
         }`}
         aria-label="Pilih Area Kirim"
       >
         <span className="flex items-center gap-2 truncate">
           <MapPin className={`w-3.5 h-3.5 shrink-0 ${value ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400'}`} />
-          <span className={`truncate ${value ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300 font-semibold'}`}>
+          <span className={`truncate ${value ? 'text-slate-900 dark:text-white font-bold' : 'text-slate-600 dark:text-slate-300 font-medium'}`}>
             {value || placeholder}
           </span>
         </span>
@@ -215,7 +218,7 @@ const ModernAreaDropdown: React.FC<ModernAreaDropdownProps> = ({
       </button>
 
       {isOpen && (
-        <div className="absolute left-0 mt-2 w-72 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+        <div className="absolute left-0 mt-2 w-72 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-lg z-50 overflow-hidden">
           <div className="p-2.5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60">
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
@@ -411,20 +414,20 @@ const ModernCalendarPicker: React.FC<ModernCalendarPickerProps> = ({
       <button
         type="button"
         onClick={() => setIsOpen(prev => !prev)}
-        className={`flex items-center justify-between gap-2.5 px-3.5 py-2 rounded-xl border text-xs font-bold transition shadow-xs cursor-pointer ${
+        className={`flex items-center justify-between gap-2.5 px-3.5 py-2 rounded-xl border text-xs font-semibold transition cursor-pointer ${
           isOpen
-            ? 'border-blue-500 ring-2 ring-blue-500/20 bg-white dark:bg-slate-900'
-            : 'border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-950 hover:border-blue-400 hover:bg-white dark:hover:bg-slate-900'
+            ? 'border-blue-600 ring-2 ring-blue-600/15 bg-white dark:bg-slate-900'
+            : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-600'
         }`}
         aria-label="Tanggal Pengiriman"
       >
         <span className="flex items-center gap-2">
           <CalendarDays className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
-          <span className="text-slate-900 dark:text-white whitespace-nowrap">
+          <span className="text-slate-900 dark:text-white font-bold whitespace-nowrap">
             {formatIsoToLongIndonesian(value)}
           </span>
           {isSelectedToday && (
-            <span className="px-1.5 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
+            <span className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-semibold">
               Hari Ini
             </span>
           )}
@@ -440,7 +443,7 @@ const ModernCalendarPicker: React.FC<ModernCalendarPickerProps> = ({
         <div
           className={`absolute ${
             align === 'left' ? 'left-0' : 'right-0'
-          } mt-2 w-[304px] rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-4 z-50 animate-in fade-in zoom-in-95 duration-100`}
+          } mt-2 w-[304px] rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-lg p-4 z-50`}
         >
           {/* Header Bulan & Tahun */}
           <div className="flex items-center justify-between mb-3">
@@ -571,7 +574,7 @@ const AutoWrapCellTextarea: React.FC<AutoWrapCellTextareaProps> = ({
       value={value}
       placeholder={placeholder}
       onChange={e => onChange(e.target.value)}
-      className={`w-full block bg-transparent resize-none overflow-hidden whitespace-normal break-words leading-snug py-0.5 px-1 focus:outline-none focus:bg-yellow-50 ${className}`}
+      className={`w-full block bg-transparent resize-none overflow-hidden whitespace-normal break-words leading-snug py-0.5 px-1 rounded-md focus:outline-none focus:bg-blue-50/50 dark:focus:bg-blue-950/30 ${className}`}
     />
   );
 };
@@ -608,7 +611,7 @@ const RupiahCellInput: React.FC<RupiahCellInputProps> = ({ value, className = ''
         onChange(parsed);
         setIsFocused(false);
       }}
-      className={`w-28 text-right bg-transparent focus:outline-none focus:bg-yellow-50 px-1 tabular-nums ${className}`}
+      className={`w-full text-right bg-transparent focus:outline-none focus:bg-blue-50/50 dark:focus:bg-blue-950/30 rounded-md px-1 tabular-nums ${className}`}
     />
   );
 };
@@ -619,6 +622,8 @@ const RupiahCellInput: React.FC<RupiahCellInputProps> = ({ value, className = ''
 export const SalesFormKirimTab: React.FC = () => {
   const [records, setRecords] = useState<FormKirimRecord[]>(() => formKirimStore.getAll());
   const [branches, setBranches] = useState<BranchRecord[]>(() => branchStore.getBranches());
+  const [syncState, setSyncState] = useState<FormKirimSyncState>(() => formKirimStore.getSyncState());
+  const [isSavingForm, setIsSavingForm] = useState<boolean>(false);
   const hasLocalEditsRef = useRef<boolean>(false);
 
   // State Pengaturan Pengiriman (tersinkronisasi langsung dengan MySQL)
@@ -705,6 +710,7 @@ export const SalesFormKirimTab: React.FC = () => {
     const unsubForm = formKirimStore.subscribe(() => {
       const latest = formKirimStore.getAll();
       setRecords(latest);
+      setSyncState(formKirimStore.getSyncState());
       if (!hasLocalEditsRef.current) {
         const ws = formKirimStore.getWorkspace();
         if (ws && Array.isArray(ws.invoiceItems) && ws.invoiceItems.length > 0) {
@@ -1236,7 +1242,8 @@ export const SalesFormKirimTab: React.FC = () => {
   };
 
   // Simpan Form Kirim dari halaman Upload & Preview lalu langsung buka Aplikasi Portal Driver
-  const handleSaveFromUploadPage = () => {
+  const handleSaveFromUploadPage = async () => {
+    if (isSavingForm) return;
     const resolvedArea = (
       uploadDraftAreaKirim ||
       selectedAreaKirim ||
@@ -1253,13 +1260,29 @@ export const SalesFormKirimTab: React.FC = () => {
           : [...invoiceItems, ...excelPreviewRows]
         : invoiceItems;
 
-    const saved = persistFormKirimToStore(targetItems, resolvedArea, uploadDraftTanggalKirim);
+    if (excelPreviewRows.length > 0) {
+      try {
+        await formKirimStore.importExcelToWorkspaceAsync({
+          items: excelPreviewRows,
+          mode: importMode,
+          selectedAreaKirim: resolvedArea,
+          tanggalKirim: uploadDraftTanggalKirim,
+          activeSavedRecordId,
+          viewMode
+        });
+      } catch (err: any) {
+        showToast(err?.message || 'Gagal mengimpor data ke server.');
+        return;
+      }
+    }
+
+    const saved = await persistFormKirimToStore(targetItems, resolvedArea, uploadDraftTanggalKirim);
     if (!saved) return;
 
     setSelectedAreaKirim(resolvedArea);
     setTanggalKirim(uploadDraftTanggalKirim);
     if (excelPreviewRows.length > 0) {
-      updateInvoiceItemsAndSync(targetItems, true, resolvedArea, uploadDraftTanggalKirim);
+      setInvoiceItems(targetItems);
     }
 
     setIsUploadExcelOpen(false);
@@ -1482,17 +1505,17 @@ export const SalesFormKirimTab: React.FC = () => {
     }, true);
   };
 
-  const persistFormKirimToStore = (
+  const persistFormKirimToStore = async (
     itemsToSave: FormKirimInvoiceItem[],
     areaName: string,
     deliveryDate: string
-  ): boolean => {
+  ): Promise<boolean> => {
     const cleanArea = (areaName || selectedAreaKirim || deliveryAreaOptions[0] || 'ROGOJAMPI')
       .trim()
       .toUpperCase();
 
     if (itemsToSave.length === 0) {
-      showToast('Tabel Form Kirim masih kosong. Silakan upload file atau tambah faktur manual terlebih dahulu.');
+      showToast('Daftar Form Kirim masih kosong. Silakan upload file atau tambah faktur manual terlebih dahulu.');
       return false;
     }
 
@@ -1603,78 +1626,395 @@ export const SalesFormKirimTab: React.FC = () => {
       );
     const targetRecordId = activeSavedRecordId || existingForAreaDate?.id || null;
 
-    let savedRecordId = targetRecordId;
-    if (targetRecordId) {
-      formKirimStore.updateFormKirim(targetRecordId, payload);
-      setActiveSavedRecordId(targetRecordId);
-      setViewMode('saved_preview');
-      logisticsStore.logActivity(
-        'Ubah Data Form Kirim Barang',
-        `Area ${cleanArea} (${deliveryDate})`,
-        `Merubah data Form Kirim Area ${cleanArea} (${uniqueCustomers} Pelanggan • ${itemsToSave.length} Faktur • Total ${totalColy} COLY)`,
-        'ubah'
-      );
-      showToast(`Form Kirim Area ${cleanArea} berhasil disimpan ke MySQL (${uniqueCustomers} Pelanggan • ${itemsToSave.length} Faktur). Membuka Portal Driver...`);
-    } else {
-      const created = formKirimStore.addFormKirim(payload);
-      savedRecordId = created.id;
-      setActiveSavedRecordId(created.id);
-      setViewMode('saved_preview');
-      logisticsStore.logActivity(
-        'Tambah Data Form Kirim Barang',
-        `Area ${cleanArea} (${deliveryDate})`,
-        `Menambahkan Form Kirim Area ${cleanArea} (${uniqueCustomers} Pelanggan • ${itemsToSave.length} Faktur • Total ${totalColy} COLY)`,
-        'tambah'
-      );
-      showToast(`Form Kirim Area ${cleanArea} berhasil disimpan ke MySQL (${uniqueCustomers} Pelanggan). Membuka Portal Driver...`);
-    }
+    setIsSavingForm(true);
+    try {
+      let savedRecordId = targetRecordId;
+      if (targetRecordId) {
+        await formKirimStore.updateFormKirimAsync(targetRecordId, payload);
+        setActiveSavedRecordId(targetRecordId);
+        setViewMode('saved_preview');
+        logisticsStore.logActivity(
+          'Ubah Data Form Kirim Barang',
+          `Area ${cleanArea} (${deliveryDate})`,
+          `Merubah data Form Kirim Area ${cleanArea} (${uniqueCustomers} Pelanggan • ${itemsToSave.length} Faktur • Total ${totalColy} COLY)`,
+          'ubah'
+        );
+        showToast(`Form Kirim Area ${cleanArea} berhasil disimpan ke server (${uniqueCustomers} Pelanggan • ${itemsToSave.length} Faktur).`);
+      } else {
+        const created = await formKirimStore.addFormKirimAsync(payload);
+        savedRecordId = created.id;
+        setActiveSavedRecordId(created.id);
+        setViewMode('saved_preview');
+        logisticsStore.logActivity(
+          'Tambah Data Form Kirim Barang',
+          `Area ${cleanArea} (${deliveryDate})`,
+          `Menambahkan Form Kirim Area ${cleanArea} (${uniqueCustomers} Pelanggan • ${itemsToSave.length} Faktur • Total ${totalColy} COLY)`,
+          'tambah'
+        );
+        showToast(`Form Kirim Area ${cleanArea} berhasil disimpan ke server (${uniqueCustomers} Pelanggan).`);
+      }
 
-    hasLocalEditsRef.current = true;
-    formKirimStore.saveWorkspace(
-      {
+      hasLocalEditsRef.current = true;
+      await formKirimStore.saveWorkspaceAsync({
         selectedAreaKirim: cleanArea,
         tanggalKirim: deliveryDate,
         activeSavedRecordId: savedRecordId,
         viewMode: 'saved_preview',
         invoiceItems: itemsToSave.map(it => ({ ...it }))
-      },
-      true
-    );
+      });
 
-    try {
-      window.dispatchEvent(
-        new CustomEvent('akk-navigate-tab', {
-          detail: {
-            tab: 'driver_portal',
-            subTab: 'form_kirim',
-            formKirimId: savedRecordId
-          }
-        })
-      );
-    } catch {
-      // ignore navigation dispatch errors
+      try {
+        window.dispatchEvent(
+          new CustomEvent('akk-navigate-tab', {
+            detail: {
+              tab: 'driver_portal',
+              subTab: 'form_kirim',
+              formKirimId: savedRecordId
+            }
+          })
+        );
+      } catch {
+        // ignore navigation dispatch errors
+      }
+
+      return true;
+    } catch (err: any) {
+      showToast(err?.message || 'Gagal menyimpan Form Kirim ke server.');
+      return false;
+    } finally {
+      setIsSavingForm(false);
     }
-
-    return true;
   };
 
-  // Simpan Form Kirim dari halaman tabel utama -> langsung masuk ke Aplikasi Portal Driver
-  const handleSaveFormKirim = () => {
+  // Simpan Form Kirim dari halaman utama -> kirim ke server & Portal Driver
+  const handleSaveFormKirim = async () => {
+    if (isSavingForm) return;
     const resolvedArea = selectedAreaKirim || uploadDraftAreaKirim || deliveryAreaOptions[0] || 'ROGOJAMPI';
     if (!selectedAreaKirim) {
       setSelectedAreaKirim(resolvedArea);
     }
-    persistFormKirimToStore(invoiceItems, resolvedArea, tanggalKirim);
+    await persistFormKirimToStore(invoiceItems, resolvedArea, tanggalKirim);
   };
 
-  // Toggle header column sort
-  const handleColumnSortToggle = (field: SortField) => {
-    if (sortField === field) {
-      setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSortField(field);
-      setSortDirection(field === 'nilaiFaktur' || field === 'coly' ? 'desc' : 'asc');
+  // ============================================================================
+  // HELPER RENDER: KARTU / LIST ITEM FAKTUR MODERN (TANPA TABEL KLASIK)
+  // ============================================================================
+  const renderSyncPill = () => {
+    if (isSavingForm || syncState.status === 'saving') {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 text-[11px] font-medium">
+          <Loader2 className="w-3 h-3 animate-spin" />
+          <span>Menyimpan...</span>
+        </span>
+      );
     }
+    if (syncState.status === 'loading') {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-[11px] font-medium">
+          <Loader2 className="w-3 h-3 animate-spin" />
+          <span>Memuat data...</span>
+        </span>
+      );
+    }
+    if (syncState.status === 'error') {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-[11px] font-medium">
+          <AlertCircle className="w-3 h-3" />
+          <span>Gagal sinkron</span>
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-[11px] font-medium">
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+        <span>Tersinkron Server</span>
+      </span>
+    );
+  };
+
+  const renderInvoiceCard = (
+    item: FormKirimInvoiceItem,
+    rowNum: number,
+    category: 'COD' | 'TEMPO',
+    isLastCod: boolean,
+    isFirstTempo: boolean
+  ) => {
+    const isBoldFaktur = isNonGudangFaktur(item.noFaktur);
+    const hasKeterangan = String(item.keterangan || '').trim().length > 0;
+    const isCod = category === 'COD';
+    const categoryBadgeClass = isCod
+      ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800/70'
+      : 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800/70';
+
+    return (
+      <div
+        key={item.id}
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
+      >
+        {/* Top Row: Sequence, Invoice No, Date, Category Badge & Edit Actions */}
+        <div className="flex flex-wrap items-center justify-between gap-2.5 pb-3 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex flex-wrap items-center gap-2 min-w-0">
+            <span className="inline-flex items-center justify-center min-w-[28px] h-6 px-2 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-semibold text-slate-600 dark:text-slate-300 tabular-nums">
+              #{rowNum}
+            </span>
+
+            {viewMode === 'edit' ? (
+              <div className="min-w-[145px] max-w-[200px]">
+                <AutoWrapCellTextarea
+                  value={item.noFaktur}
+                  placeholder="No. Faktur..."
+                  onChange={val => handleUpdateInvoiceCell(item.id, 'noFaktur', val.toUpperCase())}
+                  className={`uppercase font-mono text-xs text-slate-900 dark:text-white border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/60 px-2 py-1 ${
+                    isBoldFaktur ? 'font-bold' : 'font-semibold'
+                  }`}
+                />
+              </div>
+            ) : (
+              <span
+                className={`font-mono text-xs text-slate-900 dark:text-white ${
+                  isBoldFaktur ? 'font-bold' : 'font-semibold'
+                }`}
+              >
+                {item.noFaktur || '-'}
+              </span>
+            )}
+
+            <span className="text-slate-300 dark:text-slate-700 hidden sm:inline">•</span>
+
+            {viewMode === 'edit' ? (
+              <div className="w-[125px]">
+                <AutoWrapCellTextarea
+                  value={item.tglFaktur}
+                  placeholder="Tgl Faktur..."
+                  onChange={val => handleUpdateInvoiceCell(item.id, 'tglFaktur', val)}
+                  className="text-xs text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/60 px-2 py-1"
+                />
+              </div>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+                <CalendarDays className="w-3.5 h-3.5 text-slate-400" />
+                <span>{item.tglFaktur || '-'}</span>
+              </span>
+            )}
+
+            <span className={`px-2 py-0.5 rounded-md border text-[11px] font-semibold uppercase ${categoryBadgeClass}`}>
+              {category}
+            </span>
+          </div>
+
+          {viewMode === 'edit' && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700">
+                <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400">Hari</span>
+                <input
+                  type="number"
+                  min={0}
+                  step="1"
+                  value={item.netDays}
+                  onChange={e => handleUpdateInvoiceCell(item.id, 'netDays', e.target.value)}
+                  className="w-11 py-0.5 px-1 rounded-md border border-slate-200 dark:border-slate-700 text-center bg-white dark:bg-slate-900 focus:outline-none focus:border-blue-600 font-mono text-xs text-slate-800 dark:text-slate-200"
+                  title="0 = COD, > 0 = TEMPO"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleToggleCategory(item.id)}
+                className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold transition cursor-pointer ${categoryBadgeClass} hover:opacity-85`}
+                title={isCod ? 'Klik untuk ubah kategori ke TEMPO' : 'Klik untuk ubah kategori ke COD'}
+              >
+                {isCod ? 'Ubah ke TEMPO' : 'Ubah ke COD'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleInsertManualRowAfter(item.id, category)}
+                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-blue-600 transition cursor-pointer"
+                title={`Sisipkan baris ${category} di bawah nomor ${rowNum}`}
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleMoveItemUp(item.id)}
+                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition cursor-pointer"
+                title={
+                  isFirstTempo
+                    ? 'Naikkan pelanggan dari TEMPO ke kategori COD'
+                    : 'Pindah urutan ke atas'
+                }
+              >
+                <ChevronUp className="w-3.5 h-3.5" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleMoveItemDown(item.id)}
+                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition cursor-pointer"
+                title={
+                  isLastCod
+                    ? 'Pindah baris turun ke kelompok TEMPO'
+                    : 'Pindah urutan ke bawah'
+                }
+              >
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleDeleteInvoiceRow(item.id)}
+                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:border-rose-200 transition cursor-pointer"
+                title="Hapus baris faktur"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Main Card Body Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-start pt-3">
+          {/* Pelanggan & Alamat */}
+          <div className="lg:col-span-5 space-y-1.5 min-w-0">
+            <div className="text-[11px] font-medium text-slate-400 dark:text-slate-500">
+              Pelanggan &amp; Alamat Tujuan
+            </div>
+            {viewMode === 'edit' ? (
+              <div className="space-y-1.5">
+                <AutoWrapCellTextarea
+                  value={item.namaPelanggan}
+                  placeholder="Nama Pelanggan..."
+                  onChange={val => handleUpdateInvoiceCell(item.id, 'namaPelanggan', val.toUpperCase())}
+                  className="uppercase text-sm font-bold text-slate-900 dark:text-white border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/60 px-2.5 py-1.5"
+                />
+                <div className="flex items-start gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-2" />
+                  <AutoWrapCellTextarea
+                    value={item.alamatPelanggan}
+                    placeholder="Alamat pelanggan..."
+                    onChange={val => handleUpdateInvoiceCell(item.id, 'alamatPelanggan', val.toUpperCase())}
+                    className="uppercase text-xs text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/60 px-2.5 py-1"
+                  />
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="text-sm sm:text-base font-bold text-slate-900 dark:text-white uppercase leading-snug break-words">
+                  {item.namaPelanggan || '-'}
+                </div>
+                <div className="flex items-start gap-1.5 mt-1 text-xs text-slate-500 dark:text-slate-400 uppercase break-words">
+                  <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                  <span>{item.alamatPelanggan || '-'}</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Nilai Faktur, COLY & BAYAR */}
+          <div className="lg:col-span-4 grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+            <div className="col-span-2 sm:col-span-1 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/70 px-3 py-2">
+              <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                Nilai Faktur
+              </div>
+              {viewMode === 'edit' ? (
+                <div className="flex items-center gap-1 mt-1">
+                  <span className="text-xs text-slate-400 shrink-0">Rp</span>
+                  <RupiahCellInput
+                    value={item.nilaiFaktur}
+                    onChange={num => handleUpdateInvoiceCell(item.id, 'nilaiFaktur', num)}
+                    className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 py-0.5"
+                  />
+                </div>
+              ) : (
+                <div className="text-sm font-bold text-slate-900 dark:text-white tabular-nums mt-0.5">
+                  Rp {formatNominalRibuan(item.nilaiFaktur) || '0'}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/70 px-3 py-2">
+              <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                Muatan COLY
+              </div>
+              {viewMode === 'edit' ? (
+                <input
+                  type="number"
+                  min={0}
+                  value={item.coly > 0 ? item.coly : ''}
+                  placeholder="0"
+                  onChange={e => {
+                    const raw = e.target.value;
+                    const num = raw === '' ? 0 : Math.max(0, Math.round(Number(raw) || 0));
+                    handleUpdateInvoiceCell(item.id, 'coly', num);
+                  }}
+                  className="mt-1 w-full py-0.5 px-2 rounded-md border border-slate-200 dark:border-slate-700 text-center bg-white dark:bg-slate-900 focus:outline-none focus:border-blue-600 text-xs sm:text-sm font-bold text-slate-900 dark:text-white tabular-nums"
+                />
+              ) : (
+                <div className="mt-0.5">
+                  {item.coly > 0 ? (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 text-xs font-bold tabular-nums">
+                      {item.coly} COLY
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-400">0 COLY</span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/70 px-3 py-2">
+              <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                BAYAR
+              </div>
+              {viewMode === 'edit' ? (
+                <div className="mt-1">
+                  <AutoWrapCellTextarea
+                    value={item.bayar}
+                    placeholder="BAYAR..."
+                    onChange={val => handleUpdateInvoiceCell(item.id, 'bayar', val)}
+                    className="text-xs font-medium text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-2 py-0.5"
+                  />
+                </div>
+              ) : (
+                <div className="text-xs font-semibold text-slate-700 dark:text-slate-200 mt-1 break-words">
+                  {item.bayar || '-'}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Keterangan / Catatan */}
+          <div className="lg:col-span-3 min-w-0">
+            <div className="text-[11px] font-medium text-slate-400 dark:text-slate-500 mb-1">
+              Keterangan / Catatan
+            </div>
+            {viewMode === 'edit' ? (
+              <AutoWrapCellTextarea
+                value={item.keterangan}
+                placeholder="Tambah catatan..."
+                onChange={val => handleUpdateInvoiceCell(item.id, 'keterangan', val)}
+                className={`text-xs px-2.5 py-1.5 border ${
+                  hasKeterangan
+                    ? 'bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/60 text-amber-950 dark:text-amber-200 font-medium'
+                    : 'bg-slate-50/70 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'
+                }`}
+              />
+            ) : (
+              <div
+                className={`text-xs rounded-lg px-2.5 py-1.5 border break-words ${
+                  hasKeterangan
+                    ? 'bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/60 text-amber-950 dark:text-amber-200 font-medium'
+                    : 'bg-slate-50/60 dark:bg-slate-800/40 border-slate-200/70 dark:border-slate-800 text-slate-400'
+                }`}
+              >
+                {item.keterangan || '-'}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   // ============================================================================
@@ -1682,23 +2022,23 @@ export const SalesFormKirimTab: React.FC = () => {
   // ============================================================================
   if (isUploadExcelOpen) {
     return (
-      <div className="space-y-5 animate-fade-in">
+      <div className="akk-flat-formkirim bg-slate-50 dark:bg-slate-950 min-h-full p-4 sm:p-6 space-y-4">
         {toastMessage && (
-          <div className="fixed bottom-5 right-5 z-50 max-w-md bg-slate-900 dark:bg-emerald-600 text-white px-4 py-3 rounded-2xl shadow-2xl border border-slate-700/50 flex items-center gap-2.5 text-xs font-bold">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 dark:text-white shrink-0" />
+          <div className="fixed bottom-5 right-5 z-50 max-w-md bg-slate-900 text-white px-4 py-3 rounded-xl border border-slate-700 flex items-center gap-2.5 text-xs font-semibold">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>{toastMessage}</span>
           </div>
         )}
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-7 shadow-sm space-y-6">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 space-y-5">
           {/* Header & Area / Tanggal Controls */}
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-slate-100 dark:border-slate-800">
-            <div className="flex items-center gap-3.5">
-              <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-sm shrink-0">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-slate-200 dark:border-slate-800">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
                 <FileSpreadsheet className="w-5 h-5" />
               </div>
               <div>
-                <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white tracking-tight">
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
                   Upload File Excel Form Kirim
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -1722,24 +2062,24 @@ export const SalesFormKirimTab: React.FC = () => {
           </div>
 
           {/* Mode Upload Data */}
-          <div className="space-y-2.5">
-            <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              MODE UPLOAD DATA
+          <div className="space-y-2">
+            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Mode Upload Data
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => setImportMode('replace_all')}
-                className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
+                className={`p-3.5 rounded-xl border text-left transition-colors cursor-pointer ${
                   importMode === 'replace_all'
-                    ? 'border-blue-500 bg-blue-50/70 dark:bg-blue-950/30 text-slate-900 dark:text-white ring-2 ring-blue-500/20 shadow-xs'
+                    ? 'border-blue-600 bg-blue-50/50 dark:bg-blue-950/30 text-slate-900 dark:text-white'
                     : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:border-slate-300'
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs sm:text-sm font-bold flex items-center gap-2.5">
+                  <span className="text-xs sm:text-sm font-semibold flex items-center gap-2.5">
                     <span
-                      className={`w-3 h-3 rounded-full border-2 flex items-center justify-center ${
+                      className={`w-3 h-3 rounded-full border-2 ${
                         importMode === 'replace_all'
                           ? 'border-blue-600 bg-blue-600'
                           : 'border-slate-300 dark:border-slate-600'
@@ -1747,7 +2087,7 @@ export const SalesFormKirimTab: React.FC = () => {
                     />
                     Timpa Data Lama (Replace All)
                   </span>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300">
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
                     Default
                   </span>
                 </div>
@@ -1756,16 +2096,16 @@ export const SalesFormKirimTab: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setImportMode('append')}
-                className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
+                className={`p-3.5 rounded-xl border text-left transition-colors cursor-pointer ${
                   importMode === 'append'
-                    ? 'border-blue-500 bg-blue-50/70 dark:bg-blue-950/30 text-slate-900 dark:text-white ring-2 ring-blue-500/20 shadow-xs'
+                    ? 'border-blue-600 bg-blue-50/50 dark:bg-blue-950/30 text-slate-900 dark:text-white'
                     : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:border-slate-300'
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs sm:text-sm font-bold flex items-center gap-2.5">
+                  <span className="text-xs sm:text-sm font-semibold flex items-center gap-2.5">
                     <span
-                      className={`w-3 h-3 rounded-full border-2 flex items-center justify-center ${
+                      className={`w-3 h-3 rounded-full border-2 ${
                         importMode === 'append'
                           ? 'border-blue-600 bg-blue-600'
                           : 'border-slate-300 dark:border-slate-600'
@@ -1778,25 +2118,23 @@ export const SalesFormKirimTab: React.FC = () => {
             </div>
           </div>
 
-          {/* Input File Excel (Tanpa Tombol Template Excel) */}
-          <div className="space-y-2.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <label className="block text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                FILE EXCEL FORM KIRIM (.XLSX / .XLS / .CSV)
-              </label>
-            </div>
+          {/* Input File Excel */}
+          <div className="space-y-2">
+            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              File Excel Form Kirim (.XLSX / .XLS / .CSV)
+            </label>
 
-            <div className="p-4 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-blue-400 bg-slate-50/60 dark:bg-slate-950/50 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="p-4 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 hover:border-blue-500 bg-slate-50 dark:bg-slate-950/50 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <input
                 type="file"
                 accept=".xlsx,.xls,.csv"
                 onChange={handleExcelFileSelect}
-                className="w-full sm:w-auto text-xs text-slate-700 dark:text-slate-300 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-blue-600 file:text-xs file:font-bold file:text-white hover:file:bg-blue-500 file:shadow-xs file:cursor-pointer cursor-pointer"
+                className="w-full sm:w-auto text-xs text-slate-700 dark:text-slate-300 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-600 file:text-xs file:font-semibold file:text-white hover:file:bg-blue-700 file:cursor-pointer cursor-pointer"
               />
 
               {excelFileName && (
-                <div className="px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs font-bold text-emerald-700 dark:text-emerald-300 flex items-center gap-2 shrink-0">
-                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <div className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2 shrink-0">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                   <span>
                     {excelFileName} ({excelPreviewRows.length} Faktur • {previewUniqueStats.totalUniqueCustomers} Pelanggan)
                   </span>
@@ -1807,209 +2145,196 @@ export const SalesFormKirimTab: React.FC = () => {
 
           {/* Ringkasan Otomatis Total Customer */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="p-3.5 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/60">
-              <div className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+            <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 Total Customer
               </div>
-              <div className="text-lg font-black text-slate-900 dark:text-white mt-0.5 tabular-nums">
-                {previewUniqueStats.totalUniqueCustomers} <span className="text-xs font-bold text-slate-500">Pelanggan</span>
+              <div className="text-lg font-bold text-slate-900 dark:text-white mt-0.5 tabular-nums">
+                {previewUniqueStats.totalUniqueCustomers}{' '}
+                <span className="text-xs font-medium text-slate-500">Pelanggan</span>
               </div>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+              <div className="text-xs text-slate-500 dark:text-slate-400">
                 Total {previewSourceRows.length} nomor faktur
               </div>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800/60">
-              <div className="text-[10px] font-black uppercase tracking-wider text-amber-800 dark:text-amber-300">
-                Pelanggan COD
+            <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-amber-500" />
+                <span>Pelanggan COD</span>
               </div>
-              <div className="text-lg font-black text-slate-900 dark:text-white mt-0.5 tabular-nums">
-                {previewUniqueStats.codUniqueCustomers} <span className="text-xs font-bold text-slate-500">Pelanggan</span>
+              <div className="text-lg font-bold text-slate-900 dark:text-white mt-0.5 tabular-nums">
+                {previewUniqueStats.codUniqueCustomers}{' '}
+                <span className="text-xs font-medium text-slate-500">Pelanggan</span>
               </div>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+              <div className="text-xs text-slate-500 dark:text-slate-400">
                 {previewCodRows.length} Faktur COD (Net Days = 0)
               </div>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-rose-50/80 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/60">
-              <div className="text-[10px] font-black uppercase tracking-wider text-red-600 dark:text-red-400">
-                Pelanggan TEMPO
+            <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-rose-500" />
+                <span>Pelanggan TEMPO</span>
               </div>
-              <div className="text-lg font-black text-slate-900 dark:text-white mt-0.5 tabular-nums">
-                {previewUniqueStats.tempoUniqueCustomers} <span className="text-xs font-bold text-slate-500">Pelanggan</span>
+              <div className="text-lg font-bold text-slate-900 dark:text-white mt-0.5 tabular-nums">
+                {previewUniqueStats.tempoUniqueCustomers}{' '}
+                <span className="text-xs font-medium text-slate-500">Pelanggan</span>
               </div>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+              <div className="text-xs text-slate-500 dark:text-slate-400">
                 {previewTempoRows.length} Faktur TEMPO (Net Days &gt; 0)
               </div>
             </div>
           </div>
 
-          {/* Keterangan Kolom Terbaca Ringkas */}
-          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800 text-slate-700 dark:text-slate-300 text-xs sm:text-sm font-medium">
+          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 text-xs">
             Kolom yang terbaca:{' '}
-            <strong className="text-slate-900 dark:text-white">
+            <strong className="text-slate-900 dark:text-white font-semibold">
               No. Faktur, Tgl Faktur, Nama Pelanggan, Nilai Faktur, COLY, BAYAR, Alamat 1, Keterangan, Net Days Syarat Pelanggan
             </strong>
             .
           </div>
 
-          {/* Tampilan Preview Otomatis COD (Net Days = 0) & TEMPO (Net Days > 0) Sebelum Simpan */}
+          {/* Preview Berbasis Kartu List Modern (Bukan Tabel Klasik) */}
           {showUploadPreview && previewSourceRows.length > 0 && (
             <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h4 className="text-sm font-black text-slate-900 dark:text-white flex flex-wrap items-center gap-2">
+                <h4 className="text-sm font-bold text-slate-900 dark:text-white flex flex-wrap items-center gap-2">
                   <span>Preview Sebelum Simpan</span>
-                  <span className="px-2.5 py-0.5 rounded-md text-xs bg-indigo-600 text-white font-bold">
+                  <span className="px-2 py-0.5 rounded-md text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold">
                     {previewUniqueStats.totalUniqueCustomers} Pelanggan
                   </span>
-                  <span className="px-2.5 py-0.5 rounded-md text-xs bg-amber-300 text-slate-900 font-bold">
-                    COD: {previewUniqueStats.codUniqueCustomers} Pelanggan ({previewCodRows.length} Faktur)
+                  <span className="px-2 py-0.5 rounded-md text-xs bg-amber-50 text-amber-800 border border-amber-200 font-semibold">
+                    COD: {previewUniqueStats.codUniqueCustomers} ({previewCodRows.length} Faktur)
                   </span>
-                  <span className="px-2.5 py-0.5 rounded-md text-xs bg-red-600 text-white font-bold">
-                    TEMPO: {previewUniqueStats.tempoUniqueCustomers} Pelanggan ({previewTempoRows.length} Faktur)
+                  <span className="px-2 py-0.5 rounded-md text-xs bg-rose-50 text-rose-700 border border-rose-200 font-semibold">
+                    TEMPO: {previewUniqueStats.tempoUniqueCustomers} ({previewTempoRows.length} Faktur)
                   </span>
                 </h4>
               </div>
 
-              <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 max-h-[420px]">
-                <table className="w-full text-xs text-left border-collapse bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">
-                  <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold text-[11px] sticky top-0 z-10 border-b border-slate-200 dark:border-slate-700">
-                    <tr>
-                      <th className="py-2.5 px-2.5 text-center border-r border-slate-200 dark:border-slate-700 w-10">NO</th>
-                      <th className="py-2.5 px-3 border-r border-slate-200 dark:border-slate-700 min-w-[125px]">No. Faktur</th>
-                      <th className="py-2.5 px-3 border-r border-slate-200 dark:border-slate-700 min-w-[96px]">Tgl Faktur</th>
-                      <th className="py-2.5 px-3 border-r border-slate-200 dark:border-slate-700 min-w-[170px]">Nama Pelanggan</th>
-                      <th className="py-2.5 px-3 text-right border-r border-slate-200 dark:border-slate-700 min-w-[125px]">Nilai Faktur</th>
-                      <th className="py-2.5 px-2.5 text-center border-r border-slate-200 dark:border-slate-700 w-16">COLY</th>
-                      <th className="py-2.5 px-3 border-r border-slate-200 dark:border-slate-700 min-w-[90px]">BAYAR</th>
-                      <th className="py-2.5 px-3 border-r border-slate-200 dark:border-slate-700 min-w-[150px]">Alamat 1</th>
-                      <th className="py-2.5 px-3 border-r border-slate-200 dark:border-slate-700 min-w-[140px]">Keterangan</th>
-                      <th className="py-2.5 px-2.5 text-center border-r border-slate-200 dark:border-slate-700 w-24">Net Days</th>
-                      <th className="py-2.5 px-2.5 text-center w-20">Kategori</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                    {previewCodRows.length > 0 && (
-                      <tr>
-                        <td colSpan={11} className="py-2 px-3 font-black text-amber-950 bg-amber-300/90 dark:bg-amber-500/30 dark:text-amber-200">
-                          COD — {previewUniqueStats.codUniqueCustomers} PELANGGAN ({previewCodRows.length} FAKTUR)
-                        </td>
-                      </tr>
-                    )}
+              <div className="max-h-[420px] overflow-y-auto space-y-3 pr-1">
+                {previewCodRows.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="px-3.5 py-2 rounded-lg bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-200">
+                      <span className="inline-flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-[11px]">
+                          COD
+                        </span>
+                        <span>{previewUniqueStats.codUniqueCustomers} Pelanggan ({previewCodRows.length} Faktur)</span>
+                      </span>
+                    </div>
                     {previewCodRows.map((row, idx) => {
                       const isRowBold = isNonGudangFaktur(row.noFaktur);
                       const hasKet = String(row.keterangan || '').trim().length > 0;
                       return (
-                        <tr
-                          key={row.id || `cod-${idx}`}
-                          className={`hover:bg-blue-50/40 dark:hover:bg-slate-800/50 ${isRowBold ? 'font-bold' : 'font-normal'}`}
+                        <div
+                          key={row.id || `cod-prev-${idx}`}
+                          className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                         >
-                          <td className="py-2 px-2.5 text-center border-r border-slate-200 dark:border-slate-800 align-middle">{idx + 1}</td>
-                          <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle">
-                            {row.noFaktur}
-                          </td>
-                          <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle">
-                            {row.tglFaktur}
-                          </td>
-                          <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle">
-                            {row.namaPelanggan}
-                          </td>
-                          <td className="py-2 px-3 text-right border-r border-slate-200 dark:border-slate-800 whitespace-nowrap tabular-nums align-middle">
-                            Rp {formatNominalRibuan(row.nilaiFaktur) || '0'}
-                          </td>
-                          <td className="py-2 px-2.5 text-center border-r border-slate-200 dark:border-slate-800 align-middle">
-                            {row.coly > 0 ? row.coly : ''}
-                          </td>
-                          <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle">
-                            {row.bayar}
-                          </td>
-                          <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle">
-                            {row.alamatPelanggan}
-                          </td>
-                          <td
-                            className={`py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle ${
-                              hasKet ? 'bg-amber-100 dark:bg-amber-950/60 font-semibold text-amber-950 dark:text-amber-200' : ''
-                            }`}
-                          >
-                            {row.keterangan}
-                          </td>
-                          <td className="py-2 px-2.5 text-center font-mono border-r border-slate-200 dark:border-slate-800 align-middle">
-                            {formatNetDaysDisplay(row.netDays)}
-                          </td>
-                          <td className="py-2 px-2.5 text-center align-middle">
-                            <span className="px-2 py-0.5 rounded-md bg-amber-300 text-slate-900 font-black text-[10px]">
-                              COD
+                          <div className="space-y-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2 text-xs">
+                              <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold tabular-nums">
+                                #{idx + 1}
+                              </span>
+                              <span className={`font-mono text-slate-800 dark:text-slate-100 ${isRowBold ? 'font-bold' : 'font-semibold'}`}>
+                                {row.noFaktur}
+                              </span>
+                              <span className="text-slate-400">•</span>
+                              <span className="text-slate-500 dark:text-slate-400">{row.tglFaktur}</span>
+                              <span className="px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-semibold">
+                                COD
+                              </span>
+                            </div>
+                            <div className="text-sm font-bold text-slate-900 dark:text-white uppercase">
+                              {row.namaPelanggan}
+                            </div>
+                            <div className="text-xs text-slate-500 dark:text-slate-400 uppercase">
+                              {row.alamatPelanggan || '-'}
+                              {hasKet && (
+                                <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-50 text-amber-900 border border-amber-200 normal-case">
+                                  {row.keterangan}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex sm:flex-col items-center sm:items-end justify-between gap-1 shrink-0">
+                            <span className="text-sm font-bold text-slate-900 dark:text-white tabular-nums">
+                              Rp {formatNominalRibuan(row.nilaiFaktur) || '0'}
                             </span>
-                          </td>
-                        </tr>
+                            <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+                              {row.coly > 0 ? `${row.coly} COLY` : '0 COLY'} • Net {formatNetDaysDisplay(row.netDays)}
+                            </span>
+                          </div>
+                        </div>
                       );
                     })}
+                  </div>
+                )}
 
-                    {previewTempoRows.length > 0 && (
-                      <tr>
-                        <td colSpan={11} className="py-2 px-3 font-black text-white bg-red-600">
-                          TEMPO — {previewUniqueStats.tempoUniqueCustomers} PELANGGAN ({previewTempoRows.length} FAKTUR)
-                        </td>
-                      </tr>
-                    )}
+                {previewTempoRows.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="px-3.5 py-2 rounded-lg bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-200">
+                      <span className="inline-flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 border border-rose-200 text-[11px]">
+                          TEMPO
+                        </span>
+                        <span>{previewUniqueStats.tempoUniqueCustomers} Pelanggan ({previewTempoRows.length} Faktur)</span>
+                      </span>
+                    </div>
                     {previewTempoRows.map((row, idx) => {
                       const isRowBold = isNonGudangFaktur(row.noFaktur);
                       const hasKet = String(row.keterangan || '').trim().length > 0;
                       return (
-                        <tr
-                          key={row.id || `tempo-${idx}`}
-                          className={`hover:bg-rose-50/40 dark:hover:bg-slate-800/50 ${isRowBold ? 'font-bold' : 'font-normal'}`}
+                        <div
+                          key={row.id || `tempo-prev-${idx}`}
+                          className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                         >
-                          <td className="py-2 px-2.5 text-center border-r border-slate-200 dark:border-slate-800 align-middle">
-                            {previewCodRows.length + idx + 1}
-                          </td>
-                          <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle">
-                            {row.noFaktur}
-                          </td>
-                          <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle">
-                            {row.tglFaktur}
-                          </td>
-                          <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle">
-                            {row.namaPelanggan}
-                          </td>
-                          <td className="py-2 px-3 text-right border-r border-slate-200 dark:border-slate-800 whitespace-nowrap tabular-nums align-middle">
-                            Rp {formatNominalRibuan(row.nilaiFaktur) || '0'}
-                          </td>
-                          <td className="py-2 px-2.5 text-center border-r border-slate-200 dark:border-slate-800 align-middle">
-                            {row.coly > 0 ? row.coly : ''}
-                          </td>
-                          <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle">
-                            {row.bayar}
-                          </td>
-                          <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle">
-                            {row.alamatPelanggan}
-                          </td>
-                          <td
-                            className={`py-2 px-3 border-r border-slate-200 dark:border-slate-800 whitespace-normal break-words align-middle ${
-                              hasKet ? 'bg-amber-100 dark:bg-amber-950/60 font-semibold text-amber-950 dark:text-amber-200' : ''
-                            }`}
-                          >
-                            {row.keterangan}
-                          </td>
-                          <td className="py-2 px-2.5 text-center font-mono border-r border-slate-200 dark:border-slate-800 align-middle">
-                            {formatNetDaysDisplay(row.netDays)}
-                          </td>
-                          <td className="py-2 px-2.5 text-center align-middle">
-                            <span className="px-2 py-0.5 rounded-md bg-red-600 text-white font-black text-[10px]">
-                              TEMPO
+                          <div className="space-y-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2 text-xs">
+                              <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold tabular-nums">
+                                #{previewCodRows.length + idx + 1}
+                              </span>
+                              <span className={`font-mono text-slate-800 dark:text-slate-100 ${isRowBold ? 'font-bold' : 'font-semibold'}`}>
+                                {row.noFaktur}
+                              </span>
+                              <span className="text-slate-400">•</span>
+                              <span className="text-slate-500 dark:text-slate-400">{row.tglFaktur}</span>
+                              <span className="px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-semibold">
+                                TEMPO
+                              </span>
+                            </div>
+                            <div className="text-sm font-bold text-slate-900 dark:text-white uppercase">
+                              {row.namaPelanggan}
+                            </div>
+                            <div className="text-xs text-slate-500 dark:text-slate-400 uppercase">
+                              {row.alamatPelanggan || '-'}
+                              {hasKet && (
+                                <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-50 text-amber-900 border border-amber-200 normal-case">
+                                  {row.keterangan}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex sm:flex-col items-center sm:items-end justify-between gap-1 shrink-0">
+                            <span className="text-sm font-bold text-slate-900 dark:text-white tabular-nums">
+                              Rp {formatNominalRibuan(row.nilaiFaktur) || '0'}
                             </span>
-                          </td>
-                        </tr>
+                            <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+                              {row.coly > 0 ? `${row.coly} COLY` : '0 COLY'} • Net {formatNetDaysDisplay(row.netDays)}
+                            </span>
+                          </div>
+                        </div>
                       );
                     })}
-                  </tbody>
-                </table>
+                  </div>
+                )}
               </div>
             </div>
           )}
 
           {/* Action Footer */}
-          <div className="flex flex-wrap items-center justify-end gap-3 pt-2">
+          <div className="flex flex-wrap items-center justify-end gap-2.5 pt-2">
             <button
               type="button"
               onClick={() => {
@@ -2018,7 +2343,7 @@ export const SalesFormKirimTab: React.FC = () => {
                 setExcelFileName('');
                 setShowUploadPreview(false);
               }}
-              className="px-5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-bold text-xs sm:text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition cursor-pointer"
+              className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-semibold text-xs sm:text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition cursor-pointer"
             >
               Kembali ke Form Kirim
             </button>
@@ -2026,19 +2351,22 @@ export const SalesFormKirimTab: React.FC = () => {
             <button
               type="button"
               onClick={() => setShowUploadPreview(prev => !prev)}
-              className="px-5 py-2.5 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-bold text-xs sm:text-sm flex items-center gap-2 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition cursor-pointer"
+              className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-semibold text-xs sm:text-sm flex items-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-800 transition cursor-pointer"
             >
-              <Eye className="w-4 h-4" />
+              <Eye className="w-4 h-4 text-blue-600" />
               <span>{showUploadPreview ? 'Tutup Preview' : 'Preview Sebelum Simpan'}</span>
             </button>
 
             <button
               type="button"
-              onClick={handleSaveFromUploadPage}
-              className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs sm:text-sm flex items-center gap-2 shadow-sm transition cursor-pointer"
+              disabled={isSavingForm}
+              onClick={() => {
+                void handleSaveFromUploadPage();
+              }}
+              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold text-xs sm:text-sm flex items-center gap-2 transition cursor-pointer"
             >
-              <Save className="w-4 h-4" />
-              <span>Simpan Form Kirim</span>
+              {isSavingForm ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              <span>{isSavingForm ? 'Menyimpan...' : 'Simpan Form Kirim'}</span>
             </button>
           </div>
         </div>
@@ -2047,31 +2375,51 @@ export const SalesFormKirimTab: React.FC = () => {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="akk-flat-formkirim bg-slate-50 dark:bg-slate-950 min-h-full p-4 sm:p-6 space-y-4">
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed bottom-5 right-5 z-50 max-w-md bg-emerald-600 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-2.5 text-xs font-bold animate-in fade-in slide-in-from-bottom-4">
-          <CheckCircle2 className="w-4 h-4 shrink-0" />
+        <div className="fixed bottom-5 right-5 z-50 max-w-md bg-slate-900 text-white px-4 py-3 rounded-xl border border-slate-700 flex items-center gap-2.5 text-xs font-semibold">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* Executive Header Tanpa Logo + Ringkasan Total Customer */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 space-y-5 shadow-sm">
+      {/* Error Sync Banner */}
+      {syncState.status === 'error' && syncState.error && (
+        <div className="bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs font-medium text-rose-800 dark:text-rose-200">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{syncState.error}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              void formKirimStore.hydrateFromServer(true, true);
+            }}
+            className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-rose-300 dark:border-rose-700 text-rose-700 dark:text-rose-300 text-xs font-semibold hover:bg-rose-50 transition cursor-pointer"
+          >
+            Muat Ulang Data
+          </button>
+        </div>
+      )}
+
+      {/* Flat Clean Header + Ringkasan Metrik Netral */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-5">
         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
           <div>
-            <div className="flex flex-wrap items-center gap-2.5">
-              <h1 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white tracking-tight">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white tracking-tight">
                 Form Kirim Barang
               </h1>
               {selectedAreaKirim && (
-                <span className="px-2.5 py-0.5 rounded-lg bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 text-[11px] font-black uppercase">
+                <span className="px-2.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-semibold uppercase">
                   AREA {selectedAreaKirim}
                 </span>
               )}
+              {renderSyncPill()}
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Daftar faktur pengiriman COD &amp; Tempo per area kirim.
+              Daftar faktur pengiriman COD &amp; Tempo per area kirim ({formattedPeriodLabel}).
             </p>
           </div>
 
@@ -2092,95 +2440,100 @@ export const SalesFormKirimTab: React.FC = () => {
                 setShowUploadPreview(false);
                 setIsUploadExcelOpen(true);
               }}
-              className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-2 transition cursor-pointer shadow-sm"
+              className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-2 transition cursor-pointer"
             >
-              <Upload className="w-4 h-4" />
+              <Upload className="w-4 h-4 text-slate-500" />
               <span>Upload File Excel</span>
             </button>
 
             <button
               type="button"
-              onClick={handleSaveFormKirim}
-              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-black flex items-center gap-2 transition cursor-pointer shadow-md shadow-blue-600/20"
+              disabled={isSavingForm}
+              onClick={() => {
+                void handleSaveFormKirim();
+              }}
+              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-xs font-semibold flex items-center gap-2 transition cursor-pointer"
             >
-              <Save className="w-4 h-4" />
-              <span>Simpan Form Kirim</span>
+              {isSavingForm ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              <span>{isSavingForm ? 'Menyimpan...' : 'Simpan Form Kirim'}</span>
             </button>
           </div>
         </div>
 
-        {/* KPI Cards: Total Customer, Pelanggan COD, Pelanggan TEMPO, Total COLY, Total Tagihan COD */}
+        {/* 5 KPI Cards Flat & Netral */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 pt-1">
-          <div className="p-3.5 rounded-2xl bg-indigo-50/60 dark:bg-indigo-950/25 border border-indigo-200/80 dark:border-indigo-800/60">
-            <div className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+          <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
               Total Customer
             </div>
-            <div className="text-lg sm:text-xl font-black text-slate-900 dark:text-white mt-0.5 tabular-nums">
+            <div className="text-xl font-bold text-slate-900 dark:text-white mt-1 tabular-nums">
               {summaryTotals.uniqueTotalCustomers}{' '}
-              <span className="text-xs font-bold text-slate-500">Pelanggan</span>
+              <span className="text-xs font-medium text-slate-500">Pelanggan</span>
             </div>
-            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+            <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               {summaryTotals.totalInvoices} Faktur Pengiriman
             </div>
           </div>
 
-          <div className="p-3.5 rounded-2xl bg-amber-50/70 dark:bg-amber-950/25 border border-amber-300/80 dark:border-amber-800/60">
-            <div className="text-[10px] font-black uppercase tracking-wider text-amber-800 dark:text-amber-300">
-              Pelanggan COD
+          <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-amber-500" />
+              <span>Pelanggan COD</span>
             </div>
-            <div className="text-lg sm:text-xl font-black text-slate-900 dark:text-white mt-0.5 tabular-nums">
+            <div className="text-xl font-bold text-slate-900 dark:text-white mt-1 tabular-nums">
               {summaryTotals.uniqueCodCustomers}{' '}
-              <span className="text-xs font-bold text-slate-500">Pelanggan</span>
+              <span className="text-xs font-medium text-slate-500">Pelanggan</span>
             </div>
-            <div className="text-[11px] text-amber-900/80 dark:text-amber-300/80 font-semibold tabular-nums">
+            <div className="text-xs text-slate-500 dark:text-slate-400 font-medium tabular-nums mt-0.5">
               {summaryTotals.codCount} Faktur • Rp {formatNominalRibuan(summaryTotals.codNilai) || '0'}
             </div>
           </div>
 
-          <div className="p-3.5 rounded-2xl bg-rose-50/70 dark:bg-rose-950/25 border border-rose-200 dark:border-rose-800/60">
-            <div className="text-[10px] font-black uppercase tracking-wider text-red-600 dark:text-red-400">
-              Pelanggan TEMPO
+          <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-rose-500" />
+              <span>Pelanggan TEMPO</span>
             </div>
-            <div className="text-lg sm:text-xl font-black text-slate-900 dark:text-white mt-0.5 tabular-nums">
+            <div className="text-xl font-bold text-slate-900 dark:text-white mt-1 tabular-nums">
               {summaryTotals.uniqueTempoCustomers}{' '}
-              <span className="text-xs font-bold text-slate-500">Pelanggan</span>
+              <span className="text-xs font-medium text-slate-500">Pelanggan</span>
             </div>
-            <div className="text-[11px] text-rose-700 dark:text-rose-300 font-semibold tabular-nums">
+            <div className="text-xs text-slate-500 dark:text-slate-400 font-medium tabular-nums mt-0.5">
               {summaryTotals.tempoCount} Faktur • Rp {formatNominalRibuan(summaryTotals.tempoNilai) || '0'}
             </div>
           </div>
 
-          <div className="p-3.5 rounded-2xl bg-blue-50/70 dark:bg-blue-950/25 border border-blue-200 dark:border-blue-800/60">
-            <div className="text-[10px] font-black uppercase tracking-wider text-blue-700 dark:text-blue-400">
+          <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
               Total Muatan COLY
             </div>
-            <div className="text-lg sm:text-xl font-black text-blue-700 dark:text-blue-300 mt-0.5 tabular-nums">
-              {summaryTotals.totalColy} <span className="text-xs font-bold">COLY</span>
+            <div className="text-xl font-bold text-blue-600 dark:text-blue-400 mt-1 tabular-nums">
+              {summaryTotals.totalColy} <span className="text-xs font-semibold text-slate-500">COLY</span>
             </div>
-            <div className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
+            <div className="text-xs text-slate-500 dark:text-slate-400 tabular-nums mt-0.5">
               COD: {summaryTotals.codColy} • TEMPO: {summaryTotals.tempoColy}
             </div>
           </div>
 
-          <div className="col-span-2 lg:col-span-1 p-3.5 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/25 border border-emerald-200 dark:border-emerald-800/60">
-            <div className="text-[10px] font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+          <div className="col-span-2 lg:col-span-1 p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
               Total Tagihan COD
             </div>
-            <div className="text-base sm:text-lg font-black text-emerald-700 dark:text-emerald-300 mt-0.5 tabular-nums truncate">
+            <div className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white mt-1 tabular-nums truncate">
               Rp {formatNominalRibuan(summaryTotals.codNilai) || '0'}
             </div>
-            <div className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums truncate">
+            <div className="text-xs text-slate-500 dark:text-slate-400 tabular-nums truncate mt-0.5">
               Total Semua: Rp {formatNominalRibuan(summaryTotals.totalNilai) || '0'}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Toolbar Sortir & Mode Tampilan */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 flex flex-col xl:flex-row xl:items-center justify-between gap-3 shadow-xs">
+      {/* Toolbar Sortir, Pencarian & Mode Tampilan */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1">
-            <ArrowUpDown className="w-3.5 h-3.5 text-blue-500" />
+          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
             <span>Sortir:</span>
           </span>
 
@@ -2195,7 +2548,7 @@ export const SalesFormKirimTab: React.FC = () => {
                 setSortDirection('asc');
               }
             }}
-            className="px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-800 dark:text-slate-200 cursor-pointer focus:outline-none focus:border-blue-500"
+            className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-800 dark:text-slate-200 cursor-pointer focus:outline-none focus:border-blue-600"
           >
             <option value="default">Urutan Default</option>
             <option value="nilaiFaktur">Nilai Faktur (Rp)</option>
@@ -2218,9 +2571,9 @@ export const SalesFormKirimTab: React.FC = () => {
               }
               setSortDirection('desc');
             }}
-            className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition cursor-pointer ${
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition cursor-pointer ${
               (sortField === 'nilaiFaktur' || sortField === 'coly') && sortDirection === 'desc'
-                ? 'bg-blue-600 text-white shadow-xs'
+                ? 'bg-blue-600 text-white'
                 : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
             }`}
           >
@@ -2241,9 +2594,9 @@ export const SalesFormKirimTab: React.FC = () => {
               }
               setSortDirection('asc');
             }}
-            className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition cursor-pointer ${
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition cursor-pointer ${
               (sortField === 'nilaiFaktur' || sortField === 'coly') && sortDirection === 'asc'
-                ? 'bg-blue-600 text-white shadow-xs'
+                ? 'bg-blue-600 text-white'
                 : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
             }`}
           >
@@ -2259,10 +2612,10 @@ export const SalesFormKirimTab: React.FC = () => {
               }
               setSortDirection('asc');
             }}
-            className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition cursor-pointer ${
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition cursor-pointer ${
               (sortField === 'namaPelanggan' || sortField === 'noFaktur' || sortField === 'alamatPelanggan') &&
               sortDirection === 'asc'
-                ? 'bg-indigo-600 text-white shadow-xs'
+                ? 'bg-blue-600 text-white'
                 : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
             }`}
           >
@@ -2278,10 +2631,10 @@ export const SalesFormKirimTab: React.FC = () => {
               }
               setSortDirection('desc');
             }}
-            className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition cursor-pointer ${
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition cursor-pointer ${
               (sortField === 'namaPelanggan' || sortField === 'noFaktur' || sortField === 'alamatPelanggan') &&
               sortDirection === 'desc'
-                ? 'bg-indigo-600 text-white shadow-xs'
+                ? 'bg-blue-600 text-white'
                 : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
             }`}
           >
@@ -2293,7 +2646,7 @@ export const SalesFormKirimTab: React.FC = () => {
             <button
               type="button"
               onClick={() => setSortField('default')}
-              className="px-2 py-1.5 rounded-xl text-[11px] font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-white flex items-center gap-1 cursor-pointer"
+              className="px-2 py-1.5 rounded-lg text-xs font-medium text-slate-500 hover:text-slate-800 dark:hover:text-white flex items-center gap-1 cursor-pointer"
             >
               <RotateCcw className="w-3 h-3" />
               <span>Reset</span>
@@ -2302,677 +2655,179 @@ export const SalesFormKirimTab: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative w-full sm:w-52">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <div className="relative w-full sm:w-56">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={tableSearch}
               onChange={e => setTableSearch(e.target.value)}
               placeholder="Filter pelanggan / faktur..."
-              className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-500"
+              className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-600"
             />
           </div>
 
-          <div className="inline-flex rounded-xl p-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+          <div className="inline-flex rounded-lg p-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
             <button
               type="button"
               onClick={() => setViewMode('edit')}
-              className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition cursor-pointer ${
+              className={`px-3 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
                 viewMode === 'edit'
-                  ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
               }`}
             >
-              <Edit3 className="w-3 h-3" />
+              <Edit3 className="w-3.5 h-3.5" />
               <span>Mode Edit &amp; Input COLY</span>
             </button>
             <button
               type="button"
               onClick={() => setViewMode('saved_preview')}
-              className={`px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition cursor-pointer ${
+              className={`px-3 py-1 rounded-md text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
                 viewMode === 'saved_preview'
-                  ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
               }`}
             >
-              <Eye className="w-3 h-3" />
+              <Eye className="w-3.5 h-3.5" />
               <span>Tampilan Simpan</span>
             </button>
           </div>
         </div>
       </div>
 
-      {/* ===================================================================== */}
-      {/* TABEL FORM KIRIM MODERN (ANUGRAH KEMASAN KREATIF)                     */}
-      {/* ===================================================================== */}
-      <div className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-sm overflow-hidden">
-        {/* Kop Judul Form Kirim dengan Kontras Tinggi di Mode Terang & Gelap */}
-        <div className="py-4 px-5 sm:px-6 border-b border-slate-200 dark:border-slate-800 bg-gradient-to-r from-indigo-50/90 via-blue-50/60 to-slate-50 dark:from-slate-900 dark:via-indigo-950/40 dark:to-slate-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <div className="text-sm sm:text-base font-black tracking-wide text-slate-900 dark:text-white uppercase">
-              ANUGRAH KEMASAN KREATIF
-            </div>
-            <div className="text-xs text-slate-600 dark:text-slate-300 font-semibold mt-0.5">
-              {formattedPeriodLabel}
-            </div>
+      {/* Kop Dokumen Ringkas */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-bold tracking-wide text-slate-900 dark:text-white uppercase">
+            ANUGRAH KEMASAN KREATIF
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
-            <span className="px-3 py-1 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 shadow-2xs">
-              {summaryTotals.uniqueTotalCustomers} Pelanggan
-            </span>
-            <span className="px-3 py-1 rounded-xl bg-amber-300 text-slate-950 font-black shadow-2xs">
-              COD: {summaryTotals.uniqueCodCustomers} Pelanggan ({summaryTotals.codCount} Faktur)
-            </span>
-            <span className="px-3 py-1 rounded-xl bg-red-600 text-white font-black shadow-2xs">
-              TEMPO: {summaryTotals.uniqueTempoCustomers} Pelanggan ({summaryTotals.tempoCount} Faktur)
-            </span>
+          <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            {formattedPeriodLabel}
           </div>
         </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+          <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200">
+            {summaryTotals.uniqueTotalCustomers} Pelanggan
+          </span>
+          <span className="px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300">
+            COD: {summaryTotals.uniqueCodCustomers} ({summaryTotals.codCount} Faktur)
+          </span>
+          <span className="px-2.5 py-1 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300">
+            TEMPO: {summaryTotals.uniqueTempoCustomers} ({summaryTotals.tempoCount} Faktur)
+          </span>
+        </div>
+      </div>
 
-        {/* Tabel Form Kirim Modern & Rapi Full-Width */}
-        <div className="w-full overflow-x-auto">
-          <table className="w-full table-fixed border-collapse text-xs font-sans">
-            <thead>
-              <tr className="bg-slate-100/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-[10px] font-extrabold uppercase tracking-wider">
-                <th className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-1.5 text-center w-[36px]">
-                  NO
-                </th>
-                <th
-                  onClick={() => handleColumnSortToggle('noFaktur')}
-                  className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-2 text-left w-[11%] cursor-pointer hover:bg-blue-50/70 dark:hover:bg-slate-700/50 transition select-none"
-                  title="Klik untuk sortir No. Faktur"
-                >
-                  <div className="flex items-center justify-between gap-1">
-                    <span>No. Faktur</span>
-                    {sortField === 'noFaktur' && (
-                      <span className="text-[10px] text-blue-600 dark:text-blue-400">
-                        {sortDirection === 'asc' ? '▲' : '▼'}
-                      </span>
-                    )}
-                  </div>
-                </th>
-                <th className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-2 text-left w-[7%]">
-                  Tgl Faktur
-                </th>
-                <th
-                  onClick={() => handleColumnSortToggle('namaPelanggan')}
-                  className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-2.5 text-left w-[15%] cursor-pointer hover:bg-blue-50/70 dark:hover:bg-slate-700/50 transition select-none"
-                  title="Klik untuk sortir Nama Pelanggan (A-Z / Z-A)"
-                >
-                  <div className="flex items-center justify-between gap-1">
-                    <span>Nama Pelanggan</span>
-                    {sortField === 'namaPelanggan' && (
-                      <span className="text-[10px] text-blue-600 dark:text-blue-400">
-                        {sortDirection === 'asc' ? '▲' : '▼'}
-                      </span>
-                    )}
-                  </div>
-                </th>
-                <th
-                  onClick={() => handleColumnSortToggle('nilaiFaktur')}
-                  className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-2.5 text-right w-[11%] cursor-pointer hover:bg-blue-50/70 dark:hover:bg-slate-700/50 transition select-none"
-                  title="Klik untuk sortir Nilai Faktur (Besar ke Kecil / Kecil ke Besar)"
-                >
-                  <div className="flex items-center justify-end gap-1">
-                    <span>Nilai Faktur</span>
-                    {sortField === 'nilaiFaktur' && (
-                      <span className="text-[10px] text-blue-600 dark:text-blue-400">
-                        {sortDirection === 'asc' ? '▲' : '▼'}
-                      </span>
-                    )}
-                  </div>
-                </th>
-                <th
-                  onClick={() => handleColumnSortToggle('coly')}
-                  className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-1.5 text-center w-[6%] cursor-pointer hover:bg-blue-50/70 dark:hover:bg-slate-700/50 transition select-none"
-                  title="Klik untuk sortir COLY"
-                >
-                  <div className="flex items-center justify-center gap-1">
-                    <span>COLY</span>
-                    {sortField === 'coly' && (
-                      <span className="text-[10px] text-blue-600 dark:text-blue-400">
-                        {sortDirection === 'asc' ? '▲' : '▼'}
-                      </span>
-                    )}
-                  </div>
-                </th>
-                <th className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-2 text-left w-[7%]">
-                  BAYAR
-                </th>
-                <th
-                  onClick={() => handleColumnSortToggle('alamatPelanggan')}
-                  className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-2 text-left w-[12%] cursor-pointer hover:bg-blue-50/70 dark:hover:bg-slate-700/50 transition select-none"
-                  title="Klik untuk sortir Alamat Pelanggan"
-                >
-                  <div className="flex items-center justify-between gap-1">
-                    <span>Alamat 1</span>
-                    {sortField === 'alamatPelanggan' && (
-                      <span className="text-[10px] text-blue-600 dark:text-blue-400">
-                        {sortDirection === 'asc' ? '▲' : '▼'}
-                      </span>
-                    )}
-                  </div>
-                </th>
-                <th className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-2 text-left w-[11%]">
-                  Keterangan
-                </th>
-                {viewMode === 'edit' && (
-                  <>
-                    <th className="border-r border-slate-200/80 dark:border-slate-700/70 py-3 px-1.5 text-center w-[9%] leading-tight">
-                      Syarat (Hari) &amp; Kategori
-                    </th>
-                    <th className="py-3 px-1.5 text-center w-[92px] whitespace-nowrap">
-                      Urutan &amp; Aksi
-                    </th>
-                  </>
-                )}
-              </tr>
-            </thead>
+      {/* ===================================================================== */}
+      {/* KELOMPOK 1: PELANGGAN COD (KARTU / LIST ITEM MODERN)                  */}
+      {/* ===================================================================== */}
+      <section className="space-y-2.5">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <span className="px-2.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 font-bold tracking-wide uppercase text-[11px]">
+              COD
+            </span>
+            <span className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
+              {summaryTotals.uniqueCodCustomers} Pelanggan ({summaryTotals.codCount} Faktur)
+            </span>
+            <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+              • Total COD: Rp {formatNominalRibuan(summaryTotals.codNilai) || '0'}
+            </span>
+          </div>
 
-            <tbody className="divide-y divide-slate-200/80 dark:divide-slate-800">
-              {/* ========================================================= */}
-              {/* BAGIAN 1: KELOMPOK PELANGGAN COD                          */}
-              {/* ========================================================= */}
-              <tr className="bg-amber-50/90 dark:bg-amber-950/30 border-y border-amber-200 dark:border-amber-800/60">
-                <td colSpan={viewMode === 'edit' ? 11 : 9} className="py-2 px-3.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-2.5">
-                      <span className="px-2.5 py-1 rounded-lg font-black text-slate-950 bg-amber-300 tracking-wider uppercase text-[11px] shadow-2xs">
-                        COD
-                      </span>
-                      <span className="text-xs font-extrabold text-amber-950 dark:text-amber-200">
-                        {summaryTotals.uniqueCodCustomers} Pelanggan ({summaryTotals.codCount} Faktur)
-                      </span>
-                      <span className="text-[11px] font-semibold text-amber-800/80 dark:text-amber-300/80">
-                        • Total COD: Rp {formatNominalRibuan(summaryTotals.codNilai) || '0'}
-                      </span>
-                    </div>
-                    {viewMode === 'edit' && (
-                      <button
-                        type="button"
-                        onClick={() => handleInsertManualRowInSection('COD')}
-                        className="px-2.5 py-1 rounded-lg bg-amber-400/90 hover:bg-amber-400 text-slate-950 font-bold text-[11px] inline-flex items-center gap-1 transition cursor-pointer shadow-2xs"
-                        title="Tambah baris manual di kelompok COD"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>Tambah Baris COD</span>
-                      </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
+          {viewMode === 'edit' && (
+            <button
+              type="button"
+              onClick={() => handleInsertManualRowInSection('COD')}
+              className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-xs inline-flex items-center gap-1.5 transition cursor-pointer"
+              title="Tambah baris manual di kelompok COD"
+            >
+              <Plus className="w-3.5 h-3.5 text-blue-600" />
+              <span>Tambah Baris COD</span>
+            </button>
+          )}
+        </div>
 
-              {codItems.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={viewMode === 'edit' ? 11 : 9}
-                    className="py-4 px-3 text-center text-slate-400 italic"
-                  >
-                    Tidak ada faktur pelanggan COD (Net Days = 0).
-                  </td>
-                </tr>
-              ) : (
-                codItems.map((item, idx) => {
-                  const rowNum = idx + 1;
-                  const boldClass = isNonGudangFaktur(item.noFaktur) ? 'font-bold' : 'font-normal';
-                  const hasKeterangan = String(item.keterangan || '').trim().length > 0;
-                  return (
-                    <tr
-                      key={item.id}
-                      className={`hover:bg-blue-50/50 dark:hover:bg-slate-800/50 transition-colors ${boldClass}`}
-                    >
-                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-2 px-2 text-center relative align-middle text-slate-500 dark:text-slate-400 font-semibold">
-                        <span>{rowNum}</span>
-                        {viewMode === 'edit' && (
-                          <div className="group/rowplus absolute -bottom-2.5 inset-x-0 h-5 flex items-center justify-center z-20">
-                            <button
-                              type="button"
-                              onClick={() => handleInsertManualRowAfter(item.id, 'COD')}
-                              className="w-4 h-4 rounded-full bg-blue-600 text-white shadow-sm flex items-center justify-center opacity-0 group-hover/rowplus:opacity-100 focus:opacity-100 hover:scale-110 transition-all duration-150 cursor-pointer"
-                              title={`Sisipkan baris COD setelah nomor ${rowNum}`}
-                            >
-                              <Plus className="w-2.5 h-2.5" />
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left whitespace-normal break-words align-middle font-mono text-[11px]">
-                        {viewMode === 'edit' ? (
-                          <AutoWrapCellTextarea
-                            value={item.noFaktur}
-                            placeholder="No. Faktur..."
-                            onChange={val => handleUpdateInvoiceCell(item.id, 'noFaktur', val.toUpperCase())}
-                            className={`uppercase font-mono ${boldClass}`}
-                          />
-                        ) : (
-                          <div className="whitespace-normal break-words leading-snug">{item.noFaktur}</div>
-                        )}
-                      </td>
-                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left whitespace-normal break-words align-middle text-slate-600 dark:text-slate-300">
-                        {viewMode === 'edit' ? (
-                          <AutoWrapCellTextarea
-                            value={item.tglFaktur}
-                            onChange={val => handleUpdateInvoiceCell(item.id, 'tglFaktur', val)}
-                            className={boldClass}
-                          />
-                        ) : (
-                          <div className="whitespace-normal break-words leading-snug">{item.tglFaktur}</div>
-                        )}
-                      </td>
-                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left uppercase whitespace-normal break-words align-middle text-slate-900 dark:text-white">
-                        {viewMode === 'edit' ? (
-                          <AutoWrapCellTextarea
-                            value={item.namaPelanggan}
-                            placeholder="Nama Pelanggan..."
-                            onChange={val => handleUpdateInvoiceCell(item.id, 'namaPelanggan', val.toUpperCase())}
-                            className={`uppercase ${boldClass}`}
-                          />
-                        ) : (
-                          <div className="whitespace-normal break-words leading-snug">{item.namaPelanggan}</div>
-                        )}
-                      </td>
-                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-3 whitespace-nowrap align-middle">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-slate-400 dark:text-slate-500 text-[11px]">Rp</span>
-                          {viewMode === 'edit' ? (
-                            <RupiahCellInput
-                              value={item.nilaiFaktur}
-                              onChange={num => handleUpdateInvoiceCell(item.id, 'nilaiFaktur', num)}
-                              className={boldClass}
-                            />
-                          ) : (
-                            <span className="tabular-nums font-semibold">
-                              {formatNominalRibuan(item.nilaiFaktur) || '0'}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2 text-center align-middle">
-                        {viewMode === 'edit' ? (
-                          <input
-                            type="number"
-                            min={0}
-                            value={item.coly > 0 ? item.coly : ''}
-                            placeholder="0"
-                            onChange={e => {
-                              const raw = e.target.value;
-                              const num = raw === '' ? 0 : Math.max(0, Math.round(Number(raw) || 0));
-                              handleUpdateInvoiceCell(item.id, 'coly', num);
-                            }}
-                            className={`w-14 py-1 px-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-center bg-slate-50/70 dark:bg-slate-800/70 focus:outline-none focus:border-blue-500 focus:bg-white dark:focus:bg-slate-900 tabular-nums ${boldClass}`}
-                          />
-                        ) : item.coly > 0 ? (
-                          <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 font-bold tabular-nums">
-                            {item.coly}
-                          </span>
-                        ) : (
-                          ''
-                        )}
-                      </td>
-                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left whitespace-normal break-words align-middle">
-                        {viewMode === 'edit' ? (
-                          <AutoWrapCellTextarea
-                            value={item.bayar}
-                            onChange={val => handleUpdateInvoiceCell(item.id, 'bayar', val)}
-                            className={boldClass}
-                          />
-                        ) : (
-                          <div className="whitespace-normal break-words leading-snug">{item.bayar}</div>
-                        )}
-                      </td>
-                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left uppercase whitespace-normal break-words align-middle text-slate-700 dark:text-slate-300">
-                        {viewMode === 'edit' ? (
-                          <AutoWrapCellTextarea
-                            value={item.alamatPelanggan}
-                            placeholder="Alamat..."
-                            onChange={val => handleUpdateInvoiceCell(item.id, 'alamatPelanggan', val.toUpperCase())}
-                            className={`uppercase ${boldClass}`}
-                          />
-                        ) : (
-                          <div className="whitespace-normal break-words leading-snug">{item.alamatPelanggan}</div>
-                        )}
-                      </td>
-                      <td
-                        className={`border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left whitespace-normal break-words align-middle ${
-                          hasKeterangan
-                            ? 'bg-amber-100/90 dark:bg-amber-950/50 font-semibold text-amber-950 dark:text-amber-200'
-                            : ''
-                        }`}
-                      >
-                        {viewMode === 'edit' ? (
-                          <AutoWrapCellTextarea
-                            value={item.keterangan}
-                            placeholder="Catatan..."
-                            onChange={val => handleUpdateInvoiceCell(item.id, 'keterangan', val)}
-                            className={`${boldClass} ${hasKeterangan ? 'font-semibold' : ''}`}
-                          />
-                        ) : (
-                          <div className="whitespace-normal break-words leading-snug">{item.keterangan}</div>
-                        )}
-                      </td>
-                      {viewMode === 'edit' && (
-                        <>
-                          <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2 text-center font-mono align-middle">
-                            <div className="flex items-center justify-center gap-1.5">
-                              <input
-                                type="number"
-                                min={0}
-                                step="1"
-                                value={item.netDays}
-                                onChange={e => handleUpdateInvoiceCell(item.id, 'netDays', e.target.value)}
-                                className="w-11 py-0.5 px-1 rounded-md border border-slate-200 dark:border-slate-700 text-center bg-slate-50 dark:bg-slate-800 focus:outline-none focus:border-blue-500 font-mono text-xs"
-                                title="0 = COD, > 0 = TEMPO"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleToggleCategory(item.id)}
-                                className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase transition cursor-pointer bg-amber-300 text-slate-950 hover:bg-amber-400 shadow-2xs"
-                                title="Klik untuk ubah kategori ke TEMPO"
-                              >
-                                COD
-                              </button>
-                            </div>
-                          </td>
-                          <td className="py-1.5 px-2 text-center align-middle min-w-[105px]">
-                            <div className="flex items-center justify-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => handleMoveItemUp(item.id)}
-                                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-                                title="Pindah baris ke atas"
-                              >
-                                <ChevronUp className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleMoveItemDown(item.id)}
-                                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-                                title={
-                                  idx === codItems.length - 1
-                                    ? 'Pindah baris turun ke kelompok TEMPO'
-                                    : 'Pindah baris ke bawah'
-                                }
-                              >
-                                <ChevronDown className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteInvoiceRow(item.id)}
-                                className="p-1.5 rounded-lg border border-rose-200 dark:border-rose-900/60 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition cursor-pointer"
-                                title="Hapus baris faktur"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        </>
-                      )}
-                    </tr>
-                  );
-                })
-              )}
+        {codItems.length === 0 ? (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl py-6 px-4 text-center text-xs text-slate-400">
+            Tidak ada faktur pelanggan COD (Net Days = 0).
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            {codItems.map((item, idx) =>
+              renderInvoiceCard(item, idx + 1, 'COD', idx === codItems.length - 1, false)
+            )}
+          </div>
+        )}
+      </section>
 
-              {/* ========================================================= */}
-              {/* BAGIAN 2: KELOMPOK PELANGGAN TEMPO (WARNA MERAH)          */}
-              {/* ========================================================= */}
-              <tr className="bg-rose-50/90 dark:bg-rose-950/35 border-y border-rose-200 dark:border-rose-800/60">
-                <td colSpan={viewMode === 'edit' ? 11 : 9} className="py-2 px-3.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-2.5">
-                      <span className="px-2.5 py-1 rounded-lg font-black text-white bg-red-600 tracking-wider uppercase text-[11px] shadow-2xs">
-                        TEMPO
-                      </span>
-                      <span className="text-xs font-extrabold text-red-700 dark:text-red-300">
-                        {summaryTotals.uniqueTempoCustomers} Pelanggan ({summaryTotals.tempoCount} Faktur)
-                      </span>
-                      <span className="text-[11px] font-semibold text-rose-700/80 dark:text-rose-300/80">
-                        • Total TEMPO: Rp {formatNominalRibuan(summaryTotals.tempoNilai) || '0'}
-                      </span>
-                    </div>
-                    {viewMode === 'edit' && (
-                      <button
-                        type="button"
-                        onClick={() => handleInsertManualRowInSection('TEMPO')}
-                        className="px-2.5 py-1 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold text-[11px] inline-flex items-center gap-1 transition cursor-pointer shadow-2xs"
-                        title="Tambah baris manual di kelompok TEMPO"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>Tambah Baris TEMPO</span>
-                      </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
+      {/* ===================================================================== */}
+      {/* KELOMPOK 2: PELANGGAN TEMPO (KARTU / LIST ITEM MODERN)                */}
+      {/* ===================================================================== */}
+      <section className="space-y-2.5">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <span className="px-2.5 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 font-bold tracking-wide uppercase text-[11px]">
+              TEMPO
+            </span>
+            <span className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
+              {summaryTotals.uniqueTempoCustomers} Pelanggan ({summaryTotals.tempoCount} Faktur)
+            </span>
+            <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+              • Total TEMPO: Rp {formatNominalRibuan(summaryTotals.tempoNilai) || '0'}
+            </span>
+          </div>
 
-              {tempoItems.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={viewMode === 'edit' ? 11 : 9}
-                    className="py-4 px-3 text-center text-slate-400 italic"
-                  >
-                    Tidak ada faktur pelanggan TEMPO (Net Days &gt; 0).
-                  </td>
-                </tr>
-              ) : (
-                tempoItems.map((item, idx) => {
-                  const rowNum = codItems.length + idx + 1;
-                  const boldClass = isNonGudangFaktur(item.noFaktur) ? 'font-bold' : 'font-normal';
-                  const hasKeterangan = String(item.keterangan || '').trim().length > 0;
-                  return (
-                    <tr
-                      key={item.id}
-                      className={`hover:bg-rose-50/40 dark:hover:bg-slate-800/50 transition-colors ${boldClass}`}
-                    >
-                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-2 px-2 text-center relative align-middle text-slate-500 dark:text-slate-400 font-semibold">
-                        <span>{rowNum}</span>
-                        {viewMode === 'edit' && (
-                          <div className="group/rowplus absolute -bottom-2.5 inset-x-0 h-5 flex items-center justify-center z-20">
-                            <button
-                              type="button"
-                              onClick={() => handleInsertManualRowAfter(item.id, 'TEMPO')}
-                              className="w-4 h-4 rounded-full bg-red-600 text-white shadow-sm flex items-center justify-center opacity-0 group-hover/rowplus:opacity-100 focus:opacity-100 hover:scale-110 transition-all duration-150 cursor-pointer"
-                              title={`Sisipkan baris TEMPO setelah nomor ${rowNum}`}
-                            >
-                              <Plus className="w-2.5 h-2.5" />
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left whitespace-normal break-words align-middle font-mono text-[11px]">
-                        {viewMode === 'edit' ? (
-                          <AutoWrapCellTextarea
-                            value={item.noFaktur}
-                            placeholder="No. Faktur..."
-                            onChange={val => handleUpdateInvoiceCell(item.id, 'noFaktur', val.toUpperCase())}
-                            className={`uppercase font-mono ${boldClass}`}
-                          />
-                        ) : (
-                          <div className="whitespace-normal break-words leading-snug">{item.noFaktur}</div>
-                        )}
-                      </td>
-                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left whitespace-normal break-words align-middle text-slate-600 dark:text-slate-300">
-                        {viewMode === 'edit' ? (
-                          <AutoWrapCellTextarea
-                            value={item.tglFaktur}
-                            onChange={val => handleUpdateInvoiceCell(item.id, 'tglFaktur', val)}
-                            className={boldClass}
-                          />
-                        ) : (
-                          <div className="whitespace-normal break-words leading-snug">{item.tglFaktur}</div>
-                        )}
-                      </td>
-                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left uppercase whitespace-normal break-words align-middle text-slate-900 dark:text-white">
-                        {viewMode === 'edit' ? (
-                          <AutoWrapCellTextarea
-                            value={item.namaPelanggan}
-                            placeholder="Nama Pelanggan..."
-                            onChange={val => handleUpdateInvoiceCell(item.id, 'namaPelanggan', val.toUpperCase())}
-                            className={`uppercase ${boldClass}`}
-                          />
-                        ) : (
-                          <div className="whitespace-normal break-words leading-snug">{item.namaPelanggan}</div>
-                        )}
-                      </td>
-                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-3 whitespace-nowrap align-middle">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-slate-400 dark:text-slate-500 text-[11px]">Rp</span>
-                          {viewMode === 'edit' ? (
-                            <RupiahCellInput
-                              value={item.nilaiFaktur}
-                              onChange={num => handleUpdateInvoiceCell(item.id, 'nilaiFaktur', num)}
-                              className={boldClass}
-                            />
-                          ) : (
-                            <span className="tabular-nums font-semibold">
-                              {formatNominalRibuan(item.nilaiFaktur) || '0'}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2 text-center align-middle">
-                        {viewMode === 'edit' ? (
-                          <input
-                            type="number"
-                            min={0}
-                            value={item.coly > 0 ? item.coly : ''}
-                            placeholder="0"
-                            onChange={e => {
-                              const raw = e.target.value;
-                              const num = raw === '' ? 0 : Math.max(0, Math.round(Number(raw) || 0));
-                              handleUpdateInvoiceCell(item.id, 'coly', num);
-                            }}
-                            className={`w-14 py-1 px-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-center bg-slate-50/70 dark:bg-slate-800/70 focus:outline-none focus:border-blue-500 focus:bg-white dark:focus:bg-slate-900 tabular-nums ${boldClass}`}
-                          />
-                        ) : item.coly > 0 ? (
-                          <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 font-bold tabular-nums">
-                            {item.coly}
-                          </span>
-                        ) : (
-                          ''
-                        )}
-                      </td>
-                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left whitespace-normal break-words align-middle">
-                        {viewMode === 'edit' ? (
-                          <AutoWrapCellTextarea
-                            value={item.bayar}
-                            onChange={val => handleUpdateInvoiceCell(item.id, 'bayar', val)}
-                            className={boldClass}
-                          />
-                        ) : (
-                          <div className="whitespace-normal break-words leading-snug">{item.bayar}</div>
-                        )}
-                      </td>
-                      <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left uppercase whitespace-normal break-words align-middle text-slate-700 dark:text-slate-300">
-                        {viewMode === 'edit' ? (
-                          <AutoWrapCellTextarea
-                            value={item.alamatPelanggan}
-                            placeholder="Alamat..."
-                            onChange={val => handleUpdateInvoiceCell(item.id, 'alamatPelanggan', val.toUpperCase())}
-                            className={`uppercase ${boldClass}`}
-                          />
-                        ) : (
-                          <div className="whitespace-normal break-words leading-snug">{item.alamatPelanggan}</div>
-                        )}
-                      </td>
-                      <td
-                        className={`border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2.5 text-left whitespace-normal break-words align-middle ${
-                          hasKeterangan
-                            ? 'bg-amber-100/90 dark:bg-amber-950/50 font-semibold text-amber-950 dark:text-amber-200'
-                            : ''
-                        }`}
-                      >
-                        {viewMode === 'edit' ? (
-                          <AutoWrapCellTextarea
-                            value={item.keterangan}
-                            placeholder="Catatan..."
-                            onChange={val => handleUpdateInvoiceCell(item.id, 'keterangan', val)}
-                            className={`${boldClass} ${hasKeterangan ? 'font-semibold' : ''}`}
-                          />
-                        ) : (
-                          <div className="whitespace-normal break-words leading-snug">{item.keterangan}</div>
-                        )}
-                      </td>
-                      {viewMode === 'edit' && (
-                        <>
-                          <td className="border-r border-slate-200/70 dark:border-slate-800 py-1.5 px-2 text-center font-mono align-middle">
-                            <div className="flex items-center justify-center gap-1.5">
-                              <input
-                                type="number"
-                                min={0}
-                                step="1"
-                                value={item.netDays}
-                                onChange={e => handleUpdateInvoiceCell(item.id, 'netDays', e.target.value)}
-                                className="w-11 py-0.5 px-1 rounded-md border border-slate-200 dark:border-slate-700 text-center bg-slate-50 dark:bg-slate-800 focus:outline-none focus:border-blue-500 font-mono text-xs"
-                                title="0 = COD, > 0 = TEMPO"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleToggleCategory(item.id)}
-                                className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase transition cursor-pointer bg-red-600 text-white hover:bg-red-500 shadow-2xs"
-                                title="Klik untuk naikkan pelanggan TEMPO ke COD"
-                              >
-                                TEMPO
-                              </button>
-                            </div>
-                          </td>
-                          <td className="py-1.5 px-2 text-center align-middle min-w-[105px]">
-                            <div className="flex items-center justify-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => handleMoveItemUp(item.id)}
-                                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-                                title={
-                                  idx === 0
-                                    ? 'Naikkan pelanggan dari TEMPO ke kategori COD'
-                                    : 'Pindah baris ke atas'
-                                }
-                              >
-                                <ChevronUp className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleMoveItemDown(item.id)}
-                                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-                                title="Pindah baris ke bawah"
-                              >
-                                <ChevronDown className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteInvoiceRow(item.id)}
-                                className="p-1.5 rounded-lg border border-rose-200 dark:border-rose-900/60 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition cursor-pointer"
-                                title="Hapus baris faktur"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        </>
-                      )}
-                    </tr>
-                  );
-                })
-              )}
+          {viewMode === 'edit' && (
+            <button
+              type="button"
+              onClick={() => handleInsertManualRowInSection('TEMPO')}
+              className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-xs inline-flex items-center gap-1.5 transition cursor-pointer"
+              title="Tambah baris manual di kelompok TEMPO"
+            >
+              <Plus className="w-3.5 h-3.5 text-blue-600" />
+              <span>Tambah Baris TEMPO</span>
+            </button>
+          )}
+        </div>
 
-              {/* ========================================================= */}
-              {/* BARIS JUMLAH / SUM COLY DI BAGIAN BAWAH TABEL             */}
-              {/* ========================================================= */}
-              <tr className="bg-slate-100/90 dark:bg-slate-800/90 font-bold border-t-2 border-slate-300 dark:border-slate-700">
-                <td colSpan={4} className="border-r border-slate-200 dark:border-slate-700 py-3 px-4 text-right text-xs font-black text-slate-800 dark:text-slate-100 uppercase">
-                  Total ({summaryTotals.uniqueTotalCustomers} Pelanggan • {summaryTotals.totalInvoices} Faktur)
-                </td>
-                <td className="border-r border-slate-200 dark:border-slate-700 py-3 px-3 text-right text-xs font-black text-slate-900 dark:text-white tabular-nums">
-                  Rp {formatNominalRibuan(summaryTotals.totalNilai) || '0'}
-                </td>
-                <td className="border-r border-slate-200 dark:border-slate-700 py-3 px-2.5 text-center text-sm font-black text-blue-700 dark:text-blue-300 bg-blue-50/80 dark:bg-blue-950/40 tabular-nums">
-                  {summaryTotals.totalColy}
-                </td>
-                <td colSpan={viewMode === 'edit' ? 5 : 3} className="py-3 px-3">
-                  &nbsp;
-                </td>
-              </tr>
-            </tbody>
-          </table>
+        {tempoItems.length === 0 ? (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl py-6 px-4 text-center text-xs text-slate-400">
+            Tidak ada faktur pelanggan TEMPO (Net Days &gt; 0).
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            {tempoItems.map((item, idx) =>
+              renderInvoiceCard(item, codItems.length + idx + 1, 'TEMPO', false, idx === 0)
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* ===================================================================== */}
+      {/* RINGKASAN TOTAL BAWAH                                                 */}
+      {/* ===================================================================== */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-5 py-4 flex flex-wrap items-center justify-between gap-4">
+        <div className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white uppercase">
+          Total ({summaryTotals.uniqueTotalCustomers} Pelanggan • {summaryTotals.totalInvoices} Faktur)
+        </div>
+        <div className="flex flex-wrap items-center gap-5">
+          <div>
+            <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              Total Nilai Faktur
+            </div>
+            <div className="text-sm sm:text-base font-bold text-slate-900 dark:text-white tabular-nums">
+              Rp {formatNominalRibuan(summaryTotals.totalNilai) || '0'}
+            </div>
+          </div>
+          <div className="pl-5 border-l border-slate-200 dark:border-slate-700">
+            <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              Total Muatan
+            </div>
+            <div className="text-sm sm:text-base font-bold text-blue-600 dark:text-blue-400 tabular-nums">
+              {summaryTotals.totalColy} COLY
+            </div>
+          </div>
         </div>
       </div>
     </div>

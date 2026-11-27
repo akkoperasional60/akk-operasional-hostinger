@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Download,
   Edit3,
@@ -97,6 +99,8 @@ export const KmRecapManagement: React.FC<KmRecapManagementProps> = ({
   const [driverFilter, setDriverFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | KmRowStatus>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [rowsPerPage, setRowsPerPage] = useState<25 | 50 | 100>(25);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Admin correction modal
@@ -260,6 +264,36 @@ export const KmRecapManagement: React.FC<KmRecapManagementProps> = ({
       return true;
     });
   }, [branchScopedRows, monthFilter, fleetFilter, driverFilter, statusFilter, searchQuery]);
+
+  // Reset back to Page 1 whenever any filter or page size changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [branchFilter, monthFilter, fleetFilter, driverFilter, statusFilter, searchQuery, rowsPerPage]);
+
+  const totalItems = filteredRows.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / rowsPerPage));
+  const safePage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = totalItems === 0 ? 0 : (safePage - 1) * rowsPerPage;
+  const endIndex = Math.min(startIndex + rowsPerPage, totalItems);
+
+  const paginatedRows = useMemo(
+    () => filteredRows.slice(startIndex, endIndex),
+    [filteredRows, startIndex, endIndex]
+  );
+
+  const visiblePageNumbers = useMemo(() => {
+    if (totalPages <= 7) {
+      return Array.from({ length: totalPages }, (_, idx) => idx + 1);
+    }
+    const pages: (number | 'ellipsis-left' | 'ellipsis-right')[] = [1];
+    const windowStart = Math.max(2, safePage - 1);
+    const windowEnd = Math.min(totalPages - 1, safePage + 1);
+    if (windowStart > 2) pages.push('ellipsis-left');
+    for (let p = windowStart; p <= windowEnd; p++) pages.push(p);
+    if (windowEnd < totalPages - 1) pages.push('ellipsis-right');
+    pages.push(totalPages);
+    return pages;
+  }, [totalPages, safePage]);
 
   const kpi = useMemo(() => {
     const totalTrips = filteredRows.length;
@@ -562,10 +596,17 @@ export const KmRecapManagement: React.FC<KmRecapManagementProps> = ({
 
       {/* Main Excel-Style Clean Flat Table */}
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
-          <span className="text-sm font-bold text-slate-900">
-            Catatan Odometer Perjalanan ({filteredRows.length} Kiriman)
-          </span>
+        <div className="px-4 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5">
+            <span className="text-sm font-bold text-slate-900">
+              Catatan Odometer Perjalanan ({totalItems.toLocaleString('id-ID')} Kiriman)
+            </span>
+            {totalItems > 0 && (
+              <span className="text-xs font-medium text-slate-500 tabular-nums">
+                · Hal {safePage} dari {totalPages}
+              </span>
+            )}
+          </div>
           <span className="text-xs text-slate-500">
             Jarak KM terhitung otomatis: KM Pulang − KM Berangkat
           </span>
@@ -587,33 +628,33 @@ export const KmRecapManagement: React.FC<KmRecapManagementProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 text-sm">
-              {filteredRows.length === 0 ? (
+              {paginatedRows.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-10 text-center text-slate-500">
+                  <td colSpan={9} className="py-12 text-center text-slate-500">
                     Tidak ada data kiriman yang sesuai filter.
                   </td>
                 </tr>
               ) : (
-                filteredRows.map(row => (
-                  <tr key={row.scheduleId} className="hover:bg-slate-50 transition-colors">
-                    <td className="py-3 px-4 whitespace-nowrap">
+                paginatedRows.map(row => (
+                  <tr key={row.scheduleId} className="hover:bg-slate-50/80 transition-colors">
+                    <td className="py-3.5 px-4 whitespace-nowrap">
                       <div className="font-semibold text-slate-900 tabular-nums">{formatDateShort(row.dateIso)}</div>
                       <div className="text-xs text-slate-500">
                         {formatWeekdayShort(row.dateIso)} · {row.tripPhaseLabel}
                       </div>
                     </td>
 
-                    <td className="py-3 px-4 whitespace-nowrap">
-                      <div className="font-bold text-slate-900">
+                    <td className="py-3.5 px-4 whitespace-nowrap">
+                      <div className="font-bold text-slate-900 text-[15px]">
                         {row.initialCode !== '-' ? `${row.initialCode} · ` : ''}
                         {row.plateNumber}
                       </div>
-                      <div className="text-xs text-slate-500">{row.vehicleType}</div>
+                      <div className="text-xs text-slate-500 mt-0.5">{row.vehicleType}</div>
                     </td>
 
-                    <td className="py-3 px-4 text-right whitespace-nowrap tabular-nums">
+                    <td className="py-3.5 px-4 text-right whitespace-nowrap tabular-nums">
                       {row.kmStart > 0 ? (
-                        <span className="font-semibold text-slate-900">
+                        <span className="font-bold text-slate-900 text-[15px]">
                           {row.kmStart.toLocaleString('id-ID')}
                         </span>
                       ) : (
@@ -621,13 +662,13 @@ export const KmRecapManagement: React.FC<KmRecapManagementProps> = ({
                       )}
                     </td>
 
-                    <td className="py-3 px-4 text-right whitespace-nowrap tabular-nums">
+                    <td className="py-3.5 px-4 text-right whitespace-nowrap tabular-nums">
                       {row.kmEnd > 0 ? (
-                        <span className="font-semibold text-slate-900">
+                        <span className="font-bold text-slate-900 text-[15px]">
                           {row.kmEnd.toLocaleString('id-ID')}
                         </span>
                       ) : row.kmStart > 0 ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-700 text-xs font-semibold">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-700 text-xs font-semibold">
                           Menunggu KM Pulang
                         </span>
                       ) : (
@@ -635,7 +676,7 @@ export const KmRecapManagement: React.FC<KmRecapManagementProps> = ({
                       )}
                     </td>
 
-                    <td className="py-3 px-4 text-right whitespace-nowrap tabular-nums">
+                    <td className="py-3.5 px-4 text-right whitespace-nowrap tabular-nums">
                       {row.kmStatus === 'valid' ? (
                         <span className="font-bold text-blue-600 text-base">
                           {row.distanceKm.toLocaleString('id-ID')} km
@@ -649,16 +690,16 @@ export const KmRecapManagement: React.FC<KmRecapManagementProps> = ({
                       )}
                     </td>
 
-                    <td className="py-3 px-4">
-                      <div className="font-semibold text-slate-900">{row.driverName}</div>
+                    <td className="py-3.5 px-4">
+                      <div className="font-bold text-slate-900">{row.driverName}</div>
                       {row.helperName !== '-' && (
-                        <div className="text-xs text-slate-500">Helper: {row.helperName}</div>
+                        <div className="text-xs text-slate-500 mt-0.5">Helper: {row.helperName}</div>
                       )}
                     </td>
 
-                    <td className="py-3 px-4 font-medium text-slate-800">{row.destination}</td>
+                    <td className="py-3.5 px-4 font-semibold text-slate-800">{row.destination}</td>
 
-                    <td className="py-3 px-4 text-center whitespace-nowrap">
+                    <td className="py-3.5 px-4 text-center whitespace-nowrap">
                       {row.kmStatus === 'valid' ? (
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold">
                           Valid / Selesai
@@ -681,7 +722,7 @@ export const KmRecapManagement: React.FC<KmRecapManagementProps> = ({
                       )}
                     </td>
 
-                    <td className="py-3 px-4 text-right whitespace-nowrap">
+                    <td className="py-3.5 px-4 text-right whitespace-nowrap">
                       <button
                         type="button"
                         onClick={() => handleOpenEditKm(row)}
@@ -696,6 +737,78 @@ export const KmRecapManagement: React.FC<KmRecapManagementProps> = ({
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Flat Pagination Bar */}
+        <div className="px-4 py-3 border-t border-slate-200 bg-slate-50/70 flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+            <span className="font-medium tabular-nums">
+              {totalItems === 0
+                ? 'Menampilkan 0 kiriman'
+                : `Menampilkan ${startIndex + 1}–${endIndex} dari ${totalItems.toLocaleString('id-ID')} kiriman`}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <label htmlFor="km-recap-page-size" className="text-slate-500">
+                Baris/hal:
+              </label>
+              <select
+                id="km-recap-page-size"
+                value={rowsPerPage}
+                onChange={e => setRowsPerPage(Number(e.target.value) as 25 | 50 | 100)}
+                className="h-8 px-2 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:border-blue-600 focus:outline-none cursor-pointer"
+              >
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              disabled={safePage <= 1}
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-45 disabled:hover:bg-white text-slate-700 text-xs font-semibold transition cursor-pointer"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              <span>Sebelumnya</span>
+            </button>
+
+            <div className="flex items-center gap-1">
+              {visiblePageNumbers.map(item =>
+                typeof item === 'number' ? (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => setCurrentPage(item)}
+                    aria-current={safePage === item ? 'page' : undefined}
+                    className={`min-w-[32px] h-8 px-2 rounded-lg text-xs font-semibold tabular-nums border transition cursor-pointer ${
+                      safePage === item
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    {item}
+                  </button>
+                ) : (
+                  <span key={item} className="px-1.5 text-xs text-slate-400 select-none">
+                    &hellip;
+                  </span>
+                )
+              )}
+            </div>
+
+            <button
+              type="button"
+              disabled={safePage >= totalPages}
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              className="inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-45 disabled:hover:bg-white text-slate-700 text-xs font-semibold transition cursor-pointer"
+            >
+              <span>Berikutnya</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </div>
 

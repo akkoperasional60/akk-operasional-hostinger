@@ -408,10 +408,11 @@ export function exportFuelReportToExcel(options: {
   fleetSummaries: WeeklyFleetFuelSummary[];
   driverSummaries?: WeeklyDriverFuelSummary[];
   detailedLogs?: FuelLog[];
+  efficiencyNotesByFleetId?: Record<string, string>;
   filterWeekKey?: string;
   filterWeekLabel?: string;
 }): void {
-  const { fleetSummaries, driverSummaries = [], detailedLogs, filterWeekKey } = options;
+  const { fleetSummaries, driverSummaries = [], detailedLogs, efficiencyNotesByFleetId = {}, filterWeekKey } = options;
 
   const workbook = XLSX.utils.book_new();
 
@@ -433,6 +434,7 @@ export function exportFuelReportToExcel(options: {
     'Variansi vs Target (%)': `${f.variancePercent > 0 ? '+' : ''}${f.variancePercent}%`,
     'Biaya/KM (Rp)': f.avgCostPerKm,
     'Status Efisiensi': f.status,
+    'Keterangan Efisiensi': efficiencyNotesByFleetId[f.id] || '-',
     'Pengemudi Bertugas': f.driverNames.join(', ')
   }));
 
@@ -454,9 +456,10 @@ export function exportFuelReportToExcel(options: {
     { wch: 16 },
     { wch: 14 },
     { wch: 22 },
+    { wch: 48 },
     { wch: 28 }
   ];
-  XLSX.utils.book_append_sheet(workbook, fleetWs, 'Rekapitulasi_Armada');
+  XLSX.utils.book_append_sheet(workbook, fleetWs, 'Rekapitulasi_BBM');
 
   // 2. Sheet 2 (Opsional): Ringkasan Per Driver
   if (driverSummaries.length > 0) {

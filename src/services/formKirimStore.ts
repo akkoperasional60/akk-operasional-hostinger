@@ -125,6 +125,15 @@ export interface FormKirimRecord {
   kmPulangRecordedAt?: string;
 }
 
+export type FormKirimSyncStatus = 'idle' | 'loading' | 'saving' | 'saved' | 'error';
+
+export interface FormKirimSyncState {
+  status: FormKirimSyncStatus;
+  error?: string;
+  lastSyncedAt?: string;
+  source?: string;
+}
+
 const LEGACY_DUMMY_FORM_KIRIM_IDS = new Set(['FK-202611-001', 'FK-202611-002']);
 
 const STORAGE_KEY = 'akk_form_kirim_records_v1';
@@ -904,6 +913,7 @@ class FormKirimStore {
   private lastHydrateAt = 0;
   private rateLimitedUntil = 0;
   private workspaceSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private syncState: FormKirimSyncState = { status: 'idle' };
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -920,6 +930,15 @@ class FormKirimStore {
     }
   }
 
+  private setSyncState(next: FormKirimSyncState): void {
+    this.syncState = next;
+    this.listeners.forEach(cb => cb());
+  }
+
+  public getSyncState(): FormKirimSyncState {
+    return this.syncState;
+  }
+
   public async hydrateFromServer(force = false, bypassCooldown = false): Promise<void> {
     if (this.hydratedFromServer && !force) return;
     if (this.isHydrating) return;
@@ -929,13 +948,30 @@ class FormKirimStore {
     this.isHydrating = true;
     this.lastHydrateAt = now;
     this.hydratedFromServer = true;
+    this.setSyncState({
+      ...this.syncState,
+      status: 'loading',
+      error: undefined
+    });
     try {
       const res = await fetch('/api/form-kirim');
       if (res.status === 429) {
         this.rateLimitedUntil = Date.now() + 60000;
+        this.setSyncState({
+          ...this.syncState,
+          status: 'error',
+          error: 'Terlalu banyak permintaan ke server. Coba lagi sebentar lagi.'
+        });
         return;
       }
-      if (!res.ok) return;
+      if (!res.ok) {
+        this.setSyncState({
+          ...this.syncState,
+          status: 'error',
+          error: `Gagal memuat data dari server (HTTP ${res.status}).`
+        });
+        return;
+      }
       const data = await res.json();
       if (data && data.success) {
         let shouldNotify = false;
@@ -964,12 +1000,28 @@ class FormKirimStore {
             this.saveAll(this.records);
           }
         }
+        this.setSyncState({
+          status: 'saved',
+          lastSyncedAt: new Date().toISOString(),
+          source: data.source || 'server',
+          error: undefined
+        });
         if (shouldNotify) {
           this.listeners.forEach(cb => cb());
         }
+      } else {
+        this.setSyncState({
+          ...this.syncState,
+          status: 'error',
+          error: data?.error || 'Respons server tidak valid.'
+        });
       }
-    } catch {
-      // ignore offline
+    } catch (err: any) {
+      this.setSyncState({
+        ...this.syncState,
+        status: 'error',
+        error: err?.message || 'Koneksi ke server database gagal.'
+      });
     } finally {
       this.isHydrating = false;
     }
@@ -997,13 +1049,21 @@ class FormKirimStore {
     if (typeof window === 'undefined') return;
 
     const pushToMySql = () => {
+      this.setSyncState({ ...this.syncState, status: 'saving', error: undefined });
       fetch('/api/form-kirim/workspace', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workspace: stamped })
       })
         .then(async res => {
-          if (!res.ok) return;
+          if (!res.ok) {
+            this.setSyncState({
+              ...this.syncState,
+              status: 'error',
+              error: `Gagal menyimpan perubahan workspace (HTTP ${res.status}).`
+            });
+            return;
+          }
           const data = await res.json().catch(() => null);
           if (data?.success && Array.isArray(data.records)) {
             const cleaned = data.records.filter(
@@ -1011,8 +1071,20 @@ class FormKirimStore {
             );
             this.records = cleaned;
           }
+          this.setSyncState({
+            status: 'saved',
+            lastSyncedAt: new Date().toISOString(),
+            source: data?.source || 'server',
+            error: undefined
+          });
         })
-        .catch(() => {});
+        .catch((err: any) => {
+          this.setSyncState({
+            ...this.syncState,
+            status: 'error',
+            error: err?.message || 'Gagal menyinkronkan workspace ke server.'
+          });
+        });
     };
 
     if (this.workspaceSaveTimer) {
@@ -1025,6 +1097,88 @@ class FormKirimStore {
     } else {
       this.workspaceSaveTimer = setTimeout(pushToMySql, 350);
     }
+  }
+
+  public async saveWorkspaceAsync(nextWorkspace: FormKirimWorkspaceState): Promise<boolean> {
+    const stamped: FormKirimWorkspaceState = {
+      selectedAreaKirim: String(nextWorkspace.selectedAreaKirim || '').trim().toUpperCase(),
+      tanggalKirim: String(nextWorkspace.tanggalKirim || '').trim(),
+      activeSavedRecordId: nextWorkspace.activeSavedRecordId || null,
+      viewMode: nextWorkspace.viewMode === 'saved_preview' ? 'saved_preview' : 'edit',
+      invoiceItems: Array.isArray(nextWorkspace.invoiceItems) ? nextWorkspace.invoiceItems : [],
+      updatedAt: new Date().toISOString()
+    };
+    this.workspace = stamped;
+    if (this.workspaceSaveTimer) {
+      clearTimeout(this.workspaceSaveTimer);
+      this.workspaceSaveTimer = null;
+    }
+    if (typeof window === 'undefined') return true;
+    this.setSyncState({ ...this.syncState, status: 'saving', error: undefined });
+    try {
+      const res = await fetch('/api/form-kirim/workspace', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace: stamped })
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        const msg = data?.error || `Gagal menyimpan workspace (HTTP ${res.status}).`;
+        this.setSyncState({ ...this.syncState, status: 'error', error: msg });
+        return false;
+      }
+      if (Array.isArray(data.records)) {
+        const cleaned = data.records.filter(
+          (r: FormKirimRecord) => r && !LEGACY_DUMMY_FORM_KIRIM_IDS.has(r.id)
+        );
+        this.records = cleaned;
+      }
+      this.setSyncState({
+        status: 'saved',
+        lastSyncedAt: new Date().toISOString(),
+        source: data.source || 'server',
+        error: undefined
+      });
+      return true;
+    } catch (err: any) {
+      this.setSyncState({
+        ...this.syncState,
+        status: 'error',
+        error: err?.message || 'Gagal menghubungi server database.'
+      });
+      return false;
+    }
+  }
+
+  public async importExcelToWorkspaceAsync(params: {
+    items: FormKirimInvoiceItem[];
+    mode: 'replace_all' | 'append';
+    selectedAreaKirim: string;
+    tanggalKirim: string;
+    activeSavedRecordId?: string | null;
+    viewMode?: 'edit' | 'saved_preview';
+  }): Promise<FormKirimWorkspaceState> {
+    this.setSyncState({ ...this.syncState, status: 'saving', error: undefined });
+    const res = await fetch('/api/form-kirim/import-excel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params)
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.success || !data?.workspace) {
+      const errMsg = data?.error || `Gagal mengimpor faktur ke server (HTTP ${res.status}).`;
+      this.setSyncState({ ...this.syncState, status: 'error', error: errMsg });
+      throw new Error(errMsg);
+    }
+    this.workspace = data.workspace;
+    this.setSyncState({
+      status: 'saved',
+      lastSyncedAt: new Date().toISOString(),
+      source: data.source || 'server',
+      error: undefined
+    });
+    this.listeners.forEach(cb => cb());
+    return data.workspace;
   }
 
   private persistLocal(records: FormKirimRecord[]): void {
@@ -1046,6 +1200,7 @@ class FormKirimStore {
       };
     }
     if (typeof window !== 'undefined') {
+      this.setSyncState({ ...this.syncState, status: 'saving', error: undefined });
       fetch('/api/form-kirim', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1055,7 +1210,14 @@ class FormKirimStore {
         })
       })
         .then(async res => {
-          if (!res.ok) return;
+          if (!res.ok) {
+            this.setSyncState({
+              ...this.syncState,
+              status: 'error',
+              error: `Gagal menyimpan Form Kirim ke server (HTTP ${res.status}).`
+            });
+            return;
+          }
           const data = await res.json().catch(() => null);
           if (data?.success && Array.isArray(data.records)) {
             const cleaned = data.records.filter(
@@ -1063,8 +1225,20 @@ class FormKirimStore {
             );
             this.persistLocal(cleaned);
           }
+          this.setSyncState({
+            status: 'saved',
+            lastSyncedAt: new Date().toISOString(),
+            source: data?.source || 'server',
+            error: undefined
+          });
         })
-        .catch(() => {});
+        .catch((err: any) => {
+          this.setSyncState({
+            ...this.syncState,
+            status: 'error',
+            error: err?.message || 'Koneksi server gagal saat menyimpan.'
+          });
+        });
     }
   }
 
@@ -1184,6 +1358,74 @@ class FormKirimStore {
     return record;
   }
 
+  public async addFormKirimAsync(
+    input: Omit<
+      FormKirimRecord,
+      'id' | 'noFormKirim' | 'createdAt' | 'financeStatus' | 'driverStatus'
+    > & {
+      financeStatus?: FormKirimFinanceStatus;
+      driverStatus?: FormKirimDriverStatus;
+    }
+  ): Promise<FormKirimRecord> {
+    const existing = this.getAll();
+    const nextNum = existing.length + 1;
+    const defaultBranch = branchStore.getActiveBranches()[0]?.name || 'Banyuwangi';
+
+    const record: FormKirimRecord = {
+      ...input,
+      branchName: input.branchName || defaultBranch,
+      id: `FK-${Date.now()}`,
+      noFormKirim: `FK/AKK/2026/11/${String(nextNum).padStart(3, '0')}`,
+      createdAt: new Date().toISOString(),
+      financeStatus: input.financeStatus || 'approved_finance',
+      driverStatus: input.driverStatus || 'ready_for_driver'
+    };
+
+    const nextWorkspace: FormKirimWorkspaceState = {
+      selectedAreaKirim: String(record.areaKirim || '').trim().toUpperCase(),
+      tanggalKirim: String(record.tanggalKirim || '').trim(),
+      activeSavedRecordId: record.id,
+      viewMode: 'saved_preview',
+      invoiceItems: Array.isArray(record.invoiceItems) ? record.invoiceItems : [],
+      updatedAt: new Date().toISOString()
+    };
+
+    const nextList = [record, ...existing];
+    this.workspace = nextWorkspace;
+    this.persistLocal(nextList);
+
+    if (typeof window !== 'undefined') {
+      this.setSyncState({ ...this.syncState, status: 'saving', error: undefined });
+      const res = await fetch('/api/form-kirim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          records: this.records,
+          workspace: nextWorkspace
+        })
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        const errMsg = data?.error || `Gagal menyimpan Form Kirim ke server (HTTP ${res.status}).`;
+        this.setSyncState({ ...this.syncState, status: 'error', error: errMsg });
+        throw new Error(errMsg);
+      }
+      if (Array.isArray(data.records)) {
+        const cleaned = data.records.filter(
+          (r: FormKirimRecord) => r && !LEGACY_DUMMY_FORM_KIRIM_IDS.has(r.id)
+        );
+        this.persistLocal(cleaned);
+      }
+      this.setSyncState({
+        status: 'saved',
+        lastSyncedAt: new Date().toISOString(),
+        source: data.source || 'server',
+        error: undefined
+      });
+    }
+    return record;
+  }
+
   public updateFormKirim(id: string, patch: Partial<FormKirimRecord>): void {
     const existing = this.getAll();
     let updatedTarget: FormKirimRecord | null = null;
@@ -1215,6 +1457,76 @@ class FormKirimStore {
       : undefined;
 
     this.saveAll(updated, nextWorkspace);
+  }
+
+  public async updateFormKirimAsync(
+    id: string,
+    patch: Partial<FormKirimRecord>
+  ): Promise<FormKirimRecord | null> {
+    const existing = this.getAll();
+    let updatedTarget: FormKirimRecord | null = null;
+    const updated = existing.map(item => {
+      if (item.id !== id) return item;
+      const mergedItems = patch.invoiceItems
+        ? preserveProgressWhenAdminUpdates(patch.invoiceItems, item.invoiceItems)
+        : item.invoiceItems;
+      const nextRec = {
+        ...item,
+        ...patch,
+        invoiceItems: mergedItems
+      };
+      updatedTarget = nextRec;
+      return nextRec;
+    });
+
+    if (!updatedTarget) return null;
+
+    const nextWorkspace: FormKirimWorkspaceState = {
+      selectedAreaKirim: String((updatedTarget as FormKirimRecord).areaKirim || '').trim().toUpperCase(),
+      tanggalKirim: String((updatedTarget as FormKirimRecord).tanggalKirim || '').trim(),
+      activeSavedRecordId: id,
+      viewMode: 'saved_preview',
+      invoiceItems: Array.isArray((updatedTarget as FormKirimRecord).invoiceItems)
+        ? (updatedTarget as FormKirimRecord).invoiceItems!
+        : [],
+      updatedAt: new Date().toISOString()
+    };
+
+    this.workspace = nextWorkspace;
+    this.persistLocal(updated);
+
+    if (typeof window !== 'undefined') {
+      this.setSyncState({ ...this.syncState, status: 'saving', error: undefined });
+      const res = await fetch(`/api/form-kirim/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          record: updatedTarget,
+          workspace: nextWorkspace
+        })
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        const errMsg = data?.error || `Gagal memperbarui Form Kirim di server (HTTP ${res.status}).`;
+        this.setSyncState({ ...this.syncState, status: 'error', error: errMsg });
+        throw new Error(errMsg);
+      }
+      if (Array.isArray(data.records)) {
+        const cleaned = data.records.filter(
+          (r: FormKirimRecord) => r && !LEGACY_DUMMY_FORM_KIRIM_IDS.has(r.id)
+        );
+        this.persistLocal(cleaned);
+      }
+      this.setSyncState({
+        status: 'saved',
+        lastSyncedAt: new Date().toISOString(),
+        source: data.source || 'server',
+        error: undefined
+      });
+      return data.record || updatedTarget;
+    }
+
+    return updatedTarget;
   }
 
   public validateByFinance(
