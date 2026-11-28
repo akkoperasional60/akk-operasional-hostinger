@@ -63,25 +63,14 @@ export interface AdminStatusNotification {
   source: 'supabase_realtime' | 'local_sync' | 'simulation';
 }
 
-const ADMIN_STATUS_STORAGE_KEY = 'akk_admin_status_notifications_v1';
-
-const INITIAL_ADMIN_STATUS_NOTIFICATIONS: AdminStatusNotification[] = [];
+let inMemoryAdminStatusNotifications: AdminStatusNotification[] = [];
 
 export function getAdminStatusNotifications(): AdminStatusNotification[] {
-  try {
-    const raw = localStorage.getItem(ADMIN_STATUS_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch {}
-  return [...INITIAL_ADMIN_STATUS_NOTIFICATIONS];
+  return [...inMemoryAdminStatusNotifications];
 }
 
 export function saveAdminStatusNotifications(notifs: AdminStatusNotification[]): void {
-  try {
-    localStorage.setItem(ADMIN_STATUS_STORAGE_KEY, JSON.stringify(notifs.slice(0, 50)));
-  } catch {}
+  inMemoryAdminStatusNotifications = Array.isArray(notifs) ? notifs.slice(0, 50) : [];
 }
 
 const adminStatusListeners: Array<(notif: AdminStatusNotification) => void> = [];

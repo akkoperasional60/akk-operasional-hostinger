@@ -470,22 +470,6 @@ export const HelpDeskChat: React.FC<HelpDeskChatProps> = ({ activeTab, user }) =
     }
   }, [isOpen, hasGreeted]);
 
-  useEffect(() => {
-    const saved = sessionStorage.getItem('akk_chat_recent');
-    if (saved) setRecentQueries(JSON.parse(saved));
-  }, []);
-
-  useEffect(() => {
-    const savedMessages = sessionStorage.getItem('akk_chat_history');
-    if (savedMessages) {
-      setMessages(JSON.parse(savedMessages));
-    }
-  }, []);
-
-  useEffect(() => {
-    sessionStorage.setItem('akk_chat_history', JSON.stringify(messages));
-  }, [messages]);
-
   const handleSaveFAQ = (newList: FAQItem[]) => {
     setFaqList(newList);
     void fetch('/api/app-state', {
@@ -508,7 +492,6 @@ export const HelpDeskChat: React.FC<HelpDeskChatProps> = ({ activeTab, user }) =
 
   const clearHistory = () => {
     setMessages([{ role: 'assistant', content: greeting }]);
-    sessionStorage.removeItem('akk_chat_history');
   };
 
   const scrollToBottom = () => {
@@ -520,7 +503,6 @@ export const HelpDeskChat: React.FC<HelpDeskChatProps> = ({ activeTab, user }) =
   const saveQuery = (query: string) => {
     const newQueries = [query, ...recentQueries.filter(q => q !== query)].slice(0, 5);
     setRecentQueries(newQueries);
-    sessionStorage.setItem('akk_chat_recent', JSON.stringify(newQueries));
   };
 
   const handleSend = async (query = input) => {

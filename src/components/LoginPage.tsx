@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AkkLogo } from './AkkLogo';
 import {
   LogIn,
@@ -16,19 +16,15 @@ import {
   ArrowLeft,
   Send,
   RefreshCw,
-  ShieldCheck,
-  X
+  ShieldCheck
 } from 'lucide-react';
 import { UserRole, UserProfile } from '../types';
 import { logisticsStore } from '../services/store';
 
 const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
-const USERNAME_REGEX = /^[a-zA-Z0-9._\-\s]{3,40}$/;
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_DURATION_SECONDS = 60;
-const STORAGE_FAILED_KEY = 'akk_auth_v4_failed_attempts';
-const STORAGE_LOCKOUT_KEY = 'akk_auth_v4_lockout_until';
 
 interface LoginPageProps {
   onLoginSuccess: (user: UserProfile) => void;
@@ -68,31 +64,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [isSendingRecovery, setIsSendingRecovery] = useState(false);
   const [isVerifyingRecovery, setIsVerifyingRecovery] = useState(false);
 
-  // Rate Limiting
-  const [failedAttempts, setFailedAttempts] = useState<number>(() => {
-    try {
-      localStorage.removeItem('akk_auth_failed_attempts');
-      localStorage.removeItem('akk_auth_lockout_until');
-      localStorage.removeItem('akk_auth_v2_failed_attempts');
-      localStorage.removeItem('akk_auth_v2_lockout_until');
-      localStorage.removeItem('akk_auth_v3_failed_attempts');
-      localStorage.removeItem('akk_auth_v3_lockout_until');
-      const saved = localStorage.getItem(STORAGE_FAILED_KEY);
-      return saved ? parseInt(saved, 10) || 0 : 0;
-    } catch {
-      return 0;
-    }
-  });
-
-  const [lockoutUntil, setLockoutUntil] = useState<number>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_LOCKOUT_KEY);
-      return saved ? parseInt(saved, 10) || 0 : 0;
-    } catch {
-      return 0;
-    }
-  });
-
+  // Rate Limiting (in-memory only, zero localStorage)
+  const [failedAttempts, setFailedAttempts] = useState<number>(0);
+  const [lockoutUntil, setLockoutUntil] = useState<number>(0);
   const [countdown, setCountdown] = useState<number>(0);
 
   useEffect(() => {
@@ -106,10 +80,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         if (lockoutUntil > 0) {
           setLockoutUntil(0);
           setFailedAttempts(0);
-          try {
-            localStorage.removeItem(STORAGE_LOCKOUT_KEY);
-            localStorage.removeItem(STORAGE_FAILED_KEY);
-          } catch {}
         }
       }
     };
@@ -162,12 +132,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       }
       const nextFailed = failedAttempts + 1;
       setFailedAttempts(nextFailed);
-      try { localStorage.setItem(STORAGE_FAILED_KEY, String(nextFailed)); } catch {}
       if (nextFailed >= MAX_FAILED_ATTEMPTS) {
         const lockoutTime = Date.now() + (LOCKOUT_DURATION_SECONDS * 1000);
         setLockoutUntil(lockoutTime);
         setCountdown(LOCKOUT_DURATION_SECONDS);
-        try { localStorage.setItem(STORAGE_LOCKOUT_KEY, String(lockoutTime)); } catch {}
         setErrorMsg(`Terlalu banyak percobaan gagal (${MAX_FAILED_ATTEMPTS}x). Demi keamanan, login dikunci sementara selama ${LOCKOUT_DURATION_SECONDS} detik.`);
       } else {
         setErrorMsg(`${authError?.message || 'Email / Username atau Password salah.'} (Sisa kesempatan: ${MAX_FAILED_ATTEMPTS - nextFailed}x).`);
@@ -178,10 +146,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     setFailedAttempts(0);
     setLockoutUntil(0);
     setCountdown(0);
-    try {
-      localStorage.removeItem(STORAGE_FAILED_KEY);
-      localStorage.removeItem(STORAGE_LOCKOUT_KEY);
-    } catch {}
     setSuccessMsg(`Berhasil masuk sebagai ${user.fullName}`);
     setTimeout(() => {
       setIsLoading(false);
@@ -222,7 +186,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     setIsLoading(false);
 
     if (!newUser) {
-      setErrorMsg('Pendaftaran gagal. Email mungkin sudah terdaftar atau database Hostinger belum dapat diakses.');
+      setErrorMsg('Pendaftaran gagal. Email mungkin sudah terdaftar atau database belum merespons.');
       return;
     }
 
@@ -345,26 +309,23 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     }
   };
 
-
   return (
-    <div className="min-h-screen bg-[#f3f6fb] dark:bg-[#111d2c] flex items-center justify-center p-4 selection:bg-[#1764db] selection:text-white font-sans antialiased">
-      {/* Centered Portal Card */}
-      <div className="w-full max-w-[460px] rounded-[24px] overflow-hidden shadow-xl shadow-[#18375d]/8 border border-[#e4eaf2] dark:border-[#2b3b50] bg-white dark:bg-[#192a40] transition-all">
-        {/* Portal Driver Gradient Hero Header */}
-        <div className="relative overflow-hidden bg-gradient-to-br from-[#1454c2] via-[#1768db] to-[#3597ef] px-6 pt-7 pb-6 text-center text-white">
-          <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full border-[22px] border-white/10" />
-          {/* Logo & Brand Monogram */}
-          <div className="inline-flex items-center justify-center rounded-[18px] bg-white px-4 py-2.5 shadow-sm mb-3 relative z-10">
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 selection:bg-blue-600 selection:text-white font-sans antialiased">
+      {/* Centered Flat Portal Card */}
+      <div className="w-full max-w-[440px] rounded-xl border border-slate-200 bg-white overflow-hidden">
+        {/* Flat Clean Header */}
+        <div className="px-6 pt-6 pb-5 border-b border-slate-200 bg-white text-center">
+          <div className="inline-flex items-center justify-center mb-3">
             <AkkLogo size="md" showText={true} showSubtitle={false} />
           </div>
 
-          <p className="text-[#e2edff] text-xs leading-relaxed max-w-sm mx-auto font-medium relative z-10">
-            Portal Akses Logistik Terintegrasi &amp; Pengiriman Luar Pulau PT Anugrah Kemasan Kreatif.
+          <p className="text-slate-500 text-xs leading-relaxed max-w-sm mx-auto">
+            Portal Operasional &amp; Logistik Terintegrasi PT Anugrah Kemasan Kreatif
           </p>
 
-          {/* Segmented Tab Switcher */}
+          {/* Flat Segmented Tab Switcher */}
           {tab === 'forgot' ? (
-            <div className="flex items-center justify-between mt-5 max-w-xs mx-auto px-1 relative z-10">
+            <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100">
               <button
                 type="button"
                 onClick={() => {
@@ -373,24 +334,24 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   setErrorMsg('');
                   setSuccessMsg('');
                 }}
-                className="inline-flex items-center gap-1.5 text-xs text-white/90 hover:text-white font-semibold transition-colors cursor-pointer group"
+                className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 font-semibold transition-colors cursor-pointer"
               >
-                <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
+                <ArrowLeft className="w-3.5 h-3.5" />
                 <span>Kembali ke Masuk</span>
               </button>
-              <span className="text-xs font-bold px-3 py-1 rounded-full bg-white/15 text-white">
-                Lupa Password
+              <span className="text-xs font-semibold text-slate-700">
+                Pemulihan Password
               </span>
             </div>
           ) : (
-            <div className="flex items-center justify-center gap-1.5 mt-5 bg-white/15 backdrop-blur-xs p-1.5 rounded-full max-w-[330px] mx-auto relative z-10">
+            <div className="grid grid-cols-2 gap-1 mt-4 bg-slate-100 p-1 rounded-lg border border-slate-200">
               <button
                 type="button"
                 onClick={() => { setTab('login'); setErrorMsg(''); setSuccessMsg(''); }}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
                   tab === 'login'
-                    ? 'bg-white text-[#1764db] shadow-sm'
-                    : 'text-white/90 hover:text-white hover:bg-white/10'
+                    ? 'bg-white text-blue-600 border border-slate-200'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 <LogIn className="w-3.5 h-3.5" />
@@ -400,10 +361,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               <button
                 type="button"
                 onClick={() => { setTab('register'); setErrorMsg(''); setSuccessMsg(''); }}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-full text-xs font-bold transition-all cursor-pointer ${
+                className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
                   tab === 'register'
-                    ? 'bg-white text-[#1764db] shadow-sm'
-                    : 'text-white/90 hover:text-white hover:bg-white/10'
+                    ? 'bg-white text-blue-600 border border-slate-200'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 <UserPlus className="w-3.5 h-3.5" />
@@ -415,7 +376,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
         {/* Alert Banners */}
         {isLocked && (
-          <div className="mx-6 mt-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start gap-2.5">
+          <div className="mx-6 mt-4 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start gap-2.5">
             <Lock className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
             <div>
               <strong>Akses Dibekukan:</strong> Terlalu banyak percobaan gagal. Silakan tunggu{' '}
@@ -425,29 +386,28 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         )}
 
         {!isLocked && errorMsg && (
-          <div className="mx-6 mt-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+          <div className="mx-6 mt-4 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
             <span>{errorMsg}</span>
           </div>
         )}
 
         {successMsg && (
-          <div className="mx-6 mt-4 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
+          <div className="mx-6 mt-4 p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
             <span className="font-semibold">{successMsg}</span>
           </div>
         )}
 
         {/* Card Body */}
-        <div className="p-6 sm:p-7 bg-white dark:bg-[#192a40]">
+        <div className="p-6 bg-white">
           {tab === 'login' ? (
             /* ======================================================== */
             /* TAB 1: MASUK (LOGIN)                                      */
             /* ======================================================== */
             <form onSubmit={handleLogin} className="space-y-4">
-              {/* Field Email / Username */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                   Email / Username
                 </label>
                 <div className="relative">
@@ -456,21 +416,20 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     type="text"
                     required
                     disabled={isLocked || isLoading}
-                    placeholder="Masukkan email (nama@domain.com) atau username (Budiono, admin, dll)"
+                    placeholder="Masukkan email atau username akun"
                     value={loginEmail}
                     onChange={(e) => {
                       setLoginEmail(e.target.value);
                       if (errorMsg) setErrorMsg('');
                     }}
-                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition disabled:opacity-50"
+                    className="w-full pl-10 pr-3.5 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-800 placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-600 transition disabled:opacity-50"
                   />
                 </div>
               </div>
 
-              {/* Field Password */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Password</label>
+                  <label className="text-xs font-semibold text-slate-700">Password</label>
                   <button
                     type="button"
                     onClick={() => {
@@ -480,7 +439,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                       setErrorMsg('');
                       setSuccessMsg('');
                     }}
-                    className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 font-semibold transition cursor-pointer"
+                    className="text-xs text-blue-600 hover:text-blue-700 font-semibold transition cursor-pointer"
                   >
                     Lupa Password?
                   </button>
@@ -497,12 +456,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                       setLoginPassword(e.target.value);
                       if (errorMsg) setErrorMsg('');
                     }}
-                    className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition disabled:opacity-50"
+                    className="w-full pl-10 pr-10 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-800 placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-600 transition disabled:opacity-50"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer p-0.5"
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer p-0.5"
                     title={showPassword ? 'Sembunyikan password' : 'Lihat password'}
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -510,16 +469,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                 </div>
               </div>
 
-              {/* Tombol Submit Masuk ke Portal AKK */}
               <button
                 type="submit"
                 disabled={isLocked || isLoading}
-                className="w-full mt-2 py-3 rounded-full bg-gradient-to-r from-[#1764db] to-[#247beb] hover:brightness-95 text-white font-bold text-xs shadow-sm shadow-[#1764db]/20 flex items-center justify-center gap-2 transition active:scale-[0.99] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full mt-2 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isLoading ? (
                   <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Memproses Masuk...</span>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Masuk...</span>
                   </>
                 ) : (
                   <>
@@ -534,9 +492,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             /* TAB 2: DAFTAR AKUN                                        */
             /* ======================================================== */
             <form onSubmit={handleRegister} className="space-y-3.5">
-              {/* Nama Lengkap */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                   Nama Lengkap
                 </label>
                 <div className="relative">
@@ -547,51 +504,49 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     placeholder="Contoh: Bayu Dimas Permana"
                     value={registerData.fullName}
                     onChange={(e) => setRegisterData({ ...registerData, fullName: e.target.value })}
-                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
+                    className="w-full pl-10 pr-3.5 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-800 placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-600 transition"
                   />
                 </div>
               </div>
 
-              {/* Email & No. WhatsApp (2 Kolom) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Email</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Email</label>
                   <input
                     type="email"
                     required
                     placeholder="nama@gmail.com"
                     value={registerData.email}
                     onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
+                    className="w-full px-3.5 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-800 placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-600 transition"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">No. WhatsApp</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">No. WhatsApp</label>
                   <input
                     type="text"
                     placeholder="+62 812-..."
                     value={registerData.phone}
                     onChange={(e) => setRegisterData({ ...registerData, phone: e.target.value })}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
+                    className="w-full px-3.5 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-800 placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-600 transition"
                   />
                 </div>
               </div>
 
-              {/* Password & Konfirmasi Password (2 Kolom) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Password</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Password</label>
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
-                    placeholder="Minimal 6 karakter"
+                    placeholder="Minimal 8 karakter"
                     value={registerData.password}
                     onChange={(e) => setRegisterData({ ...registerData, password: e.target.value })}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
+                    className="w-full px-3.5 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-800 placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-600 transition"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Konfirmasi Password</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Konfirmasi Password</label>
                   <div className="relative">
                     <input
                       type={showPassword ? 'text' : 'password'}
@@ -599,7 +554,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                       placeholder="Ulangi password"
                       value={registerData.confirmPassword}
                       onChange={(e) => setRegisterData({ ...registerData, confirmPassword: e.target.value })}
-                      className="w-full pl-3.5 pr-9 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition"
+                      className="w-full pl-3.5 pr-9 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-800 placeholder-slate-400 text-xs focus:outline-none focus:bg-white focus:border-blue-600 transition"
                     />
                     <button
                       type="button"
@@ -612,20 +567,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                 </div>
               </div>
 
-              {/* Prosedur Verifikasi Akun AKK Box */}
-              <div className="p-3 rounded-xl bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200/80 dark:border-blue-800/60 text-slate-700 dark:text-slate-300 text-[11px] leading-relaxed flex items-start gap-2.5">
-                <Clock className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+              <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-slate-600 text-[11px] leading-relaxed flex items-start gap-2.5">
+                <Clock className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
                 <div>
-                  <strong className="block text-blue-900 dark:text-blue-300 font-bold">Prosedur Verifikasi Akun AKK:</strong>
+                  <strong className="block text-slate-800 font-semibold">Prosedur Verifikasi Akun AKK:</strong>
                   Pendaftaran akun baru wajib disetujui (di-approve) oleh Super Admin PT Anugrah Kemasan Kreatif sebelum mendapatkan otorisasi akses menu.
                 </div>
               </div>
 
-              {/* Tombol Kirim Pendaftaran Akun */}
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full py-3 rounded-full bg-gradient-to-r from-[#1764db] to-[#247beb] hover:brightness-95 text-white font-bold text-xs shadow-sm shadow-[#1764db]/20 flex items-center justify-center gap-2 transition active:scale-[0.99] cursor-pointer disabled:opacity-50"
+                className="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
               >
                 {isLoading ? (
                   <span>Mengirimkan Pendaftaran...</span>
@@ -641,10 +594,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             <div className="space-y-4">
               {recoveryStep === 'request' ? (
                 <form onSubmit={handleRequestRecovery} className="space-y-4">
-                  <div className="p-3.5 rounded-xl bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 text-slate-700 dark:text-slate-200 text-xs leading-relaxed flex items-start gap-2.5">
-                    <Phone className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                  <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-700 text-xs leading-relaxed flex items-start gap-2.5">
+                    <Phone className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
                     <div>
-                      <strong className="block text-emerald-800 dark:text-emerald-300 font-bold mb-0.5">
+                      <strong className="block text-slate-900 font-semibold mb-0.5">
                         Verifikasi Langsung via WhatsApp Terdaftar
                       </strong>
                       Masukkan <strong>Email</strong>, <strong>Username</strong>, atau <strong>No. WhatsApp</strong> akun terdaftar. Kode OTP 6-digit akan dikirim langsung ke WhatsApp user Anda.
@@ -652,7 +605,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                       Email / Username / No. WhatsApp Akun
                     </label>
                     <input
@@ -666,14 +619,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                         if (errorMsg) setErrorMsg('');
                         if (successMsg) setSuccessMsg('');
                       }}
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white text-xs focus:outline-none focus:bg-white focus:border-blue-500 disabled:opacity-50"
+                      className="w-full px-3.5 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-800 text-xs focus:outline-none focus:bg-white focus:border-blue-600 disabled:opacity-50"
                     />
                   </div>
 
                   <button
                     type="submit"
                     disabled={isSendingRecovery}
-                    className="w-full py-3 rounded-full bg-gradient-to-r from-[#1764db] to-[#247beb] hover:brightness-95 text-white font-bold text-xs shadow-sm shadow-[#1764db]/20 flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {isSendingRecovery ? (
                       <>
@@ -690,24 +643,24 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                 </form>
               ) : (
                 <form onSubmit={handleVerifyRecovery} className="space-y-3.5">
-                  <div className="p-3.5 rounded-xl bg-emerald-50/90 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 space-y-1.5 text-xs">
+                  <div className="p-3.5 rounded-lg bg-emerald-50 border border-emerald-200 space-y-1.5 text-xs">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="inline-flex items-center gap-1.5 font-bold text-emerald-800 dark:text-emerald-300">
-                        <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                      <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-800">
+                        <ShieldCheck className="w-4 h-4 text-emerald-600" />
                         <span>Terkirim ke WhatsApp User</span>
                       </span>
-                      <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200">
+                      <span className="font-mono text-[11px] font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
                         {recoveryExpiresIn > 0 ? `Berlaku ${formatMmSs(recoveryExpiresIn)}` : 'Kedaluwarsa'}
                       </span>
                     </div>
-                    <div className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center justify-between">
+                    <div className="text-[11px] text-slate-600 flex items-center justify-between">
                       <span>Akun: <strong>{recoveryAccountName || recoveryInput}</strong></span>
-                      <span className="font-mono font-bold text-slate-800 dark:text-white">{recoveryMaskedPhone || '-'}</span>
+                      <span className="font-mono font-semibold text-slate-800">{recoveryMaskedPhone || '-'}</span>
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                       Kode Verifikasi WhatsApp (6 Digit)
                     </label>
                     <input
@@ -722,13 +675,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                         setRecoveryCode(e.target.value.replace(/\D/g, '').slice(0, 6));
                         if (errorMsg) setErrorMsg('');
                       }}
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white text-sm font-mono font-bold tracking-[0.35em] text-center focus:outline-none focus:bg-white focus:border-blue-500"
+                      className="w-full px-3.5 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-900 text-sm font-mono font-bold tracking-[0.35em] text-center focus:outline-none focus:bg-white focus:border-blue-600"
                     />
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                      <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                         Password Baru
                       </label>
                       <div className="relative">
@@ -740,7 +693,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                           placeholder="Minimal 8 karakter"
                           value={newPassword}
                           onChange={(e) => setNewPassword(e.target.value)}
-                          className="w-full pl-3.5 pr-9 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white text-xs focus:outline-none focus:bg-white focus:border-blue-500"
+                          className="w-full pl-3.5 pr-9 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-800 text-xs focus:outline-none focus:bg-white focus:border-blue-600"
                         />
                         <button
                           type="button"
@@ -752,7 +705,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                       </div>
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                      <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                         Ulangi Password
                       </label>
                       <input
@@ -763,7 +716,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                         placeholder="Konfirmasi password"
                         value={confirmNewPassword}
                         onChange={(e) => setConfirmNewPassword(e.target.value)}
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white text-xs focus:outline-none focus:bg-white focus:border-blue-500"
+                        className="w-full px-3.5 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-slate-800 text-xs focus:outline-none focus:bg-white focus:border-blue-600"
                       />
                     </div>
                   </div>
@@ -773,7 +726,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                       type="button"
                       disabled={isSendingRecovery || recoveryResendCooldown > 0}
                       onClick={() => requestWhatsAppOtp(recoveryInput)}
-                      className="px-4 py-3 rounded-full bg-[#e9f2ff] dark:bg-[#253e64] text-[#1764db] dark:text-[#c5dbff] hover:brightness-95 font-bold text-xs transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                      className="px-4 py-2.5 rounded-lg bg-slate-100 border border-slate-200 text-slate-700 hover:bg-slate-200 font-semibold text-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                     >
                       {recoveryResendCooldown > 0
                         ? `Kirim Ulang (${recoveryResendCooldown}s)`
@@ -782,7 +735,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     <button
                       type="submit"
                       disabled={isVerifyingRecovery}
-                      className="flex-1 py-3 rounded-full bg-gradient-to-r from-[#1764db] to-[#247beb] hover:brightness-95 text-white font-bold text-xs shadow-sm shadow-[#1764db]/20 flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-60"
+                      className="flex-1 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60"
                     >
                       {isVerifyingRecovery ? (
                         <>

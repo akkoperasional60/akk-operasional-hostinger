@@ -6,7 +6,7 @@ import zlib from "zlib";
 import dotenv from "dotenv";
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import * as XLSX from "xlsx";
-import { query as mysqlQuery, testConnection as testMysqlConnection, isDatabaseConfigured } from "./server/db";
+import { query as mysqlQuery, testConnection as testMysqlConnection, isDatabaseConfigured, resetCircuitBreaker as resetMysqlCircuitBreaker, isCircuitOpen as isMysqlCircuitOpen } from "./server/db";
 import { registerCrewClaimRoutes } from './server/crewClaims';
 import { registerCrewQaRoutes, setCrewQaChangedListener } from './server/crewQa';
 
@@ -333,15 +333,46 @@ async function startServer() {
   });
 
   // Hostinger MySQL Connection & Health Check API
-  app.get("/api/db-status", async (_req, res) => {
+  app.get("/api/db-status", async (req, res) => {
+    if (String(req.query?.retry || '') === '1') {
+      resetMysqlCircuitBreaker();
+    }
     const configured = isDatabaseConfigured();
-    const testResult = configured ? await testMysqlConnection() : { success: false, configured: false, message: 'Hostinger MySQL belum dikonfigurasi: DB_NAME, DB_USER, DB_PASSWORD belum diisi di environment variables.' };
+    const circuitBreakerOpen = isMysqlCircuitOpen();
+    const testResult = configured
+      ? await testMysqlConnection()
+      : { success: false, configured: false, message: 'Hostinger MySQL belum dikonfigurasi: DB_NAME, DB_USER, DB_PASSWORD belum diisi di environment variables.' };
     res.status(200).json({
       dbEngine: "Hostinger MySQL/MariaDB (mysql2)",
       configured,
+      circuitBreakerOpen: !testResult.success && (circuitBreakerOpen || isMysqlCircuitOpen()),
       hasPasswordConfigured: Boolean(process.env.DB_PASSWORD),
       success: testResult.success,
       message: testResult.success ? 'Database Hostinger terhubung' : (testResult.message || 'Database Hostinger belum dapat diakses')
+    });
+  });
+
+  app.post("/api/db-reconnect", async (_req, res) => {
+    resetMysqlCircuitBreaker();
+    const configured = isDatabaseConfigured();
+    if (!configured) {
+      return res.status(200).json({
+        success: false,
+        configured: false,
+        circuitBreakerOpen: false,
+        message: 'Konfigurasi DB_NAME, DB_USER, DB_PASSWORD belum tersedia di environment variables.'
+      });
+    }
+    const testResult = await testMysqlConnection();
+    if (testResult.success) {
+      await ensureDatabaseSchema().catch(() => {});
+      await ensureBootstrapAdmin().catch(() => {});
+    }
+    return res.status(200).json({
+      success: testResult.success,
+      configured: testResult.configured,
+      circuitBreakerOpen: !testResult.success && isMysqlCircuitOpen(),
+      message: testResult.success ? 'Database Hostinger berhasil terhubung kembali.' : testResult.message
     });
   });
 
@@ -3281,6 +3312,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
           ['schedules_payload', JSON.stringify(payload)]
         ).catch(err => console.warn("[Schedule MySQL Async Write Warning]", err?.message || err));
         triggerBackgroundScheduleTableSync(safeIncomingSchedules);
+        void propagateScheduleFleetToReportsAndShifts(finalSchedules).catch(() => {});
       });
 
       return res.json({
@@ -4716,17 +4748,37 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   setCrewQaChangedListener((tripId) => broadcastCrewSyncEvent('crew_qa', tripId));
   registerCrewQaRoutes(app, requireAuth);
   // Only these endpoints can claim a vacant live slot using a locked transaction.
+  const normalizeBranchKeyForFleet = (raw?: string): string => {
+    const v = String(raw || '').trim().toLowerCase();
+    if (!v) return '';
+    if (v === 'cab-sidoarjo' || /sidoarjo|surabaya|sda/.test(v)) return 'cab-sidoarjo';
+    if (v === 'cab-banyuwangi' || /banyuwangi|nusantara|bwi/.test(v)) return 'cab-banyuwangi';
+    return v;
+  };
+
+  const extractFleetTokens = (raw?: string): string[] =>
+    String(raw || '')
+      .toUpperCase()
+      .split(/[\s\/(),.-]+/)
+      .map(t => t.trim())
+      .filter(Boolean);
+
   const resolveFleetInfoForTrip = async (trip: any): Promise<{
     fleetId?: string;
     plateNumber: string;
     vehicleType?: string;
     initialCode?: string;
     fuelLevelPercent?: number;
+    branchId?: string;
   }> => {
     const directPlate = sanitizeOperationalPlate(trip?.fleet?.plateNumber);
     const armadaRaw = String(trip?.armada || '').trim();
     const armadaNorm = armadaRaw.toLowerCase();
+    const armadaTokens = extractFleetTokens(armadaRaw);
     const fleetId = String(trip?.fleetId || trip?.fleet?.id || '').trim();
+    const tripBranch =
+      normalizeBranchKeyForFleet(trip?.originBranchId || trip?.branchId || trip?.fleet?.branchId) ||
+      normalizeBranchKeyForFleet(trip?.originName);
 
     let candidates: any[] = Object.values(inMemoryFleetsFallback);
     if (isDatabaseConfigured()) {
@@ -4740,34 +4792,123 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
               plateNumber: r.plate_number,
               vehicleType: r.vehicle_type,
               fuelLevelPercent: Number(r.fuel_level_percent ?? 80),
-              initialCode: p.initialCode || ''
+              initialCode: p.initialCode || '',
+              branchId: normalizeBranchKeyForFleet(p.branchId || p.originBranchId || p.branchName || '')
             };
           });
         }
       } catch {}
     }
 
-    const matched = candidates.find((f: any) => {
-      if (!f) return false;
-      if (fleetId && String(f.id || '').trim() === fleetId) return true;
-      const pClean = String(f.plateNumber || '').replace(/\s+/g, '').toUpperCase();
-      if (directPlate !== '-' && pClean && directPlate.replace(/\s+/g, '').toUpperCase() === pClean) return true;
-      if (armadaNorm) {
-        const initNorm = String(f.initialCode || '').trim().toLowerCase();
-        if (initNorm && (initNorm === armadaNorm || armadaNorm.includes(initNorm))) return true;
-        if (pClean && armadaRaw.replace(/\s+/g, '').toUpperCase().includes(pClean)) return true;
-      }
-      return false;
-    });
+    const branchFiltered = tripBranch
+      ? candidates.filter((f: any) => {
+          const fb = normalizeBranchKeyForFleet(f?.branchId || f?.originBranchId || f?.branchName || '');
+          return !fb || fb === tripBranch;
+        })
+      : candidates;
+    const poolCandidates = branchFiltered.length > 0 ? branchFiltered : candidates;
 
-    const resolvedPlate = sanitizeOperationalPlate(matched?.plateNumber || directPlate !== '-' ? (matched?.plateNumber || directPlate) : armadaRaw);
+    let matched = poolCandidates.find((f: any) => fleetId && String(f?.id || '').trim() === fleetId);
+    if (!matched && directPlate !== '-') {
+      const targetPlate = directPlate.replace(/\s+/g, '').toUpperCase();
+      matched = poolCandidates.find((f: any) => String(f?.plateNumber || '').replace(/\s+/g, '').toUpperCase() === targetPlate);
+    }
+    if (!matched && armadaNorm) {
+      matched = poolCandidates.find((f: any) => {
+        if (!f) return false;
+        const initRaw = String(f.initialCode || '').trim();
+        const initNorm = initRaw.toLowerCase();
+        const pClean = String(f.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+        if (initNorm && initNorm === armadaNorm) return true;
+        const initTokens = extractFleetTokens(initRaw);
+        if (initTokens.length > 0 && armadaTokens.some(tok => initTokens.includes(tok))) return true;
+        if (pClean && armadaRaw.replace(/\s+/g, '').toUpperCase().includes(pClean)) return true;
+        return false;
+      });
+    }
+
+    const resolvedPlate = sanitizeOperationalPlate(
+      matched?.plateNumber || (directPlate !== '-' ? directPlate : armadaRaw)
+    );
     return {
       fleetId: matched?.id || fleetId || undefined,
       plateNumber: resolvedPlate,
       vehicleType: matched?.vehicleType || trip?.fleet?.vehicleType || armadaRaw || 'Armada Kiriman',
-      initialCode: matched?.initialCode || trip?.fleet?.initialCode || '',
-      fuelLevelPercent: Number(matched?.fuelLevelPercent ?? trip?.fleet?.fuelLevelPercent ?? 80)
+      initialCode: matched?.initialCode || trip?.fleet?.initialCode || armadaRaw || '',
+      fuelLevelPercent: Number(matched?.fuelLevelPercent ?? trip?.fleet?.fuelLevelPercent ?? 80),
+      branchId: matched?.branchId || tripBranch || undefined
     };
+  };
+
+  const propagateScheduleFleetToReportsAndShifts = async (schedulesList: any[]): Promise<void> => {
+    if (!Array.isArray(schedulesList) || schedulesList.length === 0) return;
+    const byId = new Map<string, any>();
+    for (const s of schedulesList) {
+      if (s?.id) byId.set(String(s.id).trim(), s);
+      if (s?.trackingNumber) byId.set(String(s.trackingNumber).trim(), s);
+    }
+    const [reports, shiftState] = await Promise.all([
+      loadDriverReportsFromDbIfNeeded().catch(() => inMemoryDriverReports),
+      loadDriverShiftsFromDbIfNeeded().catch(() => ({ shifts: inMemoryDriverShifts, pins: inMemoryDriverPins }))
+    ]);
+
+    let reportsChanged = false;
+    const updatedReports = (Array.isArray(reports) ? reports : []).map((r: any) => {
+      const sid = String(r?.scheduleId || r?.deliveryId || '').trim();
+      if (!sid) return r;
+      const sched = byId.get(sid);
+      if (!sched) return r;
+      const schedPlate = sanitizeOperationalPlate(sched.fleet?.plateNumber || sched.armada);
+      const schedCode = String(sched.fleet?.initialCode || sched.armada || '').trim();
+      const schedFleetId = String(sched.fleetId || sched.fleet?.id || '').trim();
+      if (schedPlate === '-' && !schedCode) return r;
+      if (
+        r.plateNumber === (schedPlate !== '-' ? schedPlate : r.plateNumber) &&
+        r.scheduledPlateNumber === (schedPlate !== '-' ? schedPlate : r.scheduledPlateNumber) &&
+        r.fleetId === (schedFleetId || r.fleetId) &&
+        r.fleetSyncStatus === 'synced'
+      ) {
+        return r;
+      }
+      reportsChanged = true;
+      return sanitizeReportRecord({
+        ...r,
+        fleetId: schedFleetId || r.fleetId,
+        fleetInitialCode: schedCode || r.fleetInitialCode,
+        scheduledPlateNumber: schedPlate !== '-' ? schedPlate : r.scheduledPlateNumber,
+        scheduledFleetInitialCode: schedCode || r.scheduledFleetInitialCode,
+        plateNumber: schedPlate !== '-' ? schedPlate : r.plateNumber,
+        fleetSyncStatus: 'synced'
+      });
+    });
+
+    if (reportsChanged) {
+      await persistDriverReportsToDb(updatedReports);
+      broadcastDriverReportEvent('reports_synced', { count: updatedReports.length });
+    }
+
+    let shiftsChanged = false;
+    const updatedShifts = (Array.isArray(shiftState?.shifts) ? shiftState.shifts : []).map((sh: any) => {
+      const shId = String(sh?.id || '');
+      const sid = shId.startsWith('SHF-CREW-') ? shId.slice('SHF-CREW-'.length) : String(sh?.scheduleId || '').trim();
+      if (!sid) return sh;
+      const sched = byId.get(sid);
+      if (!sched) return sh;
+      const schedPlate = sanitizeOperationalPlate(sched.fleet?.plateNumber || sched.armada);
+      const schedFleetId = String(sched.fleetId || sched.fleet?.id || '').trim();
+      if (schedPlate === '-') return sh;
+      if (sh.plateNumber === schedPlate && (!schedFleetId || sh.fleetId === schedFleetId)) return sh;
+      shiftsChanged = true;
+      return sanitizeShiftRecord({
+        ...sh,
+        fleetId: schedFleetId || sh.fleetId,
+        plateNumber: schedPlate
+      });
+    });
+
+    if (shiftsChanged) {
+      await persistDriverShiftsToDb(updatedShifts);
+    }
   };
 
   registerCrewClaimRoutes(app, {
@@ -5003,8 +5144,9 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
           driverName: existingShift?.driverName || driverName,
           helper1Id: existingShift?.helper1Id || helperId,
           helper1Name: existingShift?.helper1Name || helperName,
-          fleetId: existingShift?.fleetId || fleetInfo.fleetId || `fleet-${trip.id}`,
-          plateNumber: existingShift?.plateNumber && existingShift.plateNumber !== '-' ? existingShift.plateNumber : fleetInfo.plateNumber,
+          scheduleId: trip.id,
+          fleetId: fleetInfo.fleetId || existingShift?.fleetId || `fleet-${trip.id}`,
+          plateNumber: fleetInfo.plateNumber !== '-' ? fleetInfo.plateNumber : (existingShift?.plateNumber || '-'),
           checkinRole: existingShift?.checkinRole || 'driver',
           checkinTime: existingShift?.checkinTime || trip?.actualDeparture || now,
           checkinTimeFormatted: existingShift?.checkinTimeFormatted || depWib,
@@ -8026,6 +8168,9 @@ Kembalikan HANYA JSON valid:
       adminCalendarSchedulesExistsInDb = true;
       lastAdminSchedulesDbSyncAt = Date.now();
       writePersistentAppState('admin_calendar_schedules_payload', incoming);
+      setImmediate(() => {
+        void propagateScheduleFleetToReportsAndShifts(incoming).catch(() => {});
+      });
 
       const msg = incoming.length === 0
         ? 'Jadwal admin berhasil dikosongkan & disimpan ke database MySQL'
@@ -8428,7 +8573,9 @@ Kembalikan HANYA JSON valid:
         );
         const userRows = await mysqlQuery<any[]>(
           `SELECT id, full_name, email, phone, role, status
-           FROM users WHERE LOWER(TRIM(role)) = 'marketing_offline' AND LOWER(TRIM(status)) = 'approved'`
+           FROM users
+           WHERE LOWER(TRIM(role)) IN ('marketing_offline', 'spv_marketing_offline')
+             AND LOWER(TRIM(status)) = 'approved'`
         ).catch(() => []);
 
         const mapped = (Array.isArray(rows) ? rows : []).map((r: any) => ({
@@ -8446,7 +8593,7 @@ Kembalikan HANYA JSON valid:
           fullName: u.full_name,
           email: u.email,
           phone: u.phone || '-',
-          role: 'marketing_offline',
+          role: String(u.role || 'marketing_offline').toLowerCase().trim(),
           status: 'approved'
         }));
 
@@ -8513,25 +8660,30 @@ Kembalikan HANYA JSON valid:
       const m2 = String(masterSalesName2 || '').trim().toUpperCase();
       if (await ensureMarketingRelationalTables()) {
         await mysqlQuery(
-          `UPDATE sales_mappings
-           SET user_id = ?, user_full_name = ?, user_phone = ?, master_sales_name_1 = ?, master_sales_name_2 = ?
-           WHERE id = ?`,
-          [String(userId), String(userFullName || ''), String(userPhone || '-'), m1, m2, id]
+          `INSERT INTO sales_mappings (id, user_id, user_full_name, user_phone, master_sales_name_1, master_sales_name_2)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE
+             user_id = VALUES(user_id),
+             user_full_name = VALUES(user_full_name),
+             user_phone = VALUES(user_phone),
+             master_sales_name_1 = VALUES(master_sales_name_1),
+             master_sales_name_2 = VALUES(master_sales_name_2)`,
+          [id, String(userId), String(userFullName || ''), String(userPhone || '-'), m1, m2]
         );
       }
-      inMemoryMarketingSalesMappings = inMemoryMarketingSalesMappings.map((m: any) =>
-        m.id === id
-          ? {
-              ...m,
-              userId: String(userId),
-              userFullName: String(userFullName || m.userFullName),
-              userPhone: String(userPhone || m.userPhone || '-'),
-              masterSalesName1: m1,
-              masterSalesName2: m2
-            }
-          : m
-      );
-      return res.json({ success: true });
+      const updatedEntry = {
+        id,
+        userId: String(userId),
+        userFullName: String(userFullName || ''),
+        userPhone: String(userPhone || '-'),
+        masterSalesName1: m1,
+        masterSalesName2: m2
+      };
+      const existsInMem = inMemoryMarketingSalesMappings.some((m: any) => m.id === id);
+      inMemoryMarketingSalesMappings = existsInMem
+        ? inMemoryMarketingSalesMappings.map((m: any) => (m.id === id ? { ...m, ...updatedEntry } : m))
+        : [...inMemoryMarketingSalesMappings, updatedEntry];
+      return res.json({ success: true, mapping: updatedEntry });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err?.message || 'Gagal memperbarui sales_mappings di MySQL.' });
     }
@@ -8570,8 +8722,8 @@ Kembalikan HANYA JSON valid:
         }));
 
         let invRows: any[] = [];
-        if (reqRole === 'marketing_offline' && reqUserId) {
-          // Strict MySQL JOIN / WHERE filtering for Marketing Offline user
+        if ((reqRole === 'marketing_offline' || reqRole === 'spv_marketing_offline') && reqUserId) {
+          // Strict MySQL JOIN / WHERE filtering for Marketing Offline & SPV Marketing Offline user
           invRows = await mysqlQuery<any[]>(
             `SELECT DISTINCT iv.*
              FROM invoice_validations iv
@@ -8781,7 +8933,7 @@ app.get('/api/marketing-invoice-validations', async (req, res) => {
       const reqRole = String(req.query.role || req.headers['x-user-role'] || '').toLowerCase().trim();
       let scopedRecords = inMemoryMarketingValidations;
 
-      if (reqUserId && reqRole === 'marketing_offline') {
+      if (reqUserId && (reqRole === 'marketing_offline' || reqRole === 'spv_marketing_offline')) {
         const userMaps = inMemoryMarketingSalesMappings.filter(
           (m: any) => String(m.userId || '').trim() === reqUserId
         );
@@ -12271,6 +12423,303 @@ app.get('/api/marketing-invoice-validations', async (req, res) => {
         success: false,
         error: err?.message || 'Gagal menjalankan deteksi fallback YOLO26 di server'
       });
+    }
+  });
+
+  // 🔧 Manajemen Sparepart & Stok Bengkel (100% Persistent MySQL)
+  let inMemorySpareParts: any[] = (() => {
+    const d = readPersistentAppState('spare_parts_v1');
+    return Array.isArray(d) ? d : [];
+  })();
+  let inMemorySparePartUsages: any[] = (() => {
+    const d = readPersistentAppState('spare_part_usages_v1');
+    return Array.isArray(d) ? d : [];
+  })();
+  let sparePartsSchemaReady = false;
+
+  const ensureSparePartsTables = async (): Promise<boolean> => {
+    if (!isDatabaseConfigured()) return false;
+    if (sparePartsSchemaReady) return true;
+    try {
+      await mysqlQuery(`
+        CREATE TABLE IF NOT EXISTS spare_parts (
+          id VARCHAR(64) NOT NULL PRIMARY KEY,
+          code VARCHAR(50) NOT NULL UNIQUE,
+          name VARCHAR(191) NOT NULL,
+          category VARCHAR(100) NOT NULL,
+          stock INT DEFAULT 0,
+          min_stock INT DEFAULT 5,
+          unit_price DECIMAL(12,2) DEFAULT 0.00,
+          supplier VARCHAR(191) NULL,
+          payload_json LONGTEXT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+      try {
+        const cols = await mysqlQuery<any[]>(`SHOW COLUMNS FROM spare_parts LIKE 'payload_json'`);
+        if (!Array.isArray(cols) || cols.length === 0) {
+          await mysqlQuery(`ALTER TABLE spare_parts ADD COLUMN payload_json LONGTEXT NULL`);
+        }
+      } catch {}
+      await mysqlQuery(`
+        CREATE TABLE IF NOT EXISTS spare_part_usages (
+          id VARCHAR(64) NOT NULL PRIMARY KEY,
+          spare_part_id VARCHAR(64) NOT NULL,
+          fleet_id VARCHAR(64) NOT NULL,
+          quantity INT NOT NULL DEFAULT 1,
+          usage_date VARCHAR(32) NOT NULL,
+          payload_json LONGTEXT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          INDEX idx_spu_part (spare_part_id),
+          INDEX idx_spu_fleet (fleet_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+      sparePartsSchemaReady = true;
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  app.get('/api/spare-parts', requireAuth, async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      if (await ensureSparePartsTables()) {
+        const [partRows, usageRows] = await Promise.all([
+          mysqlQuery<any[]>(`SELECT * FROM spare_parts ORDER BY created_at DESC`),
+          mysqlQuery<any[]>(`SELECT * FROM spare_part_usages ORDER BY usage_date DESC, created_at DESC`)
+        ]);
+        const parts = (Array.isArray(partRows) ? partRows : []).map((r: any) => {
+          const extra = parseJsonColumn(r.payload_json) || {};
+          return {
+            ...extra,
+            id: r.id,
+            code: r.code,
+            name: r.name,
+            category: r.category,
+            stock: Number(r.stock ?? 0),
+            minStock: Number(r.min_stock ?? extra.minStock ?? 5),
+            unit: extra.unit || 'Pcs',
+            unitPrice: Number(r.unit_price ?? extra.unitPrice ?? 0),
+            supplier: r.supplier || extra.supplier || '-',
+            warehouseBranchId: extra.warehouseBranchId || extra.branchId || 'cab-banyuwangi',
+            warehouseBranchName: extra.warehouseBranchName || 'Cabang Banyuwangi (Nusantara DC)',
+            lastRestocked: extra.lastRestocked || (r.created_at ? String(r.created_at).slice(0, 10) : new Date().toISOString().slice(0, 10))
+          };
+        });
+        const usages = (Array.isArray(usageRows) ? usageRows : []).map((u: any) => {
+          const extra = parseJsonColumn(u.payload_json) || {};
+          return {
+            ...extra,
+            id: u.id,
+            sparePartId: u.spare_part_id,
+            fleetId: u.fleet_id,
+            quantity: Number(u.quantity ?? 1),
+            date: u.usage_date || extra.date || new Date().toISOString().slice(0, 10)
+          };
+        });
+        inMemorySpareParts = parts;
+        inMemorySparePartUsages = usages;
+        writePersistentAppState('spare_parts_v1', parts);
+        writePersistentAppState('spare_part_usages_v1', usages);
+        return res.json({ success: true, spareParts: parts, usages, source: 'mysql' });
+      }
+      return res.json({ success: true, spareParts: inMemorySpareParts, usages: inMemorySparePartUsages, source: 'memory' });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err?.message || 'Gagal memuat data sparepart dari MySQL.' });
+    }
+  });
+
+  app.post('/api/spare-parts', requireAuth, express.json(), async (req, res) => {
+    try {
+      const b = req.body || {};
+      const id = String(b.id || `sp-${Date.now()}`).trim();
+      const code = String(b.code || '').trim().toUpperCase();
+      const name = String(b.name || '').trim();
+      if (!code || !name) {
+        return res.status(400).json({ success: false, message: 'Kode dan nama sparepart wajib diisi.' });
+      }
+      const partObj = {
+        ...b,
+        id,
+        code,
+        name,
+        category: String(b.category || 'Lainnya').trim(),
+        stock: Math.max(0, Number(b.stock || 0)),
+        minStock: Math.max(0, Number(b.minStock || 5)),
+        unit: String(b.unit || 'Pcs').trim(),
+        unitPrice: Math.max(0, Number(b.unitPrice || 0)),
+        supplier: String(b.supplier || '-').trim(),
+        warehouseBranchId: String(b.warehouseBranchId || b.branchId || 'cab-banyuwangi').trim(),
+        warehouseBranchName: String(b.warehouseBranchName || 'Cabang Banyuwangi (Nusantara DC)').trim(),
+        lastRestocked: String(b.lastRestocked || new Date().toISOString().slice(0, 10))
+      };
+      if (await ensureSparePartsTables()) {
+        await mysqlQuery(
+          `INSERT INTO spare_parts (id, code, name, category, stock, min_stock, unit_price, supplier, payload_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE
+             code = VALUES(code), name = VALUES(name), category = VALUES(category),
+             stock = VALUES(stock), min_stock = VALUES(min_stock), unit_price = VALUES(unit_price),
+             supplier = VALUES(supplier), payload_json = VALUES(payload_json)`,
+          [partObj.id, partObj.code, partObj.name, partObj.category, partObj.stock, partObj.minStock, partObj.unitPrice, partObj.supplier, JSON.stringify(partObj)]
+        );
+      }
+      inMemorySpareParts = [partObj, ...inMemorySpareParts.filter((p: any) => p.id !== partObj.id)];
+      writePersistentAppState('spare_parts_v1', inMemorySpareParts);
+      return res.json({ success: true, sparePart: partObj });
+    } catch (err: any) {
+      const dup = String(err?.code || '').includes('DUP') || String(err?.message || '').toLowerCase().includes('duplicate');
+      return res.status(dup ? 409 : 500).json({ success: false, message: dup ? 'Kode sparepart sudah terdaftar.' : (err?.message || 'Gagal menyimpan sparepart.') });
+    }
+  });
+
+  app.put('/api/spare-parts/:id', requireAuth, express.json(), async (req, res) => {
+    try {
+      const id = String(req.params.id || '').trim();
+      const b = req.body || {};
+      if (!id) return res.status(400).json({ success: false, message: 'ID sparepart wajib diisi.' });
+      const existing = inMemorySpareParts.find((p: any) => p.id === id) || {};
+      const updated = {
+        ...existing,
+        ...b,
+        id,
+        code: String(b.code || existing.code || '').trim().toUpperCase(),
+        name: String(b.name || existing.name || '').trim(),
+        category: String(b.category || existing.category || 'Lainnya').trim(),
+        stock: Math.max(0, Number(b.stock ?? existing.stock ?? 0)),
+        minStock: Math.max(0, Number(b.minStock ?? existing.minStock ?? 5)),
+        unit: String(b.unit || existing.unit || 'Pcs').trim(),
+        unitPrice: Math.max(0, Number(b.unitPrice ?? existing.unitPrice ?? 0)),
+        supplier: String(b.supplier || existing.supplier || '-').trim(),
+        warehouseBranchId: String(b.warehouseBranchId || existing.warehouseBranchId || 'cab-banyuwangi').trim(),
+        warehouseBranchName: String(b.warehouseBranchName || existing.warehouseBranchName || 'Cabang Banyuwangi (Nusantara DC)').trim()
+      };
+      if (await ensureSparePartsTables()) {
+        await mysqlQuery(
+          `UPDATE spare_parts
+           SET code = ?, name = ?, category = ?, stock = ?, min_stock = ?, unit_price = ?, supplier = ?, payload_json = ?
+           WHERE id = ?`,
+          [updated.code, updated.name, updated.category, updated.stock, updated.minStock, updated.unitPrice, updated.supplier, JSON.stringify(updated), id]
+        );
+      }
+      inMemorySpareParts = inMemorySpareParts.map((p: any) => p.id === id ? updated : p);
+      writePersistentAppState('spare_parts_v1', inMemorySpareParts);
+      return res.json({ success: true, sparePart: updated });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err?.message || 'Gagal memperbarui sparepart.' });
+    }
+  });
+
+  app.post('/api/spare-parts/:id/restock', requireAuth, express.json(), async (req, res) => {
+    try {
+      const id = String(req.params.id || '').trim();
+      const addQty = Number(req.body?.quantity || 0);
+      if (!id || !Number.isFinite(addQty) || addQty <= 0) {
+        return res.status(400).json({ success: false, message: 'Jumlah restock harus lebih dari 0.' });
+      }
+      const todayStr = new Date().toISOString().slice(0, 10);
+      let updated: any = null;
+      if (await ensureSparePartsTables()) {
+        const rows = await mysqlQuery<any[]>(`SELECT * FROM spare_parts WHERE id = ? LIMIT 1`, [id]);
+        if (Array.isArray(rows) && rows.length > 0) {
+          const r = rows[0];
+          const extra = parseJsonColumn(r.payload_json) || {};
+          const nextStock = Number(r.stock || 0) + addQty;
+          updated = { ...extra, id: r.id, code: r.code, name: r.name, category: r.category, stock: nextStock, minStock: Number(r.min_stock ?? extra.minStock ?? 5), unitPrice: Number(r.unit_price ?? 0), supplier: r.supplier || extra.supplier || '-', lastRestocked: todayStr };
+          await mysqlQuery(`UPDATE spare_parts SET stock = ?, payload_json = ? WHERE id = ?`, [nextStock, JSON.stringify(updated), id]);
+        }
+      }
+      if (!updated) {
+        const cur = inMemorySpareParts.find((p: any) => p.id === id);
+        if (!cur) return res.status(404).json({ success: false, message: 'Sparepart tidak ditemukan.' });
+        updated = { ...cur, stock: Number(cur.stock || 0) + addQty, lastRestocked: todayStr };
+      }
+      inMemorySpareParts = inMemorySpareParts.map((p: any) => p.id === id ? updated : p);
+      writePersistentAppState('spare_parts_v1', inMemorySpareParts);
+      return res.json({ success: true, sparePart: updated });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err?.message || 'Gagal menambah stok sparepart.' });
+    }
+  });
+
+  app.delete('/api/spare-parts/:id', requireAuth, async (req, res) => {
+    try {
+      const id = String(req.params.id || '').trim();
+      if (await ensureSparePartsTables()) {
+        await mysqlQuery(`DELETE FROM spare_part_usages WHERE spare_part_id = ?`, [id]);
+        await mysqlQuery(`DELETE FROM spare_parts WHERE id = ?`, [id]);
+      }
+      inMemorySpareParts = inMemorySpareParts.filter((p: any) => p.id !== id);
+      inMemorySparePartUsages = inMemorySparePartUsages.filter((u: any) => u.sparePartId !== id);
+      writePersistentAppState('spare_parts_v1', inMemorySpareParts);
+      writePersistentAppState('spare_part_usages_v1', inMemorySparePartUsages);
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err?.message || 'Gagal menghapus sparepart.' });
+    }
+  });
+
+  app.post('/api/spare-part-usages', requireAuth, express.json(), async (req, res) => {
+    try {
+      const b = req.body || {};
+      const sparePartId = String(b.sparePartId || '').trim();
+      const fleetId = String(b.fleetId || '').trim();
+      const quantity = Math.max(1, Number(b.quantity || 1));
+      if (!sparePartId || !fleetId) {
+        return res.status(400).json({ success: false, message: 'Sparepart dan armada wajib dipilih.' });
+      }
+      const id = String(b.id || `spu-${Date.now()}`).trim();
+      const usageObj = {
+        ...b,
+        id,
+        sparePartId,
+        fleetId,
+        quantity,
+        date: String(b.date || new Date().toISOString().slice(0, 10))
+      };
+      if (await ensureSparePartsTables()) {
+        const partRows = await mysqlQuery<any[]>(`SELECT * FROM spare_parts WHERE id = ? LIMIT 1`, [sparePartId]);
+        if (Array.isArray(partRows) && partRows.length > 0) {
+          const r = partRows[0];
+          const curStock = Number(r.stock || 0);
+          if (curStock < quantity) {
+            return res.status(400).json({ success: false, message: `Stok ${r.name} tidak mencukupi (sisa ${curStock}).` });
+          }
+          const nextStock = curStock - quantity;
+          const extra = parseJsonColumn(r.payload_json) || {};
+          extra.stock = nextStock;
+          await mysqlQuery(`UPDATE spare_parts SET stock = ?, payload_json = ? WHERE id = ?`, [nextStock, JSON.stringify(extra), sparePartId]);
+        }
+        await mysqlQuery(
+          `INSERT INTO spare_part_usages (id, spare_part_id, fleet_id, quantity, usage_date, payload_json)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [usageObj.id, usageObj.sparePartId, usageObj.fleetId, usageObj.quantity, usageObj.date, JSON.stringify(usageObj)]
+        );
+      }
+      inMemorySpareParts = inMemorySpareParts.map((p: any) =>
+        p.id === sparePartId ? { ...p, stock: Math.max(0, Number(p.stock || 0) - quantity) } : p
+      );
+      inMemorySparePartUsages = [usageObj, ...inMemorySparePartUsages];
+      writePersistentAppState('spare_parts_v1', inMemorySpareParts);
+      writePersistentAppState('spare_part_usages_v1', inMemorySparePartUsages);
+      return res.json({ success: true, usage: usageObj });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err?.message || 'Gagal mencatat pemakaian sparepart.' });
+    }
+  });
+
+  app.delete('/api/spare-part-usages/:id', requireAuth, async (req, res) => {
+    try {
+      const id = String(req.params.id || '').trim();
+      if (await ensureSparePartsTables()) {
+        await mysqlQuery(`DELETE FROM spare_part_usages WHERE id = ?`, [id]);
+      }
+      inMemorySparePartUsages = inMemorySparePartUsages.filter((u: any) => u.id !== id);
+      writePersistentAppState('spare_part_usages_v1', inMemorySparePartUsages);
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err?.message || 'Gagal menghapus riwayat pemakaian sparepart.' });
     }
   });
 

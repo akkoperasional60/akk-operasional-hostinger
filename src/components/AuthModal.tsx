@@ -41,28 +41,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [successMsg, setSuccessMsg] = useState('');
 
   // 🛡️ Proteksi Brute-Force: Melacak percobaan gagal & waktu penguncian
-  const [failedAttempts, setFailedAttempts] = useState<number>(() => {
-    try {
-      localStorage.removeItem('akk_auth_failed_attempts');
-      localStorage.removeItem('akk_auth_lockout_until');
-      localStorage.removeItem('akk_auth_v2_failed_attempts');
-      localStorage.removeItem('akk_auth_v2_lockout_until');
-      const saved = localStorage.getItem(STORAGE_FAILED_KEY);
-      return saved ? parseInt(saved, 10) || 0 : 0;
-    } catch {
-      return 0;
-    }
-  });
-
-  const [lockoutUntil, setLockoutUntil] = useState<number>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_LOCKOUT_KEY);
-      return saved ? parseInt(saved, 10) || 0 : 0;
-    } catch {
-      return 0;
-    }
-  });
-
+  const [failedAttempts, setFailedAttempts] = useState<number>(0);
+  const [lockoutUntil, setLockoutUntil] = useState<number>(0);
   const [countdown, setCountdown] = useState<number>(0);
 
   // Interval hitung mundur pembekuan akses (cooldown)
@@ -77,10 +57,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         if (lockoutUntil > 0) {
           setLockoutUntil(0);
           setFailedAttempts(0);
-          try {
-            localStorage.removeItem(STORAGE_LOCKOUT_KEY);
-            localStorage.removeItem(STORAGE_FAILED_KEY);
-          } catch {}
         }
       }
     };
@@ -312,12 +288,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }
       const nextFailed = failedAttempts + 1;
       setFailedAttempts(nextFailed);
-      try { localStorage.setItem(STORAGE_FAILED_KEY, String(nextFailed)); } catch {}
       if (nextFailed >= MAX_FAILED_ATTEMPTS) {
         const lockoutTime = Date.now() + (LOCKOUT_DURATION_SECONDS * 1000);
         setLockoutUntil(lockoutTime);
         setCountdown(LOCKOUT_DURATION_SECONDS);
-        try { localStorage.setItem(STORAGE_LOCKOUT_KEY, String(lockoutTime)); } catch {}
         setErrorMsg(`Terlalu banyak percobaan gagal (${MAX_FAILED_ATTEMPTS}x). Login dikunci sementara selama ${LOCKOUT_DURATION_SECONDS} detik.`);
       } else {
         const remaining = MAX_FAILED_ATTEMPTS - nextFailed;
@@ -329,10 +303,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setFailedAttempts(0);
     setLockoutUntil(0);
     setCountdown(0);
-    try {
-      localStorage.removeItem(STORAGE_FAILED_KEY);
-      localStorage.removeItem(STORAGE_LOCKOUT_KEY);
-    } catch {}
     setSuccessMsg(user.role === 'super_admin' ? 'Berhasil masuk sebagai Super Admin' : `Berhasil masuk sebagai ${user.fullName}`);
     setTimeout(() => onClose(), 500);
   };

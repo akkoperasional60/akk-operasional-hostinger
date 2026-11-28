@@ -141,7 +141,7 @@ export function computeWeeklyFleetSummaries(logs: FuelLog[]): WeeklyFleetFuelSum
   });
 
   const results: WeeklyFleetFuelSummary[] = Object.values(grouped).map(item => {
-    const totalLiters = Number(item.logs.reduce((sum, l) => sum + (l.liters || 0), 0).toFixed(1));
+    const totalLiters = Number(item.logs.reduce((sum, l) => sum + (l.liters || 0), 0).toFixed(2));
     const totalCost = item.logs.reduce((sum, l) => sum + (l.totalCost || 0), 0);
     const totalDistanceKm = item.logs.reduce((sum, l) => sum + (l.distanceKm || 0), 0);
     const refuelCount = item.logs.length;
@@ -242,7 +242,7 @@ export function computeFleetRangeSummaries(
   });
 
   const results: WeeklyFleetFuelSummary[] = Object.entries(grouped).map(([key, item]) => {
-    const totalLiters = Number(item.logs.reduce((sum, l) => sum + (l.liters || 0), 0).toFixed(1));
+    const totalLiters = Number(item.logs.reduce((sum, l) => sum + (l.liters || 0), 0).toFixed(2));
     const totalCost = item.logs.reduce((sum, l) => sum + (l.totalCost || 0), 0);
     const totalDistanceKm = item.logs.reduce((sum, l) => sum + (l.distanceKm || 0), 0);
     const refuelCount = item.logs.length;
@@ -333,7 +333,7 @@ export function computeWeeklyDriverSummaries(logs: FuelLog[]): WeeklyDriverFuelS
   });
 
   const results: WeeklyDriverFuelSummary[] = Object.values(grouped).map(item => {
-    const totalLiters = Number(item.logs.reduce((sum, l) => sum + (l.liters || 0), 0).toFixed(1));
+    const totalLiters = Number(item.logs.reduce((sum, l) => sum + (l.liters || 0), 0).toFixed(2));
     const totalCost = item.logs.reduce((sum, l) => sum + (l.totalCost || 0), 0);
     const totalDistanceKm = item.logs.reduce((sum, l) => sum + (l.distanceKm || 0), 0);
     const refuelCount = item.logs.length;
@@ -424,7 +424,7 @@ export function exportFuelReportToExcel(options: {
     'Inisial Armada': f.initialCode,
     'Tipe Kendaraan': f.vehicleType,
     'Frekuensi Isi': f.refuelCount,
-    'Total Liter': f.totalLiters,
+    'Total Liter': Number(Number(f.totalLiters || 0).toFixed(2)),
     'Total Jarak (KM)': f.totalDistanceKm,
     'Total Biaya (Rp)': f.totalCost,
     'Rasio Aktual (KM/L)': f.avgKmPerLiter,
@@ -469,7 +469,7 @@ export function exportFuelReportToExcel(options: {
       'Nama Driver': d.driverName,
       'Armada Dikemudikan': d.fleetPlates.join(', '),
       'Frekuensi Isi BBM': d.refuelCount,
-      'Total Liter BBM': d.totalLiters,
+      'Total Liter BBM': Number(Number(d.totalLiters || 0).toFixed(2)),
       'Total Jarak Tempuh (KM)': d.totalDistanceKm,
       'Total Biaya BBM (Rp)': d.totalCost,
       'Rasio Efisiensi (KM/L)': d.avgKmPerLiter,
@@ -500,7 +500,7 @@ export function exportFuelReportToExcel(options: {
       'Driver': l.driverName,
       'Helper': l.helperName || '-',
       'Jenis BBM': l.fuelType,
-      'Volume (Liter)': l.liters,
+      'Volume (Liter)': Number(Number(l.liters || 0).toFixed(2)),
       'Harga / Liter (Rp)': l.costPerLiter,
       'Total Biaya (Rp)': l.totalCost,
       'KM Awal': l.startOdometerKm,
@@ -565,7 +565,7 @@ export function exportFuelReportToPDF(options: {
   const margin = 12;
   const contentWidth = pageWidth - (margin * 2);
 
-  const totalLiters = Number(fleetSummaries.reduce((acc, f) => acc + f.totalLiters, 0).toFixed(1));
+  const totalLiters = Number(fleetSummaries.reduce((acc, f) => acc + f.totalLiters, 0).toFixed(2));
   const totalCost = fleetSummaries.reduce((acc, f) => acc + f.totalCost, 0);
   const totalDistance = fleetSummaries.reduce((acc, f) => acc + f.totalDistanceKm, 0);
   const avgKmPerL = totalLiters > 0 ? Number((totalDistance / totalLiters).toFixed(2)) : 0;
@@ -644,7 +644,7 @@ export function exportFuelReportToPDF(options: {
   doc.text('TOTAL BBM:', margin + 4, yPos + 5);
   doc.setTextColor(15, 23, 42);
   doc.setFont('helvetica', 'bold');
-  doc.text(`${totalLiters.toLocaleString('id-ID')} Liter`, margin + 4, yPos + 10);
+  doc.text(`${totalLiters.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Liter`, margin + 4, yPos + 10);
 
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(71, 85, 105);
@@ -754,7 +754,7 @@ export function exportFuelReportToPDF(options: {
       f.initialCode || '-',
       f.vehicleType,
       f.refuelCount.toString(),
-      f.totalLiters.toFixed(1),
+      f.totalLiters.toFixed(2),
       f.totalDistanceKm.toLocaleString('id-ID'),
       formatRupiah(f.totalCost),
       f.avgKmPerLiter.toFixed(2),
@@ -795,7 +795,7 @@ export function exportFuelReportToPDF(options: {
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 23, 42);
   doc.text('TOTAL REKAPITULASI ARMADA', margin + 4, yPos + 4.5);
-  doc.text(`${totalLiters.toFixed(1)} L`, margin + 124, yPos + 4.5, { align: 'right' });
+  doc.text(`${totalLiters.toFixed(2)} L`, margin + 124, yPos + 4.5, { align: 'right' });
   doc.text(`${totalDistance.toLocaleString('id-ID')} KM`, margin + 144, yPos + 4.5, { align: 'right' });
   doc.text(formatRupiah(totalCost), margin + 170, yPos + 4.5, { align: 'right' });
   doc.text(`${avgKmPerL}`, margin + 186, yPos + 4.5, { align: 'right' });
@@ -908,7 +908,7 @@ export function exportFuelReportToPDF(options: {
       d.driverName,
       d.fleetPlates.join(', ') || '-',
       d.refuelCount.toString(),
-      d.totalLiters.toFixed(1),
+      d.totalLiters.toFixed(2),
       d.totalDistanceKm.toLocaleString('id-ID'),
       formatRupiah(d.totalCost),
       d.avgKmPerLiter.toFixed(2),

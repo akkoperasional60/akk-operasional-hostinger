@@ -522,8 +522,8 @@ export class ScheduleInitializerService {
       return true; // Already populated with real/synced schedules
     }
     try {
-      if (localStorage.getItem('akk_weekly_schedule_initialized') === 'true') {
-        return true;
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem('akk_weekly_schedule_initialized');
       }
     } catch {}
 
@@ -537,12 +537,6 @@ export class ScheduleInitializerService {
       s.trackingNumber.includes('JUM') ||
       s.trackingNumber.includes('SAB')
     ));
-
-    if (hasInitialized) {
-      try {
-        localStorage.setItem('akk_weekly_schedule_initialized', 'true');
-      } catch {}
-    }
 
     return hasInitialized;
   }

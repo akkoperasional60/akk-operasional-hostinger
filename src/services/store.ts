@@ -1601,6 +1601,9 @@ class LogisticsStore {
   }
 
   private loadFromStorage<T>(key: string, fallback: T): T {
+    if (MYSQL_BACKED_STORAGE_KEYS.has(key) || key.startsWith('akk_admin_schedule_cache_')) {
+      return fallback;
+    }
     try {
       const data = localStorage.getItem(key);
       return data ? JSON.parse(data) : fallback;
@@ -1624,23 +1627,14 @@ class LogisticsStore {
     this.cachedSchedules = null;
   }
 
-  private saveToStorage(key: string, data: any, silent = false) {
+  private saveToStorage(key: string, _data: any, silent = false) {
     this.invalidateReadCaches();
-    // Data operasional bisnis disimpan di Hostinger MySQL (/api/*), bukan localStorage browser
-    if (MYSQL_BACKED_STORAGE_KEYS.has(key) || key.startsWith('akk_admin_schedule_cache_')) {
-      try {
-        if (typeof localStorage !== 'undefined') {
-          localStorage.removeItem(key);
-        }
-      } catch {}
-      if (!silent) this.notify();
-      return;
-    }
+    // 100% langsung ke database MySQL (/api/*), tanpa menyimpan data operasional di localStorage browser
     try {
-      safeSetItem(key, JSON.stringify(data));
-    } catch {
-      // Safe fallback - in-memory state remains fully intact
-    }
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(key);
+      }
+    } catch {}
     if (!silent) this.notify();
   }
 
@@ -3820,11 +3814,14 @@ class LogisticsStore {
 
   public async loginUserRemote(identifier: string, password: string): Promise<UserProfile | null> {
     this.lastAuthError = null;
+    const controller = new AbortController();
+    const timeoutId = typeof window !== 'undefined' ? window.setTimeout(() => controller.abort(), 8000) : null;
     try {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
+        signal: controller.signal,
         body: JSON.stringify({ identifier: identifier.trim(), password })
       });
       const payload = await response.json().catch(() => ({}));
@@ -3896,12 +3893,19 @@ class LogisticsStore {
       const previewFallback = this.tryPreviewLoginFallback(identifier, password);
       if (previewFallback) return previewFallback;
 
+      const isAbort = err?.name === 'AbortError' || String(err?.message || '').toLowerCase().includes('abort');
       this.lastAuthError = {
         status: 503,
-        message: 'Tidak dapat terhubung ke server autentikasi. Periksa koneksi jaringan atau status server.'
+        message: isAbort
+          ? 'Permintaan login melebihi batas waktu (8 detik). Periksa koneksi database MySQL atau coba hubungkan ulang.'
+          : 'Tidak dapat terhubung ke server autentikasi. Periksa koneksi jaringan atau status server.'
       };
       console.warn('[Hostinger Auth] Login gagal:', err);
       return null;
+    } finally {
+      if (timeoutId !== null && typeof window !== 'undefined') {
+        window.clearTimeout(timeoutId);
+      }
     }
   }
 
@@ -3970,17 +3974,19 @@ class LogisticsStore {
           setTimeout(() => {
             void (async () => {
               try {
-                const [fuelRes, scanRes, rotationRes, adminSchedRes] = await Promise.all([
+                const [fuelRes, scanRes, rotationRes, adminSchedRes, spareRes] = await Promise.all([
                   fetch('/api/fuel-logs', { credentials: 'same-origin', headers: authHeaders }),
                   fetch('/api/scanned-documents', { credentials: 'same-origin', headers: authHeaders }),
                   fetch('/api/logistics/crew-rotation-state', { credentials: 'same-origin', headers: authHeaders }),
-                  fetch('/api/admin-schedules', { credentials: 'same-origin', headers: authHeaders })
+                  fetch('/api/admin-schedules', { credentials: 'same-origin', headers: authHeaders }),
+                  fetch('/api/spare-parts', { credentials: 'same-origin', headers: authHeaders })
                 ]);
-                const [fuelPayload, scanPayload, rotationPayload, adminSchedPayload] = await Promise.all([
+                const [fuelPayload, scanPayload, rotationPayload, adminSchedPayload, sparePayload] = await Promise.all([
                   fuelRes.ok ? fuelRes.json().catch(() => ({})) : Promise.resolve({}),
                   scanRes.ok ? scanRes.json().catch(() => ({})) : Promise.resolve({}),
                   rotationRes.ok ? rotationRes.json().catch(() => ({})) : Promise.resolve({}),
-                  adminSchedRes.ok ? adminSchedRes.json().catch(() => ({})) : Promise.resolve({})
+                  adminSchedRes.ok ? adminSchedRes.json().catch(() => ({})) : Promise.resolve({}),
+                  spareRes.ok ? spareRes.json().catch(() => ({})) : Promise.resolve({})
                 ]);
                 let secondaryUpdated = false;
                 if (fuelRes.ok && Array.isArray(fuelPayload?.data)) {
@@ -4036,6 +4042,15 @@ class LogisticsStore {
                 }
                 if (adminSchedRes.ok && Array.isArray(adminSchedPayload?.schedules)) {
                   this.lastAdminScheduleWeeksList = adminSchedPayload.schedules;
+                  secondaryUpdated = true;
+                }
+                if (spareRes.ok && sparePayload?.success) {
+                  if (Array.isArray(sparePayload.spareParts)) {
+                    this.spareParts = sparePayload.spareParts;
+                  }
+                  if (Array.isArray(sparePayload.usages)) {
+                    this.sparePartUsages = sparePayload.usages;
+                  }
                   secondaryUpdated = true;
                 }
                 if (secondaryUpdated) {
@@ -4545,9 +4560,7 @@ class LogisticsStore {
         changed = true;
       }
       if (changed) {
-        try {
-          safeSetItem(STORAGE_KEYS.CREWS, JSON.stringify(this.crews));
-        } catch {}
+        this.saveToStorage(STORAGE_KEYS.CREWS, this.crews, true);
       }
     } else {
       matchedCrew = {
@@ -6865,13 +6878,41 @@ class LogisticsStore {
     return [...this.spareParts];
   }
 
+  public async refreshSparePartsFromServer(): Promise<{ spareParts: SparePart[]; usages: SparePartUsage[] }> {
+    try {
+      const res = await fetch('/api/spare-parts', {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: this.buildSessionAuthHeaders({ Accept: 'application/json' })
+      });
+      const payload = await res.json().catch(() => null);
+      if (res.ok && payload?.success) {
+        if (Array.isArray(payload.spareParts)) {
+          this.spareParts = payload.spareParts;
+        }
+        if (Array.isArray(payload.usages)) {
+          this.sparePartUsages = payload.usages;
+        }
+        this.notify();
+      }
+    } catch (err) {
+      console.warn('[Hostinger SpareParts] Gagal refresh dari MySQL:', err);
+    }
+    return { spareParts: [...this.spareParts], usages: [...this.sparePartUsages] };
+  }
+
   public addSparePart(part: Omit<SparePart, 'id'>): SparePart {
     const newPart: SparePart = {
       ...part,
       id: 'sp-' + Math.random().toString(36).substring(2, 9)
     };
     this.spareParts = [newPart, ...this.spareParts];
-    this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
+    void fetch('/api/spare-parts', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(newPart)
+    }).catch(err => console.warn('[MySQL SparePart POST]', err));
     this.logActivity(
       'Tambah Sparepart Baru',
       newPart.name,
@@ -6884,8 +6925,14 @@ class LogisticsStore {
 
   public updateSparePart(id: string, updated: Partial<SparePart>): void {
     const existing = this.spareParts.find(p => p.id === id);
+    const merged = existing ? { ...existing, ...updated } : updated;
     this.spareParts = this.spareParts.map(p => p.id === id ? { ...p, ...updated } : p);
-    this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
+    void fetch(`/api/spare-parts/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(merged)
+    }).catch(err => console.warn('[MySQL SparePart PUT]', err));
     if (existing) {
       this.logActivity(
         'Ubah Data Sparepart',
@@ -6900,7 +6947,12 @@ class LogisticsStore {
   public deleteSparePart(id: string): void {
     const part = this.spareParts.find(p => p.id === id);
     this.spareParts = this.spareParts.filter(p => p.id !== id);
-    this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
+    this.sparePartUsages = this.sparePartUsages.filter(u => u.partId !== id && (u as any).sparePartId !== id);
+    void fetch(`/api/spare-parts/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders()
+    }).catch(err => console.warn('[MySQL SparePart DELETE]', err));
     if (part) {
       this.logActivity(
         'Hapus Master Sparepart',
@@ -6916,10 +6968,15 @@ class LogisticsStore {
     if (!part) return;
     const newStock = part.stock + amount;
     const today = new Date().toISOString().substring(0, 10);
-    this.spareParts = this.spareParts.map(p => 
+    this.spareParts = this.spareParts.map(p =>
       p.id === id ? { ...p, stock: newStock, lastRestockDate: today, notes: notes || p.notes } : p
     );
-    this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
+    void fetch(`/api/spare-parts/${encodeURIComponent(id)}/restock`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ quantity: amount, notes })
+    }).catch(err => console.warn('[MySQL SparePart Restock]', err));
     this.logActivity(
       'Restock Sparepart Masuk',
       part.name,
@@ -6941,9 +6998,18 @@ class LogisticsStore {
       id: 'usg-' + Math.random().toString(36).substring(2, 9)
     };
 
-    // 1. Simpan ke daftar riwayat pemakaian
+    // 1. Simpan ke daftar riwayat pemakaian & langsung kirim ke MySQL
     this.sparePartUsages = [newUsage, ...this.sparePartUsages];
-    this.saveToStorage(STORAGE_KEYS.SPARE_PART_USAGES, this.sparePartUsages);
+    void fetch('/api/spare-part-usages', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        ...newUsage,
+        sparePartId: newUsage.partId,
+        date: newUsage.replacementDate
+      })
+    }).catch(err => console.warn('[MySQL SparePart Usage POST]', err));
 
     // 2. Potong stok otomatis di master inventaris gudang jika partId cocok
     if (usage.partId) {
@@ -6954,7 +7020,6 @@ class LogisticsStore {
         }
         return p;
       });
-      this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
     }
 
     // 3. Sinkronisasi tanggal servis terakhir pada armada
@@ -6969,7 +7034,6 @@ class LogisticsStore {
         }
         return f;
       });
-      this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
     }
 
     // 4. Catat ke audit log aktivitas sistem
@@ -6986,7 +7050,11 @@ class LogisticsStore {
   public deleteSparePartUsage(id: string): void {
     const item = this.sparePartUsages.find(u => u.id === id);
     this.sparePartUsages = this.sparePartUsages.filter(u => u.id !== id);
-    this.saveToStorage(STORAGE_KEYS.SPARE_PART_USAGES, this.sparePartUsages);
+    void fetch(`/api/spare-part-usages/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders()
+    }).catch(err => console.warn('[MySQL SparePart Usage DELETE]', err));
     if (item) {
       this.logActivity(
         'Hapus Log Ganti Sparepart',
@@ -7163,19 +7231,7 @@ class LogisticsStore {
     this.spareParts = [...INITIAL_SPARE_PARTS];
     this.sparePartUsages = [...INITIAL_SPARE_PART_USAGES];
     this.fuelLogs = [...INITIAL_FUEL_LOGS];
-    this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
-    this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
-    this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
-    this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
-    this.saveToStorage(STORAGE_KEYS.SALES_ORDERS, this.salesOrders);
-    this.saveToStorage(STORAGE_KEYS.ADMIN_ACTIVITIES, this.adminActivities);
-    this.saveToStorage(STORAGE_KEYS.ADMIN_SCHEDULES, this.adminSchedules);
-    this.saveToStorage(STORAGE_KEYS.LOADING_RECORDS, this.loadingRecords);
-    this.saveToStorage(STORAGE_KEYS.SKILL_PROFILES, this.skillProfiles);
-    this.saveToStorage(STORAGE_KEYS.JOBDESK_CONFIGS, this.jobdeskConfigs);
-    this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
-    this.saveToStorage(STORAGE_KEYS.SPARE_PART_USAGES, this.sparePartUsages);
-    this.saveToStorage(STORAGE_KEYS.FUEL_LOGS, this.fuelLogs);
+    this.notify();
   }
 
   // ==========================================

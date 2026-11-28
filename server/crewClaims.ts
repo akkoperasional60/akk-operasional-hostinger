@@ -324,9 +324,6 @@ function validateAndNormalizeDepartureForm(raw: unknown, trip: any, actor: any, 
     throw Object.assign(new Error('Form Keluar beserta 4 tanda tangan digital wajib dilengkapi.'), { status: 422 });
   }
   const input = raw as any;
-  if (!input.checks?.waybillMatch || !input.checks?.documentsReady) {
-    throw Object.assign(new Error('Checklist verifikasi surat jalan dan kelengkapan dokumen wajib dicentang.'), { status: 422 });
-  }
   const signatures: Record<string, string> = {};
   for (const key of DEPARTURE_SIGNATURE_KEYS) {
     const val = typeof input.signatures?.[key] === 'string' ? input.signatures[key].trim() : '';
@@ -337,6 +334,13 @@ function validateAndNormalizeDepartureForm(raw: unknown, trip: any, actor: any, 
       throw Object.assign(new Error('Ukuran gambar tanda tangan terlalu besar.'), { status: 413 });
     }
     signatures[key] = val;
+  }
+  const signerNames: Record<string, string> = {};
+  if (input.signerNames && typeof input.signerNames === 'object') {
+    for (const key of DEPARTURE_SIGNATURE_KEYS) {
+      const n = clean(input.signerNames[key]);
+      if (n) signerNames[key] = n.slice(0, 120);
+    }
   }
   const wibTime = new Date(now).toLocaleTimeString('id-ID', {
     hour: '2-digit',
@@ -352,9 +356,11 @@ function validateAndNormalizeDepartureForm(raw: unknown, trip: any, actor: any, 
   });
   return {
     summary: {
+      branchName: clean(input.summary?.branchName) || clean(trip?.originName) || '-',
       driverName: clean(input.summary?.driverName) || clean(trip?.portalCrew?.name || trip?.crew?.name) || '-',
       helperName: clean(input.summary?.helperName) || clean(trip?.portalCrewHelper?.name || trip?.crewHelper?.name) || '-',
       fleetLabel: clean(input.summary?.fleetLabel) || clean(trip?.fleet?.initialCode || trip?.armada || trip?.fleet?.plateNumber) || '-',
+      departureTime: clean(input.summary?.departureTime) || `${wibTime} WIB`,
       areaName: clean(input.summary?.areaName) || clean(trip?.areaName || trip?.store?.storeName) || '-',
       recordedAt: now,
       recordedAtWib: clean(input.summary?.recordedAtWib) || `${wibTime} WIB · ${wibDate}`
@@ -363,6 +369,7 @@ function validateAndNormalizeDepartureForm(raw: unknown, trip: any, actor: any, 
       waybillMatch: true,
       documentsReady: true
     },
+    signerNames,
     signatures,
     signedAt: now,
     signedBy: clean(actor?.full_name || actor?.fullName) || 'Kru AKK',

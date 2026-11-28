@@ -139,35 +139,14 @@ interface SharedFlowRecord {
 }
 
 function loadSharedScheduleFlowMap(): Record<string, SharedFlowRecord> {
-  try {
-    const raw = localStorage.getItem('akk_shared_schedule_flow_v1');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') return parsed;
-    }
-  } catch {}
   return {};
 }
 
 function loadGateOutConfirmMap(): Record<string, boolean | string> {
-  try {
-    const raw = localStorage.getItem('akk_driver_keluar_argo_v1');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') return parsed;
-    }
-  } catch {}
   return {};
 }
 
 function loadSavedRouteEvaluations(): TrackingEvaluation[] {
-  try {
-    const raw = localStorage.getItem('akk_tracking_evaluations_v1');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch {}
   return [];
 }
 

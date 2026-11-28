@@ -37,7 +37,7 @@ export interface NewCrewPayload {
   emergencyContact?: string;
 }
 
-const STORAGE_KEY_SAVED_CREW_MAPPINGS = 'akk_saved_spreadsheet_crew_mappings_v1';
+const inMemoryCrewMappings: Record<string, string> = {};
 
 /**
  * Calculates string similarity using Levenshtein distance (0 to 100)
@@ -118,32 +118,24 @@ export const crewAutoMapper = {
     const cleanRaw = (rawCrewName || '').trim();
     const upperRaw = cleanRaw.toUpperCase();
 
-    // Check user-saved custom mapping dictionary first
-    try {
-      const savedMappings = localStorage.getItem(STORAGE_KEY_SAVED_CREW_MAPPINGS);
-      if (savedMappings) {
-        const map = JSON.parse(savedMappings) as Record<string, string>;
-        if (map[cleanRaw] || map[upperRaw]) {
-          const targetName = map[cleanRaw] || map[upperRaw];
-          const found = catalog.find(c => c.name.toUpperCase() === targetName.toUpperCase());
-          if (found) {
-            return {
-              rawName: cleanRaw,
-              roleHint,
-              occurrenceCount: 1,
-              matchedCrewId: found.id,
-              matchedCrewName: found.name,
-              matchedCrewRole: found.role,
-              confidence: 'exact',
-              confidenceScore: 100,
-              similarityReason: 'Dicocokkan berdasarkan riwayat pemetaan kru sebelumnya',
-              isUserOverridden: true
-            };
-          }
-        }
+    // Check user-saved custom mapping dictionary in memory first
+    const targetName = inMemoryCrewMappings[cleanRaw] || inMemoryCrewMappings[upperRaw];
+    if (targetName) {
+      const found = catalog.find(c => c.name.toUpperCase() === targetName.toUpperCase());
+      if (found) {
+        return {
+          rawName: cleanRaw,
+          roleHint,
+          occurrenceCount: 1,
+          matchedCrewId: found.id,
+          matchedCrewName: found.name,
+          matchedCrewRole: found.role,
+          confidence: 'exact',
+          confidenceScore: 100,
+          similarityReason: 'Dicocokkan berdasarkan riwayat pemetaan kru sebelumnya',
+          isUserOverridden: true
+        };
       }
-    } catch {
-      // ignore
     }
 
     // 1. Exact Name Match (100% Identical, case-insensitive)
@@ -282,18 +274,11 @@ export const crewAutoMapper = {
   },
 
   /**
-   * Menyimpan pemetaan preferensi kru pengguna ke localStorage
+   * Menyimpan pemetaan preferensi kru pengguna dalam memori sesi
    */
   saveMappingPreference(rawName: string, targetCrewName: string): void {
-    try {
-      const existing = localStorage.getItem(STORAGE_KEY_SAVED_CREW_MAPPINGS);
-      const map: Record<string, string> = existing ? JSON.parse(existing) : {};
-      map[rawName.trim()] = targetCrewName.trim();
-      map[rawName.trim().toUpperCase()] = targetCrewName.trim();
-      localStorage.setItem(STORAGE_KEY_SAVED_CREW_MAPPINGS, JSON.stringify(map));
-    } catch {
-      // ignore
-    }
+    inMemoryCrewMappings[rawName.trim()] = targetCrewName.trim();
+    inMemoryCrewMappings[rawName.trim().toUpperCase()] = targetCrewName.trim();
   },
 
   /**

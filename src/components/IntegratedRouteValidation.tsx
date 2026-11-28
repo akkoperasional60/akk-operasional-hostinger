@@ -134,13 +134,6 @@ function formatDistanceLabel(km: number | null): string {
 }
 
 function loadSavedTrackingEvaluations(): TrackingEvaluation[] {
-  try {
-    const raw = localStorage.getItem('akk_tracking_evaluations_v1');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch {}
   return [];
 }
 

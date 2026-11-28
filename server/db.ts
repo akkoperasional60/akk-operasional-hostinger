@@ -37,6 +37,12 @@ export function isCircuitOpen(): boolean {
   return Date.now() < circuitOpenUntil;
 }
 
+export function resetCircuitBreaker(): void {
+  circuitOpenUntil = 0;
+  consecutiveFailures = 0;
+  localLoopbackRefusedInPreview = false;
+}
+
 function handleConnectionFailure(err: any): void {
   consecutiveFailures++;
   const errCode = String(err?.code || '');
@@ -105,7 +111,7 @@ export function getDbPool(): mysql.Pool {
 
 export async function query<T = any>(sql: string, params: any[] = []): Promise<T> {
   if (isCircuitOpen()) {
-    throw new Error('Database circuit breaker active (using instant local cache)');
+    throw new Error('Circuit breaker database aktif sementara. Klik "Coba Hubungkan Ulang" atau periksa konfigurasi MySQL.');
   }
 
   try {

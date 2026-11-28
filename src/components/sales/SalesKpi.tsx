@@ -3411,7 +3411,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                           activeDisplayedKpiList.reduce((s, r) => s + r.validasiSoWeb, 0) /
                           activeDisplayedKpiList.length
                         ).toFixed(2)
-                      : '0.0'}
+                      : '0.00'}
                     %
                   </div>
                   <p className="text-xs text-slate-500 mt-1">Ketepatan validasi SO &amp; Web</p>
@@ -3434,7 +3434,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                             0
                           ) / activeDisplayedKpiList.length
                         ).toFixed(2)
-                      : '0.0'}
+                      : '0.00'}
                     %
                   </div>
                   <p className="text-xs text-slate-500 mt-1">Penyelesaian faktur penjualan</p>

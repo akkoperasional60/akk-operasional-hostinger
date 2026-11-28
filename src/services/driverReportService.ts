@@ -26,6 +26,7 @@ export interface DriverHelperReport {
   areaName: string;
   deliveryId?: string;
   scheduleId?: string;
+  trackingNumber?: string;
   fleetId?: string;
   fleetInitialCode?: string;
   scheduledPlateNumber?: string;

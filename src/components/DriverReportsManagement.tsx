@@ -1212,6 +1212,9 @@ export const DriverReportsManagement: React.FC = () => {
       targetReturnLabel: string;
       checkinPunctuality: { status: 'tepat' | 'awal' | 'terlambat' | 'belum'; label: string; diffMinutes: number | null };
       checkoutPunctuality: { status: 'tepat' | 'awal' | 'terlambat' | 'belum'; label: string; diffMinutes: number | null };
+      fleetAuditStatus?: 'synced' | 'mismatch' | 'unscheduled';
+      expectedFleetLabel?: string;
+      matchedSchedule?: typeof schedules[number] | null;
     };
 
     const combinedMap = new Map<string, CheckinRow>();
@@ -1279,14 +1282,33 @@ export const DriverReportsManagement: React.FC = () => {
           (!cleanPlate || (s.plateNumber || '').replace(/\s+/g, '').toUpperCase() === cleanPlate))
       );
 
-      // Tarik plat nomor dan area otomatis dari jadwal Admin bila di shift belum lengkap
-      const resolvedPlate = !isPlaceholderPlate(base.plateNumber)
+      // Single Source of Truth: prioritaskan armada & plat nomor dari jadwal kiriman Admin
+      const schedFleetObj = matchedSchedule
+        ? (matchedSchedule.fleet || fleets.find(f => f.id === matchedSchedule.fleetId))
+        : undefined;
+      const schedPlateRaw = (schedFleetObj?.plateNumber || matchedSchedule?.armada || '').trim();
+      const schedPlateValid = Boolean(schedPlateRaw && !isPlaceholderPlate(schedPlateRaw));
+      const basePlateValid = Boolean(base.plateNumber && !isPlaceholderPlate(base.plateNumber));
+
+      const resolvedPlate = schedPlateValid
+        ? schedPlateRaw
+        : basePlateValid
         ? base.plateNumber.trim()
-        : matchedSchedule?.fleet?.plateNumber
-        ? matchedSchedule.fleet.plateNumber.trim()
-        : matchedSchedule?.armada && !isPlaceholderPlate(matchedSchedule.armada)
-        ? matchedSchedule.armada.trim()
         : '-';
+
+      let fleetAuditStatus: 'synced' | 'mismatch' | 'unscheduled' = 'unscheduled';
+      let expectedFleetLabel = '';
+      if (matchedSchedule) {
+        expectedFleetLabel = schedPlateValid ? formatPlateWithInitial(schedPlateRaw) : '-';
+        const baseClean = (base.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+        const schedClean = schedPlateRaw.replace(/\s+/g, '').toUpperCase();
+        const schedCodeClean = (schedFleetObj?.initialCode || matchedSchedule.armada || '').replace(/\s+/g, '').toUpperCase();
+        if (!basePlateValid || !schedClean || baseClean === schedClean || (schedCodeClean && baseClean === schedCodeClean)) {
+          fleetAuditStatus = 'synced';
+        } else {
+          fleetAuditStatus = 'mismatch';
+        }
+      }
 
       const resolvedArea = !isGenericArea(base.areaName)
         ? base.areaName.trim()
@@ -1352,7 +1374,10 @@ export const DriverReportsManagement: React.FC = () => {
         targetDepartureLabel,
         targetReturnLabel,
         checkinPunctuality: evalPunctuality(base.checkinTime, targetDepMinutes, sopTiming.isNightDeparture || targetDepMinutes >= 18 * 60),
-        checkoutPunctuality: evalPunctuality(base.checkoutTime, targetArrMinutes, false)
+        checkoutPunctuality: evalPunctuality(base.checkoutTime, targetArrMinutes, false),
+        fleetAuditStatus,
+        expectedFleetLabel,
+        matchedSchedule: matchedSchedule || null
       };
     };
 
@@ -1363,6 +1388,8 @@ export const DriverReportsManagement: React.FC = () => {
         buildRecord({
           id: r.id,
           shiftId: r.shiftId,
+          scheduleId: r.scheduleId || r.deliveryId,
+          trackingNumber: r.trackingNumber,
           date: r.date || getLocalDateStr(r.timestamp),
           driverName: r.driverName,
           helperName: r.helperName,
@@ -1423,6 +1450,7 @@ export const DriverReportsManagement: React.FC = () => {
           buildRecord({
             id: s.id,
             shiftId: s.id,
+            scheduleId: (s as any).scheduleId,
             date: s.date,
             driverName: s.driverName,
             helperName: isHelperShift ? '-' : filteredHelperCombined || '-',
@@ -1946,9 +1974,52 @@ export const DriverReportsManagement: React.FC = () => {
                             )}
                         </td>
                         <td className="py-3.5 px-4 whitespace-nowrap">
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono text-sm font-bold text-slate-900 dark:text-slate-100">
-                            {formatPlateWithInitial(item.plateNumber)}
-                          </span>
+                          <div className="flex flex-col items-start gap-1">
+                            <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono text-sm font-bold text-slate-900 dark:text-slate-100">
+                              {formatPlateWithInitial(item.plateNumber)}
+                            </span>
+                            {item.matchedSchedule && item.fleetAuditStatus === 'synced' && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-semibold">
+                                <CheckCircle2 className="w-3 h-3" />
+                                Sesuai Jadwal
+                              </span>
+                            )}
+                            {item.matchedSchedule && item.fleetAuditStatus === 'mismatch' && (
+                              <div className="flex flex-wrap items-center gap-1">
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-semibold">
+                                  <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                  Jadwal: {item.expectedFleetLabel}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const sch = item.matchedSchedule!;
+                                    const schFleet = sch.fleet || fleets.find(f => f.id === sch.fleetId);
+                                    driverReportService.syncReportsFleetFromSchedule({
+                                      scheduleId: sch.id,
+                                      trackingNumber: sch.trackingNumber,
+                                      fleetId: sch.fleetId,
+                                      plateNumber: schFleet?.plateNumber || sch.armada,
+                                      fleetInitialCode: schFleet?.initialCode || sch.armada,
+                                      driverName: sch.crew?.name,
+                                      areaName: sch.areaName || sch.store?.storeName,
+                                      date: getLocalDateStr(sch.departureDate)
+                                    });
+                                    loadReports();
+                                    addNotification(
+                                      'schedule',
+                                      'Armada Disinkronkan',
+                                      `Armada Check-In & Laporan diperbarui mengikuti jadwal admin (${item.expectedFleetLabel}).`
+                                    );
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-semibold transition-colors cursor-pointer"
+                                >
+                                  <RefreshCw className="w-2.5 h-2.5" />
+                                  Sinkronkan Armada
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3.5 px-4 text-sm font-semibold text-slate-800 dark:text-slate-200">
                           {item.areaName}
@@ -3222,10 +3293,10 @@ export const DriverReportsManagement: React.FC = () => {
                                             `Armada laporan diperbarui mengikuti jadwal kiriman admin (${fleetAudit.expectedLabel}).`
                                           );
                                         }}
-                                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-semibold transition-colors"
+                                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-semibold transition-colors cursor-pointer"
                                       >
                                         <RefreshCw className="w-2.5 h-2.5" />
-                                        Sinkronkan
+                                        Sinkronkan Armada
                                       </button>
                                     </div>
                                   )}

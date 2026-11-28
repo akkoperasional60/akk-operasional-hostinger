@@ -78,14 +78,10 @@ class DriverOfflineSyncService {
   private initSimulatedState() {
     if (typeof window === 'undefined') return;
     try {
-      const sim = localStorage.getItem(LS_SIMULATE_KEY);
-      this.isSimulatedOffline = sim === 'true';
-      this.lastSyncTime = localStorage.getItem(LS_LAST_SYNC_KEY) || null;
-      // Load fallback queue immediately from localStorage
-      const savedQueue = localStorage.getItem(LS_QUEUE_KEY);
-      if (savedQueue) {
-        this.pendingQueue = JSON.parse(savedQueue);
-      }
+      localStorage.removeItem(LS_SIMULATE_KEY);
+      localStorage.removeItem(LS_LAST_SYNC_KEY);
+      localStorage.removeItem(LS_QUEUE_KEY);
+      localStorage.removeItem(LS_CACHE_KEY);
     } catch {}
   }
 
@@ -211,9 +207,6 @@ class DriverOfflineSyncService {
    */
   public setSimulatedOffline(enabled: boolean) {
     this.isSimulatedOffline = enabled;
-    try {
-      localStorage.setItem(LS_SIMULATE_KEY, enabled ? 'true' : 'false');
-    } catch {}
     this.notify();
 
     // Jika dimatikan (kembali online) dan ada antrean, langsung sinkronkan
@@ -223,22 +216,13 @@ class DriverOfflineSyncService {
   }
 
   /**
-   * Simpan antrean aksi ke IndexedDB dan fallback localStorage
+   * Simpan antrean aksi ke IndexedDB (tanpa localStorage)
    */
   private async persistQueue() {
-    // 1. Simpan ke localStorage (fallback cepat)
-    try {
-      localStorage.setItem(LS_QUEUE_KEY, JSON.stringify(this.pendingQueue));
-    } catch (e) {
-      console.warn('[DriverOfflineSync] LocalStorage queue persist quota warning:', e);
-    }
-
-    // 2. Simpan ke IndexedDB jika tersedia
     if (this.isDbReady && this.db) {
       try {
         const tx = this.db.transaction(STORE_QUEUE, 'readwrite');
         const store = tx.objectStore(STORE_QUEUE);
-        // Clear old records & write all
         await new Promise<void>((resolve, reject) => {
           const clearReq = store.clear();
           clearReq.onsuccess = () => {
@@ -265,13 +249,7 @@ class DriverOfflineSyncService {
   }
 
   private loadQueueFromLocalStorage() {
-    try {
-      const raw = localStorage.getItem(LS_QUEUE_KEY);
-      if (raw) {
-        this.pendingQueue = JSON.parse(raw);
-        this.notify();
-      }
-    } catch {}
+    // No-op: operational data is kept in memory / MySQL without localStorage
   }
 
   private async reloadQueueFromStorage() {
@@ -379,9 +357,6 @@ class DriverOfflineSyncService {
 
       this.lastSyncTime = new Date().toLocaleTimeString('id-ID');
       this.totalSyncedCount++;
-      try {
-        localStorage.setItem(LS_LAST_SYNC_KEY, this.lastSyncTime);
-      } catch {}
 
       this.notify();
 
@@ -465,9 +440,6 @@ class DriverOfflineSyncService {
     this.totalSyncedCount += syncedCount;
     if (syncedCount > 0) {
       this.lastSyncTime = new Date().toLocaleTimeString('id-ID');
-      try {
-        localStorage.setItem(LS_LAST_SYNC_KEY, this.lastSyncTime);
-      } catch {}
     }
 
     await this.persistQueue();
@@ -519,9 +491,6 @@ class DriverOfflineSyncService {
         this.lastSyncSuccessCount++;
         this.totalSyncedCount++;
         this.lastSyncTime = new Date().toLocaleTimeString('id-ID');
-        try {
-          localStorage.setItem(LS_LAST_SYNC_KEY, this.lastSyncTime);
-        } catch {}
         await this.persistQueue();
         this.notify();
 
@@ -585,10 +554,6 @@ class DriverOfflineSyncService {
    * Simpan snapshot daftar tugas pengiriman ke cache lokal untuk akses saat offline
    */
   public async cacheDeliveries(deliveries: Schedule[]) {
-    try {
-      localStorage.setItem(LS_CACHE_KEY, JSON.stringify(deliveries));
-    } catch {}
-
     if (this.isDbReady && this.db) {
       try {
         const tx = this.db.transaction(STORE_DELIVERIES, 'readwrite');
@@ -600,7 +565,7 @@ class DriverOfflineSyncService {
   }
 
   /**
-   * Ambil snapshot tugas pengiriman yang tersimpan di cache offline
+   * Ambil snapshot tugas pengiriman yang tersimpan di IndexedDB atau store aktif
    */
   public async getCachedDeliveries(driverId?: string): Promise<Schedule[]> {
     if (this.isDbReady && this.db) {
@@ -627,14 +592,8 @@ class DriverOfflineSyncService {
   }
 
   private getFallbackCachedDeliveries(driverId?: string): Schedule[] {
-    try {
-      const raw = localStorage.getItem(LS_CACHE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as Schedule[];
-        return driverId ? parsed.filter(d => d.crewId === driverId) : parsed;
-      }
-    } catch {}
-    return logisticsStore.getSchedules();
+    const schedules = logisticsStore.getSchedules();
+    return driverId ? schedules.filter(d => d.crewId === driverId) : schedules;
   }
 }
 

@@ -81,49 +81,27 @@ class DataBridgeService {
 
     try {
       if (typeof localStorage !== 'undefined') {
-        const stored = localStorage.getItem(CONFIG_STORAGE_KEY);
-        if (stored) {
-          return { ...defaultConfig, ...JSON.parse(stored) };
-        }
+        localStorage.removeItem(CONFIG_STORAGE_KEY);
       }
-    } catch (e) {
-      console.warn('[DataBridge] Failed to load config from storage:', e);
-    }
+    } catch {}
     return defaultConfig;
   }
 
   private saveConfigToStorage(): void {
-    try {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(this.config));
-      }
-    } catch (e) {
-      console.error('[DataBridge] Failed to persist config:', e);
-    }
+    // Disimpan di memori sesi (tanpa localStorage)
   }
 
   private loadLogs(): DataBridgeLogEntry[] {
     try {
       if (typeof localStorage !== 'undefined') {
-        const stored = localStorage.getItem(LOGS_STORAGE_KEY);
-        if (stored) {
-          return JSON.parse(stored);
-        }
+        localStorage.removeItem(LOGS_STORAGE_KEY);
       }
-    } catch (e) {
-      console.warn('[DataBridge] Failed to load logs from storage:', e);
-    }
+    } catch {}
     return [];
   }
 
   private saveLogsToStorage(): void {
-    try {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(LOGS_STORAGE_KEY, JSON.stringify(this.logs.slice(0, 50)));
-      }
-    } catch (e) {
-      console.error('[DataBridge] Failed to persist logs:', e);
-    }
+    // Disimpan di memori sesi (tanpa localStorage)
   }
 
   public notifyListeners(): void {

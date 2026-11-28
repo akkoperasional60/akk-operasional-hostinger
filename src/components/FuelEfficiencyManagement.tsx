@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import {
   AlertTriangle,
   ArrowDown,
@@ -201,7 +202,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
   useEffect(() => {
     setLogsCurrentPage(1);
-  }, [searchQuery, filterFleetId, filterSpbu, filterStatus, filterFuelType, logSortBy, selectedBranchFilter]);
+  }, [searchQuery, filterFleetId, filterSpbu, filterStatus, filterFuelType, filterDate, filterArea, logSortBy, selectedBranchFilter]);
 
   useEffect(() => {
     if (!activeModalDropdown && !isGasStationDropdownOpen) return;
@@ -465,7 +466,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
           (l.plateNumber && normalizePlateKey(l.plateNumber) === normalizePlateKey(fleet.plateNumber))
       );
       const totalLogs = logs.length;
-      const totalLiters = logs.reduce((acc, l) => acc + l.liters, 0);
+      const totalLiters = Number(logs.reduce((acc, l) => acc + l.liters, 0).toFixed(2));
       const totalCost = logs.reduce((acc, l) => acc + l.totalCost, 0);
       const totalDistanceKm = logs.reduce((acc, l) => acc + l.distanceKm, 0);
 
@@ -545,7 +546,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     const scores: DriverFuelScore[] = Array.from(driverMap.values()).map(item => {
       const totalTrips = item.logs.length;
       const totalDistanceKm = item.logs.reduce((acc, l) => acc + l.distanceKm, 0);
-      const totalLiters = item.logs.reduce((acc, l) => acc + l.liters, 0);
+      const totalLiters = Number(item.logs.reduce((acc, l) => acc + l.liters, 0).toFixed(2));
       const avgKmPerLiter = totalLiters > 0 ? Number((totalDistanceKm / totalLiters).toFixed(2)) : 0;
 
       const avgEfficiencyRatio =
@@ -586,7 +587,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
   // Branch-scoped KPI Summary
   const kpiSummary = useMemo(() => {
-    const totalLiters = Number(reconciledLogs.reduce((acc, l) => acc + l.liters, 0).toFixed(1));
+    const totalLiters = Number(reconciledLogs.reduce((acc, l) => acc + l.liters, 0).toFixed(2));
     const totalCost = reconciledLogs.reduce((acc, l) => acc + l.totalCost, 0);
     const totalDistanceKm = reconciledLogs.reduce((acc, l) => acc + l.distanceKm, 0);
     const overallAvgKmPerLiter = totalLiters > 0 ? Number((totalDistanceKm / totalLiters).toFixed(2)) : 0;
@@ -630,7 +631,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
         map.set(iso, { fullDate: iso, date: iso.slice(5), liters: 0, distance: 0 });
       }
       const item = map.get(iso)!;
-      item.liters = Number((item.liters + l.liters).toFixed(1));
+      item.liters = Number((item.liters + l.liters).toFixed(2));
       item.distance += l.distanceKm;
     });
 
@@ -928,7 +929,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     setFormDate(log.date || new Date().toISOString().split('T')[0]);
     setFormFuelType(log.fuelType || 'BioSolar');
     setFormCostPerLiter(log.costPerLiter !== undefined ? String(log.costPerLiter) : '6800');
-    setFormLiters(String(log.liters || ''));
+    setFormLiters(log.liters ? Number(log.liters).toFixed(2) : '');
     setFormStartOdo(String(log.startOdometerKm || ''));
     setFormEndOdo(String(log.endOdometerKm || ''));
     setFormGasStation(log.gasStation || 'SPBU Farly');
@@ -1063,7 +1064,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       helperName: formHelperName || undefined,
       date: formDate,
       fuelType: formFuelType,
-      liters: Number(formLiters),
+      liters: Number(Number(formLiters).toFixed(2)),
       costPerLiter: Number(formCostPerLiter) || 6800,
       startOdometerKm: startKm,
       endOdometerKm: endKm,
@@ -1154,7 +1155,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       return [...list].sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.createdAt || '').localeCompare(b.createdAt || ''));
     }
     return [...list].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || '').localeCompare(a.createdAt || ''));
-  }, [reconciledLogs, searchQuery, filterFleetId, filterStatus, filterFuelType, filterSpbu, logSortBy, cleanCanonicalFleets, fleets]);
+  }, [reconciledLogs, searchQuery, filterFleetId, filterStatus, filterFuelType, filterSpbu, filterDate, filterArea, logSortBy, cleanCanonicalFleets, fleets]);
 
   const totalLogsPages = useMemo(
     () => Math.max(1, Math.ceil(filteredLogs.length / LOGS_PER_PAGE)),
@@ -1181,57 +1182,55 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
   const calcOutput = useMemo(() => {
     const target = FUEL_TARGET_RATIOS[calcFleetType]?.target || 7.5;
-    const estLiters = Number((calcDistanceKm / target).toFixed(1));
+    const estLiters = Number((calcDistanceKm / target).toFixed(2));
     const estTotalCost = Math.round(estLiters * calcCustomPrice);
     const costPerKm = calcDistanceKm > 0 ? Math.round(estTotalCost / calcDistanceKm) : 0;
     const costPerBox = calcCargoBoxes > 0 ? Math.round(estTotalCost / calcCargoBoxes) : 0;
     return { target, estLiters, estTotalCost, costPerKm, costPerBox };
   }, [calcFleetType, calcDistanceKm, calcCustomPrice, calcCargoBoxes]);
 
-  const handleExportCSV = () => {
-    const headers = [
-      'ID Log', 'Tanggal', 'Cabang', 'Plat Nomor', 'Inisial', 'Tipe Kendaraan',
-      'Driver', 'Helper', 'Jenis BBM', 'Liter', 'Harga/L', 'Total Biaya (Rp)',
-      'KM Awal', 'KM Akhir', 'Jarak (KM)', 'Sumber Jarak', 'Rasio (KM/L)',
-      'Standar Target', 'Status Efisiensi', 'SPBU', 'Rute Perjalanan', 'Catatan'
-    ];
-
-    const rows = filteredLogs.map(l => {
+  const handleExportExcel = () => {
+    const rows = filteredLogs.map((l, idx) => {
       const bId = resolveLogBranchId(l);
       const bLabel = bId === 'cab-sidoarjo' ? 'Cabang Sidoarjo' : 'Cabang Nusantara';
-      return [
-        l.id,
-        l.date,
-        bLabel,
-        l.plateNumber,
-        l.initialCode || '-',
-        l.vehicleType,
-        l.driverName,
-        l.helperName || '-',
-        l.fuelType,
-        l.liters,
-        l.costPerLiter,
-        l.totalCost,
-        l.startOdometerKm,
-        l.endOdometerKm,
-        l.distanceKm,
-        l.distanceSource === 'portal' ? 'Portal Driver' : 'Input BBM',
-        l.ratioKmPerLiter,
-        l.targetRatio,
-        l.efficiencyStatus,
-        `"${l.gasStation}"`,
-        `"${l.routeTrip || '-'}"`,
-        `"${l.notes || '-'}"`
-      ];
+      return {
+        'No': idx + 1,
+        'ID Log': l.id,
+        'Tanggal': l.date,
+        'Cabang': bLabel,
+        'Plat Nomor': l.plateNumber,
+        'Inisial': l.initialCode || '-',
+        'Tipe Kendaraan': l.vehicleType,
+        'Driver': l.driverName,
+        'Helper': l.helperName || '-',
+        'Jenis BBM': l.fuelType,
+        'Volume (Liter)': Number(Number(l.liters || 0).toFixed(2)),
+        'Harga/L (Rp)': l.costPerLiter,
+        'Total Biaya (Rp)': l.totalCost,
+        'KM Awal': l.startOdometerKm,
+        'KM Akhir': l.endOdometerKm,
+        'Jarak (KM)': l.distanceKm,
+        'Sumber Jarak': l.distanceSource === 'portal' ? 'Portal Driver' : 'Input BBM',
+        'Rasio (KM/L)': l.ratioKmPerLiter,
+        'Standar Target': l.targetRatio,
+        'Status Efisiensi': l.efficiencyStatus,
+        'SPBU': l.gasStation,
+        'Rute Perjalanan': l.routeTrip || '-',
+        'Catatan': l.notes || '-'
+      };
     });
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const link = document.createElement('a');
-    link.setAttribute('href', encodeURI(csvContent));
-    link.setAttribute('download', `efisiensi_bbm_akk_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [
+      { wch: 5 }, { wch: 14 }, { wch: 12 }, { wch: 18 }, { wch: 14 },
+      { wch: 12 }, { wch: 16 }, { wch: 22 }, { wch: 20 }, { wch: 12 },
+      { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 12 }, { wch: 12 },
+      { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 22 },
+      { wch: 22 }, { wch: 28 }, { wch: 24 }
+    ];
+    XLSX.utils.book_append_sheet(wb, ws, 'Audit_Riwayat_BBM');
+    XLSX.writeFile(wb, `efisiensi_bbm_akk_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   // Calendar grid helper for modal date picker
@@ -1316,11 +1315,11 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
             <button
               type="button"
-              onClick={handleExportCSV}
+              onClick={handleExportExcel}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition cursor-pointer whitespace-nowrap"
             >
               <Download className="w-3.5 h-3.5 text-slate-500" />
-              <span>CSV</span>
+              <span>Export Excel</span>
             </button>
 
             <button
@@ -1339,7 +1338,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
           <div className="p-4 rounded-xl border border-slate-200 bg-white">
             <div className="text-xs font-semibold text-slate-500">Total Konsumsi &amp; Biaya BBM</div>
             <div className="text-2xl font-bold text-slate-900 font-mono tabular-nums mt-1">
-              {kpiSummary.totalLiters.toLocaleString('id-ID')} <span className="text-sm font-medium text-slate-500">Liter</span>
+              {kpiSummary.totalLiters.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-sm font-medium text-slate-500">Liter</span>
             </div>
             <div className="text-xs text-slate-500 mt-1 tabular-nums">
               Rp {(kpiSummary.totalCost / 1000000).toFixed(2)} Juta · Rp {kpiSummary.overallAvgCostPerKm.toLocaleString('id-ID')}/KM
@@ -1809,7 +1808,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                         )}
                       </td>
                       <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap">
-                        {item.totalLiters.toLocaleString('id-ID')} L
+                        {item.totalLiters.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L
                       </td>
                       <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-slate-900 whitespace-nowrap">
                         {item.avgLKm}
@@ -1931,7 +1930,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     <td className="py-3 px-4 text-xs text-slate-600 whitespace-nowrap">{item.areaKirim}</td>
                     <td className="py-3 px-4 text-right font-mono tabular-nums">{item.totalLogs}x</td>
                     <td className="py-3 px-4 text-right font-mono tabular-nums font-semibold text-slate-900">
-                      {item.totalLiters.toLocaleString('id-ID')} L
+                      {item.totalLiters.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L
                     </td>
                     <td className="py-3 px-4 text-right font-mono tabular-nums font-semibold text-blue-600">
                       {item.totalDistanceKm.toLocaleString('id-ID')}
@@ -2037,7 +2036,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                       <td className="py-3 px-4 text-right font-mono tabular-nums font-semibold text-blue-600">
                         {d.totalDistanceKm.toLocaleString('id-ID')} KM
                       </td>
-                      <td className="py-3 px-4 text-right font-mono tabular-nums">{d.totalLiters.toLocaleString('id-ID')} L</td>
+                      <td className="py-3 px-4 text-right font-mono tabular-nums">{d.totalLiters.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L</td>
                       <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-slate-900">
                         {d.avgKmPerLiter}
                       </td>
@@ -2234,7 +2233,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                           </div>
                         </td>
                         <td className="py-3.5 px-4 text-right font-mono tabular-nums whitespace-nowrap text-xs">
-                          <span className="font-semibold text-slate-900">{log.liters} L</span>
+                          <span className="font-semibold text-slate-900">{Number(log.liters || 0).toFixed(2)} L</span>
                           <span className="text-slate-400 mx-1">·</span>
                           <span className="text-slate-600">Rp {log.totalCost.toLocaleString('id-ID')}</span>
                         </td>
@@ -2434,7 +2433,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   </button>
 
                   {activeModalDropdown === 'fleet' && (
-                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
                       <div className="p-2 border-b border-slate-100">
                         <input
                           type="text"
@@ -2481,7 +2480,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   </button>
 
                   {activeModalDropdown === 'date' && (
-                    <div className="absolute right-0 top-full mt-1 z-30 w-72 bg-white border border-slate-200 rounded-lg shadow-lg p-3 space-y-2">
+                    <div className="absolute right-0 top-full mt-1 z-30 w-72 bg-white border border-slate-200 rounded-lg shadow-sm p-3 space-y-2">
                       <div className="flex items-center justify-between">
                         <button
                           type="button"
@@ -2544,7 +2543,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   </button>
 
                   {activeModalDropdown === 'driver' && (
-                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
                       <div className="p-2 border-b border-slate-100">
                         <input
                           type="text"
@@ -2590,7 +2589,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   </button>
 
                   {activeModalDropdown === 'helper' && (
-                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
                       <div className="p-2 border-b border-slate-100">
                         <input
                           type="text"
@@ -2682,7 +2681,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-blue-600"
                   />
                   {isGasStationDropdownOpen && (
-                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-lg divide-y divide-slate-100">
+                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-sm divide-y divide-slate-100">
                       {['SPBU Farly', 'SPBU Gajah Mada', 'SPBU Luar / Urgent'].map(st => (
                         <button
                           key={st}
@@ -2741,7 +2740,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   </button>
 
                   {activeModalDropdown === 'area' && (
-                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
                       <div className="p-2 border-b border-slate-100">
                         <input
                           type="text"
@@ -2930,7 +2929,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
                 <div>
                   <div className="text-xs text-slate-500">Estimasi BBM</div>
-                  <div className="text-lg font-bold text-slate-900 font-mono tabular-nums">{calcOutput.estLiters} L</div>
+                  <div className="text-lg font-bold text-slate-900 font-mono tabular-nums">{calcOutput.estLiters.toFixed(2)} L</div>
                   <div className="text-[11px] text-slate-500">Target {calcOutput.target} KM/L</div>
                 </div>
                 <div>
@@ -2995,7 +2994,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                 ...(selectedLogForDetail.helperName ? [{ label: 'Helper', value: selectedLogForDetail.helperName }] : []),
                 { label: 'SPBU', value: selectedLogForDetail.gasStation },
                 { label: 'Area Kirim', value: selectedLogForDetail.routeTrip || '-' },
-                { label: 'Volume & Jenis', value: `${selectedLogForDetail.liters} L (${selectedLogForDetail.fuelType})` },
+                { label: 'Volume & Jenis', value: `${Number(selectedLogForDetail.liters || 0).toFixed(2)} L (${selectedLogForDetail.fuelType})` },
                 { label: 'Total Biaya', value: `Rp ${selectedLogForDetail.totalCost.toLocaleString('id-ID')}` },
                 { label: 'Odometer', value: `${selectedLogForDetail.startOdometerKm} – ${selectedLogForDetail.endOdometerKm} KM` },
                 {

@@ -172,9 +172,9 @@ const DEFAULT_WIDGET_CONFIGS: WidgetConfig[] = [
   }
 ];
 
-const STORAGE_KEY = 'akk_logistics_dashboard_widgets_v2';
-const LAYOUT_STORAGE_KEY = 'akk_logistics_dashboard_layout_col_v2';
-const PERIOD_STORAGE_KEY = 'akk_logistics_dashboard_period_v2';
+let inMemoryWidgets: WidgetConfig[] | null = null;
+let inMemoryLayoutCols: '1' | '2' | '3' = '2';
+let inMemoryPeriodFilter: 'today' | '7days' | 'month' | 'all' = 'all';
 
 interface LogisticsWidgetsDashboardProps {
   onNavigate?: (tab: NavTab) => void;
@@ -183,39 +183,14 @@ interface LogisticsWidgetsDashboardProps {
 export const LogisticsWidgetsDashboard: React.FC<LogisticsWidgetsDashboardProps> = ({ onNavigate }) => {
   // Widget configuration state
   const [widgets, setWidgets] = useState<WidgetConfig[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const merged = DEFAULT_WIDGET_CONFIGS.map(def => {
-            const found = parsed.find((p: any) => p.id === def.id || p.tab === def.tab);
-            return found ? { ...def, ...found } : def;
-          });
-          return merged.sort((a, b) => a.order - b.order);
-        }
-      }
-    } catch {}
-    return DEFAULT_WIDGET_CONFIGS;
+    return inMemoryWidgets ? [...inMemoryWidgets] : DEFAULT_WIDGET_CONFIGS;
   });
 
   // Layout column density: 1, 2, or 3 columns
-  const [layoutCols, setLayoutCols] = useState<'1' | '2' | '3'>(() => {
-    try {
-      const saved = localStorage.getItem(LAYOUT_STORAGE_KEY);
-      if (saved === '1' || saved === '2' || saved === '3') return saved;
-    } catch {}
-    return '2';
-  });
+  const [layoutCols, setLayoutCols] = useState<'1' | '2' | '3'>(() => inMemoryLayoutCols);
 
   // Period filter: 'today' | '7days' | 'month' | 'all'
-  const [periodFilter, setPeriodFilter] = useState<'today' | '7days' | 'month' | 'all'>(() => {
-    try {
-      const saved = localStorage.getItem(PERIOD_STORAGE_KEY);
-      if (saved === 'today' || saved === '7days' || saved === 'month' || saved === 'all') return saved;
-    } catch {}
-    return 'all';
-  });
+  const [periodFilter, setPeriodFilter] = useState<'today' | '7days' | 'month' | 'all'>(() => inMemoryPeriodFilter);
 
   // Refresh animation state
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -282,20 +257,16 @@ export const LogisticsWidgetsDashboard: React.FC<LogisticsWidgetsDashboardProps>
     }, 600);
   };
 
-  // Save layout column preference
+  // Save layout column preference in memory
   const handleSetLayoutCols = (cols: '1' | '2' | '3') => {
     setLayoutCols(cols);
-    try {
-      localStorage.setItem(LAYOUT_STORAGE_KEY, cols);
-    } catch {}
+    inMemoryLayoutCols = cols;
   };
 
-  // Save period preference
+  // Save period preference in memory
   const handleSetPeriodFilter = (p: 'today' | '7days' | 'month' | 'all') => {
     setPeriodFilter(p);
-    try {
-      localStorage.setItem(PERIOD_STORAGE_KEY, p);
-    } catch {}
+    inMemoryPeriodFilter = p;
   };
 
   // Open customize modal
@@ -380,9 +351,7 @@ export const LogisticsWidgetsDashboard: React.FC<LogisticsWidgetsDashboardProps>
       .sort((a, b) => a.order - b.order);
 
     setWidgets(sorted);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(sorted));
-    } catch {}
+    inMemoryWidgets = sorted;
 
     setIsCustomizeModalOpen(false);
     setSaveToast('Tata letak widget dashboard berhasil disimpan!');

@@ -398,7 +398,6 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
 
   const wasOpenRef = React.useRef<boolean>(false);
   const lastInitIdRef = React.useRef<string>('');
-  const DRAFT_KEY = 'akk_checklist_modal_draft_v1';
 
   // Sync state ONLY when modal opens from closed state or when initialChecklist ID explicitly changes
   React.useEffect(() => {
@@ -422,23 +421,6 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
 
     wasOpenRef.current = true;
     lastInitIdRef.current = currentInitId;
-
-    // Check if there is a recent in-progress draft in sessionStorage (e.g., if Android WebView reloaded during camera capture)
-    try {
-      const rawDraft = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(DRAFT_KEY) : null;
-      if (rawDraft) {
-        const draft = JSON.parse(rawDraft);
-        if (draft && draft.checklist && (draft.plateNumber === plateNumber || draft.driverId === driverId)) {
-          setChecklist(draft.checklist);
-          setNotes(draft.notes || '');
-          setOdometerInput(draft.odometerInput || '');
-          setFuelPercent(draft.fuelPercent || 80);
-          setInspectionType(draft.inspectionType || defaultInspectionType || 'pre_trip');
-          setPhotoUrl(draft.photoUrl || null);
-          return;
-        }
-      }
-    } catch {}
 
     if (initialChecklist) {
       const syncedItems = driverChecklistService.syncItemsWithStandard(initialChecklist.items);
@@ -474,27 +456,7 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
     }
   }, [isOpen, initialChecklist, driverId, fleetId, plateNumber, vehicleType, driverName, defaultInspectionType, canSelectPostTrip]);
 
-  // Persist draft in sessionStorage while modal is open so native camera reloads don't lose progress
-  React.useEffect(() => {
-    if (!isOpen) return;
-    try {
-      if (typeof sessionStorage !== 'undefined') {
-        sessionStorage.setItem(
-          DRAFT_KEY,
-          JSON.stringify({
-            driverId,
-            plateNumber,
-            checklist,
-            notes,
-            odometerInput,
-            fuelPercent,
-            inspectionType,
-            photoUrl
-          })
-        );
-      }
-    } catch {}
-  }, [isOpen, driverId, plateNumber, checklist, notes, odometerInput, fuelPercent, inspectionType, photoUrl]);
+
 
   React.useEffect(() => {
     if (isOpen && crewRole === 'helper') {
@@ -605,11 +567,6 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
       setNotes('');
       setOdometerInput('');
       setPhotoUrl(null);
-      try {
-        if (typeof sessionStorage !== 'undefined') {
-          sessionStorage.removeItem(DRAFT_KEY);
-        }
-      } catch {}
       if (cameraInputRef.current) {
         cameraInputRef.current.value = '';
       }

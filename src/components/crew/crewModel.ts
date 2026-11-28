@@ -2,8 +2,8 @@ import type { Schedule, UserProfile, Crew } from '../../types';
 import { branchStore } from '../../services/branchStore';
 import { logisticsStore } from '../../services/store';
 
-export const QA_STORAGE_KEY = 'akk_qa_kiriman_sandbox_v63';
 export const QA_EVENT = 'akk-qa-kiriman-updated';
+let inMemoryQaTrips: any[] = [];
 export type CrewSlot = 'driver' | 'helper';
 export type TripPhase = 'waiting' | 'going' | 'returned';
 export type WorkAction = 'bbm' | 'kendala' | 'toko' | 'retur' | 'form_kirim';
@@ -104,6 +104,8 @@ export interface DepartureValidationData {
     helperName: string;
     fleetLabel: string;
     areaName: string;
+    branchName?: string;
+    departureTime?: string;
     recordedAt: string;
     recordedAtWib: string;
   };
@@ -112,6 +114,7 @@ export interface DepartureValidationData {
     documentsReady: boolean;
   };
   signatures: Record<DepartureSignatureKey, string>;
+  signerNames?: Partial<Record<DepartureSignatureKey, string>>;
   signedAt: string;
   signedBy?: string;
   gps?: { latitude: number; longitude: number; accuracy: number };
@@ -171,8 +174,7 @@ export function slotForUser(trip: FieldTrip, user: UserProfile): CrewSlot | null
 
 export function readQaTrips(): FieldTrip[] {
   try {
-    const rows: any[] = JSON.parse(localStorage.getItem(QA_STORAGE_KEY) || '[]');
-    if (!Array.isArray(rows)) return [];
+    const rows: any[] = Array.isArray(inMemoryQaTrips) ? inMemoryQaTrips : [];
     return rows.filter(t => t && typeof t.id === 'string' && typeof t.branchId === 'string' && typeof t.area === 'string')
       .slice(0, 120).map(t => ({
         id: t.id, branchId: t.branchId, area: t.area, fleetLabel: t.fleetLabel || 'Belum dipilih',
@@ -193,8 +195,7 @@ export function saveQaTripPatch(tripId: string, change: (trip: FieldTrip) => Fie
   const found = all.find(t => t.id === tripId);
   if (!found) throw new Error('Kiriman uji tidak tersedia. Muat ulang halaman.');
   const updated = change(found);
-  const next = all.map(t => t.id === tripId ? updated : t).map(({ source: _source, schedule: _schedule, ...rest }) => rest);
-  localStorage.setItem(QA_STORAGE_KEY, JSON.stringify(next));
+  inMemoryQaTrips = all.map(t => t.id === tripId ? updated : t).map(({ source: _source, schedule: _schedule, ...rest }) => rest);
   window.dispatchEvent(new Event(QA_EVENT));
   return updated;
 }
@@ -287,8 +288,23 @@ export function getAuthHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}`, 'x-akk-session-token': token } : {};
 }
 
+async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit, timeoutMs = 8000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error('Koneksi server lambat (batas waktu 8000ms). Tekan Coba Lagi.');
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 export async function fetchQaTrips(): Promise<FieldTrip[]> {
-  const response = await fetch('/api/crew-qa/trips', {headers:getAuthHeaders(),credentials:'same-origin',cache:'no-store'});
+  const response = await fetchWithTimeout('/api/crew-qa/trips', {headers:getAuthHeaders(),credentials:'same-origin',cache:'no-store'});
   if (!response.ok) throw new Error('Jadwal uji server belum tersedia. Coba buka ulang.');
   const result = await response.json();
   if (!result?.success || !Array.isArray(result.trips)) throw new Error('Data jadwal uji tidak valid.');
@@ -308,12 +324,12 @@ export async function fetchQaTrips(): Promise<FieldTrip[]> {
 }
 
 export async function fetchLiveTrips(): Promise<FieldTrip[]> {
-  let response = await fetch('/api/crew-assignments', { headers: getAuthHeaders(), credentials: 'same-origin', cache: 'no-store' });
+  let response = await fetchWithTimeout('/api/crew-assignments', { headers: getAuthHeaders(), credentials: 'same-origin', cache: 'no-store' });
   if (response.status === 401 && logisticsStore.isPreviewEnvironment()) {
     const recovered = await logisticsStore.ensurePreviewServerSession(true);
     if (recovered) {
       await logisticsStore.hydrateOperationalDataFromHostinger(true);
-      response = await fetch('/api/crew-assignments', { headers: getAuthHeaders(), credentials: 'same-origin', cache: 'no-store' });
+      response = await fetchWithTimeout('/api/crew-assignments', { headers: getAuthHeaders(), credentials: 'same-origin', cache: 'no-store' });
     }
   }
   const result = await response.json().catch(() => ({}));

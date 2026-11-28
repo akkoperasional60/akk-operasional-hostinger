@@ -242,7 +242,7 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
   }, [fleetSummaries, statusFilter, sortOrder]);
 
   const activeMetrics = useMemo(() => {
-    const totalLiters = Number(displayedFleetSummaries.reduce((sum, f) => sum + f.totalLiters, 0).toFixed(1));
+    const totalLiters = Number(displayedFleetSummaries.reduce((sum, f) => sum + f.totalLiters, 0).toFixed(2));
     const totalCost = displayedFleetSummaries.reduce((sum, f) => sum + f.totalCost, 0);
     const totalDistance = displayedFleetSummaries.reduce((sum, f) => sum + f.totalDistanceKm, 0);
     const totalRefuels = displayedFleetSummaries.reduce((sum, f) => sum + f.refuelCount, 0);
@@ -503,7 +503,7 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
               </div>
 
               {isCalendarOpen && (
-                <div className="absolute left-0 top-full mt-2 z-50 w-80 bg-white border border-slate-200 rounded-xl shadow-lg p-3.5 space-y-3">
+                <div className="absolute left-0 top-full mt-2 z-50 w-80 bg-white border border-slate-200 rounded-xl p-3.5 space-y-3">
                   <div className="flex items-center justify-between pb-2 border-b border-slate-100">
                     <button
                       type="button"
@@ -665,15 +665,15 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
 
         {/* 5 SUMMARY STRIPS */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 pt-2">
-          <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/70">
+          <div className="p-3.5 rounded-lg border border-slate-200 bg-white">
             <span className="text-xs text-slate-500 block font-medium">Total Konsumsi</span>
             <span className="text-xl font-bold text-slate-900 font-mono tabular-nums mt-0.5 block">
-              {activeMetrics.totalLiters.toLocaleString('id-ID')} L
+              {activeMetrics.totalLiters.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L
             </span>
             <span className="text-xs text-slate-500 block mt-0.5">{activeMetrics.totalRefuels}x pengisian</span>
           </div>
 
-          <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/70">
+          <div className="p-3.5 rounded-lg border border-slate-200 bg-white">
             <span className="text-xs text-slate-500 block font-medium">Total Biaya BBM</span>
             <span className="text-xl font-bold text-slate-900 font-mono tabular-nums mt-0.5 block">
               {formatRupiah(activeMetrics.totalCost)}
@@ -681,7 +681,7 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
             <span className="text-xs text-slate-500 block mt-0.5">Rp {activeMetrics.avgCostPerKm.toLocaleString('id-ID')}/KM</span>
           </div>
 
-          <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/70">
+          <div className="p-3.5 rounded-lg border border-slate-200 bg-white">
             <span className="text-xs text-slate-500 block font-medium">Jarak Tempuh Total</span>
             <span className="text-xl font-bold text-blue-600 font-mono tabular-nums mt-0.5 block">
               {activeMetrics.totalDistance.toLocaleString('id-ID')} KM
@@ -689,7 +689,7 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
             <span className="text-xs text-slate-500 block mt-0.5">Tersinkron KM driver</span>
           </div>
 
-          <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/70">
+          <div className="p-3.5 rounded-lg border border-slate-200 bg-white">
             <span className="text-xs text-slate-500 block font-medium">Rerata Rasio</span>
             <span className="text-xl font-bold text-slate-900 font-mono tabular-nums mt-0.5 block">
               {activeMetrics.avgKmPerLiter} KM/L
@@ -697,7 +697,7 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
             <span className="text-xs text-slate-500 block mt-0.5">Target standar 7.5 KM/L</span>
           </div>
 
-          <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/70">
+          <div className="p-3.5 rounded-lg border border-slate-200 bg-white">
             <span className="text-xs text-slate-500 block font-medium">Konsumsi Liter / KM</span>
             <span className="text-xl font-bold text-slate-900 font-mono tabular-nums mt-0.5 block">
               {activeMetrics.avgLiterPerKm}
@@ -762,7 +762,7 @@ export const FuelWeeklyReportView: React.FC<FuelWeeklyReportViewProps> = ({
                     </td>
                     <td className="py-3.5 px-3.5 text-slate-600 text-xs whitespace-nowrap">{f.vehicleType}</td>
                     <td className="py-3.5 px-3.5 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap">{f.refuelCount}x</td>
-                    <td className="py-3.5 px-3.5 text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">{f.totalLiters} L</td>
+                    <td className="py-3.5 px-3.5 text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">{Number(f.totalLiters || 0).toFixed(2)} L</td>
                     <td className="py-3.5 px-3.5 text-right font-mono tabular-nums font-semibold text-blue-600 whitespace-nowrap">{f.totalDistanceKm.toLocaleString('id-ID')}</td>
                     <td className="py-3.5 px-3.5 text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">{formatRupiah(f.totalCost)}</td>
                     <td className="py-3.5 px-3.5 text-right font-mono tabular-nums font-bold text-slate-900 whitespace-nowrap">{f.avgKmPerLiter}</td>

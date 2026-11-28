@@ -15,9 +15,9 @@ import { branchStore } from '../services/branchStore';
  * schedules, GPS records or payroll data are written by this component.
  * The assigned TASK ROLE comes from the selected slot, never user.role.
  */
-const QA_STORAGE_KEY = 'akk_qa_kiriman_sandbox_v63';
 const QA_EVENT = 'akk-qa-kiriman-updated';
 const QA_EMAIL = /^akk-qa-(driver|helper)-[a-z0-9-]+@example\.com$/i;
+let inMemoryTestTrips: any[] = [];
 
 type CrewSlot = 'driver' | 'helper';
 type TripPhase = 'waiting' | 'going' | 'returned';
@@ -51,17 +51,13 @@ export function isQaCrewUser(user: UserProfile | null | undefined): boolean {
 }
 
 function getTrips(): QaTrip[] {
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(QA_STORAGE_KEY) || '[]');
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((t): t is QaTrip =>
-      Boolean(t && typeof t === 'object' && typeof t.id === 'string' &&
-        typeof t.area === 'string' && typeof t.branchId === 'string')
-    ).slice(0, 60);
-  } catch { return []; }
+  return inMemoryTestTrips.filter((t): t is QaTrip =>
+    Boolean(t && typeof t === 'object' && typeof t.id === 'string' &&
+      typeof t.area === 'string' && typeof t.branchId === 'string')
+  ).slice(0, 60);
 }
 function publishTrips(trips: QaTrip[]) {
-  localStorage.setItem(QA_STORAGE_KEY, JSON.stringify(trips.slice(0, 60)));
+  inMemoryTestTrips = trips.slice(0, 60);
   window.dispatchEvent(new Event(QA_EVENT));
 }
 function dateDisplay(date: string) {
@@ -93,10 +89,8 @@ export const CrewTestWorkspace: React.FC<{ user: UserProfile }> = ({ user }) => 
 
   useEffect(() => {
     const update = () => setTrips(getTrips());
-    window.addEventListener('storage', update);
     window.addEventListener(QA_EVENT, update);
     return () => {
-      window.removeEventListener('storage', update);
       window.removeEventListener(QA_EVENT, update);
     };
   }, []);

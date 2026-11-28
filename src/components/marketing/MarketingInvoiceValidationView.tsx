@@ -62,7 +62,12 @@ function getEligibleMarketingSalesUsers(
     if (u.status !== 'approved') return false;
     const roleNorm = String(u.role || '').toLowerCase().trim();
     const titleNorm = String(getUserRoleDisplayTitle(u.role) || '').toLowerCase().trim();
-    return roleNorm === 'marketing_offline' || titleNorm === 'marketing offline';
+    return (
+      roleNorm === 'marketing_offline' ||
+      roleNorm === 'spv_marketing_offline' ||
+      titleNorm === 'marketing offline' ||
+      titleNorm === 'spv marketing offline'
+    );
   });
 }
 
@@ -1211,7 +1216,7 @@ export const MarketingSalesMappingView: React.FC<{
               {editingMappingId ? 'Perbarui Data Mapping Nama Sales' : 'Tambah Mapping Nama Sales Baru'}
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Dropdown sumber akun hanya menarik user database dengan role Marketing Offline
+              Dropdown sumber akun menarik user database dengan role Marketing Offline dan SPV Marketing Offline
             </p>
           </div>
           {editingMappingId && (
@@ -1232,21 +1237,27 @@ export const MarketingSalesMappingView: React.FC<{
         <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
           <div className="md:col-span-4">
             <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1.5">
-              Akun User Management (Role: Marketing Offline) *
+              Akun User Management (Marketing Offline / SPV Marketing Offline) *
             </label>
             <ModernValidationDropdown
               value={mapUserId}
               onChange={val => setMapUserId(val)}
               icon={<User className="w-3.5 h-3.5" />}
               searchable
-              searchPlaceholder="Cari user Marketing Offline..."
-              options={marketingOfflineUsers.map(u => ({
-                value: u.id,
-                label: u.fullName,
-                subLabel: `Marketing Offline • WA: ${u.phone || '-'}`,
-                badge: u.phone || 'No WA',
-                badgeTone: 'emerald'
-              }))}
+              searchPlaceholder="Cari user Marketing Offline / SPV..."
+              options={marketingOfflineUsers.map(u => {
+                const roleLabel =
+                  String(u.role || '').toLowerCase() === 'spv_marketing_offline'
+                    ? 'SPV Marketing Offline'
+                    : getUserRoleDisplayTitle(u.role) || 'Marketing Offline';
+                return {
+                  value: u.id,
+                  label: u.fullName,
+                  subLabel: `${roleLabel} • WA: ${u.phone || '-'}`,
+                  badge: roleLabel,
+                  badgeTone: String(u.role || '').toLowerCase() === 'spv_marketing_offline' ? 'blue' : 'emerald'
+                };
+              })}
             />
           </div>
 
@@ -1354,14 +1365,29 @@ export const MarketingSalesMappingView: React.FC<{
                   const liveUser = marketingOfflineUsers.find(u => u.id === m.userId);
                   const phoneDisplay = liveUser?.phone || m.userPhone || '-';
                   const nameDisplay = liveUser?.fullName || m.userFullName;
+                  const roleRaw = String(liveUser?.role || '').toLowerCase();
+                  const roleLabel =
+                    roleRaw === 'spv_marketing_offline'
+                      ? 'SPV Marketing Offline'
+                      : liveUser
+                      ? getUserRoleDisplayTitle(liveUser.role) || 'Marketing Offline'
+                      : 'Marketing Offline';
                   return (
                     <tr key={m.id} className="h-11 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
                       <td className="px-4 font-mono font-bold text-slate-500">{idx + 1}</td>
                       <td className="px-4 font-extrabold text-slate-900 dark:text-white whitespace-nowrap">
-                        {nameDisplay}
-                        <span className="ml-2 text-[10px] font-medium text-slate-400">
-                          &middot; Marketing Offline
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span>{nameDisplay}</span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-semibold border ${
+                              roleRaw === 'spv_marketing_offline'
+                                ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800'
+                                : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700'
+                            }`}
+                          >
+                            {roleLabel}
+                          </span>
+                        </div>
                       </td>
                       <td className="px-4 font-mono font-bold text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
                         {phoneDisplay}
@@ -1444,7 +1470,6 @@ export const MarketingInvoiceValidationView: React.FC<{
     return (
       r === 'super_admin' ||
       r === 'spv_marketing' ||
-      r === 'spv_marketing_offline' ||
       title === 'super admin' ||
       title === 'spv marketing'
     );
@@ -1541,6 +1566,14 @@ export const MarketingInvoiceValidationView: React.FC<{
     setTimeout(() => setToastMessage(null), 3500);
   };
 
+  const resolveSalesInfo = (item: MarketingInvoiceValidationItem) =>
+    resolveSalesFromMappings(
+      item.masterSalesName || item.salesName,
+      salesMappings,
+      allUsers,
+      item.salesUserId
+    );
+
   const loadInvoiceValidationsFromMysql = async () => {
     setIsLoadingMysql(true);
     setDbErrorMessage(null);
@@ -1628,7 +1661,7 @@ export const MarketingInvoiceValidationView: React.FC<{
     };
   }, [currentUser?.id, currentUser?.role]);
 
-  // Parse file Excel pada Halaman Upload Excel (mengabaikan baris dengan nominal kosong / 0)
+  // Parse file Excel pada Halaman Upload Excel (ArrayBuffer + deteksi header dinamis + Accurate split "Rp")
   const handleExcelFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1637,63 +1670,206 @@ export const MarketingInvoiceValidationView: React.FC<{
     const reader = new FileReader();
     reader.onload = evt => {
       try {
-        const bstr = evt.target?.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
+        const buffer = evt.target?.result;
+        if (!(buffer instanceof ArrayBuffer)) {
+          showToast('Format file Excel tidak valid.');
+          return;
+        }
+        const wb = XLSX.read(buffer, { type: 'array' });
         const wsName = wb.SheetNames[0];
+        if (!wsName) {
+          showToast('File Excel tidak memiliki sheet yang dapat dibaca.');
+          return;
+        }
         const ws = wb.Sheets[wsName];
         const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
 
-        let currentSales = '';
-        let currentCustomer = '';
-        let currentInvoiceNo = '';
-        let skippedZeroNominal = 0;
-        const invoiceMap = new Map<string, MarketingInvoiceValidationItem>();
+        const normHdr = (v: any): string =>
+          String(v || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9%]+/g, ' ')
+            .trim();
+
+        // Deteksi koordinat header dinamis (10 kolom standar + Tanggal Faktur opsional)
+        let headerRowIdx = -1;
+        let colMap = {
+          sales: -1,
+          customer: -1,
+          invoiceNo: -1,
+          invoiceDate: -1,
+          itemDesc: -1,
+          qty: -1,
+          unit: -1,
+          price: -1,
+          discPct: -1,
+          total: -1,
+          ket: -1
+        };
+
+        const scanLimit = Math.min(rows.length, 30);
+        for (let r = 0; r < scanLimit; r++) {
+          const row = rows[r];
+          if (!Array.isArray(row)) continue;
+          const nextMap = { ...colMap };
+          row.forEach((cell, cIdx) => {
+            const h = normHdr(cell);
+            if (!h) return;
+            if (nextMap.sales === -1 && (h === 'nama penjual' || h === 'nama sales' || h === 'penjual' || h === 'sales')) {
+              nextMap.sales = cIdx;
+            } else if (nextMap.customer === -1 && (h === 'nama pelanggan' || h === 'pelanggan' || h === 'customer')) {
+              nextMap.customer = cIdx;
+            } else if (nextMap.invoiceNo === -1 && (h === 'no faktur' || h === 'nomor faktur' || h === 'no invoice' || h === 'faktur')) {
+              nextMap.invoiceNo = cIdx;
+            } else if (nextMap.invoiceDate === -1 && (h === 'tanggal faktur' || h === 'tgl faktur' || h === 'tanggal')) {
+              nextMap.invoiceDate = cIdx;
+            } else if (nextMap.itemDesc === -1 && (h === 'keterangan barang' || h === 'nama barang' || h === 'barang' || h === 'item')) {
+              nextMap.itemDesc = cIdx;
+            } else if (nextMap.qty === -1 && (h === 'kts faktur' || h === 'kts' || h === 'qty' || h === 'kuantitas')) {
+              nextMap.qty = cIdx;
+            } else if (nextMap.unit === -1 && (h === 'sat' || h === 'satuan' || h === 'unit')) {
+              nextMap.unit = cIdx;
+            } else if (nextMap.price === -1 && (h === 'harga' || h === 'harga satuan')) {
+              nextMap.price = cIdx;
+            } else if (nextMap.discPct === -1 && (h === '%' || h === 'persen' || h === 'diskon %' || h === 'disc %')) {
+              nextMap.discPct = cIdx;
+            } else if (nextMap.total === -1 && (h === 'total harga' || h === 'total' || h === 'subtotal')) {
+              nextMap.total = cIdx;
+            } else if (nextMap.ket === -1 && (h === 'ket' || h === 'keterangan' || h === 'area' || h === 'catatan')) {
+              nextMap.ket = cIdx;
+            }
+          });
+
+          const hits = [nextMap.sales, nextMap.customer, nextMap.invoiceNo, nextMap.itemDesc].filter(x => x >= 0).length;
+          if (hits >= 3) {
+            headerRowIdx = r;
+            colMap = nextMap;
+            break;
+          }
+        }
+
+        // Diagnostik header hilang bila format kolom Excel tidak terbaca
+        if (headerRowIdx === -1) {
+          const probeText = rows
+            .slice(0, 15)
+            .flat()
+            .map(v => normHdr(v))
+            .filter(Boolean);
+          const missingHeaders: string[] = [];
+          if (!probeText.some(h => h.includes('penjual') || h.includes('sales'))) missingHeaders.push('Nama Penjual');
+          if (!probeText.some(h => h.includes('pelanggan') || h.includes('customer'))) missingHeaders.push('Nama Pelanggan');
+          if (!probeText.some(h => h.includes('faktur') || h.includes('invoice'))) missingHeaders.push('No Faktur');
+          if (!probeText.some(h => h.includes('keterangan barang') || h.includes('nama barang'))) missingHeaders.push('Keterangan Barang');
+          showToast(
+            missingHeaders.length > 0
+              ? `Header kolom Excel tidak lengkap. Kolom wajib tidak ditemukan: ${missingHeaders.join(', ')}.`
+              : 'Baris header 10 kolom faktur tidak terdeteksi di 30 baris pertama Excel.'
+          );
+          setUploadPreviewInvoices([]);
+          setUploadSkippedEmptyRows(0);
+          return;
+        }
+
+        // Fallback posisi relatif bila salah satu kolom opsional tidak punya label eksplisit
+        if (colMap.qty === -1 && colMap.itemDesc >= 0) colMap.qty = colMap.itemDesc + 1;
+        if (colMap.unit === -1 && colMap.qty >= 0) colMap.unit = colMap.qty + 1;
+        if (colMap.price === -1 && colMap.unit >= 0) colMap.price = colMap.unit + 1;
+        if (colMap.discPct === -1 && colMap.price >= 0) colMap.discPct = colMap.price + 1;
+        if (colMap.total === -1 && colMap.discPct >= 0) colMap.total = colMap.discPct + 1;
+        if (colMap.ket === -1 && colMap.total >= 0) colMap.ket = colMap.total + 1;
 
         const parseNum = (val: any): number => {
           if (typeof val === 'number') return Number.isFinite(val) ? val : 0;
           const raw = String(val || '').trim();
-          if (!raw || raw === '-' || raw.toLowerCase() === 'rp -' || raw.toLowerCase() === 'rp-') {
+          if (!raw || raw === '-' || raw.toLowerCase() === 'rp -' || raw.toLowerCase() === 'rp-' || raw.toLowerCase() === 'rp') {
             return 0;
           }
-          const cleaned = raw
-            .replace(/Rp/gi, '')
-            .replace(/\s+/g, '')
-            .replace(/\./g, '')
-            .replace(/,/g, '.')
-            .replace(/[^\d.-]/g, '');
-          const n = parseFloat(cleaned);
+          // Handle US vs ID decimal/thousands neatly
+          const noRp = raw.replace(/Rp/gi, '').replace(/\s+/g, '');
+          const normalized = /^\d{1,3}(\.\d{3})+(,\d+)?$/.test(noRp)
+            ? noRp.replace(/\./g, '').replace(/,/g, '.')
+            : noRp.replace(/,/g, '').replace(/[^\d.-]/g, '');
+          const n = parseFloat(normalized);
           return Number.isFinite(n) ? n : 0;
         };
 
-        rows.forEach((row, rIdx) => {
-          if (!Array.isArray(row) || row.length < 4) return;
-          const col0 = String(row[0] || '').trim();
-          const col1 = String(row[1] || '').trim();
-          const col2 = String(row[2] || '').trim();
-          const col3 = String(row[3] || '').trim();
+        // Accurate export sering memisah "Rp" di sel colIndex dan angka nominal di sel colIndex + 1
+        const parseCurrencyWithSplitRp = (row: any[], colIdx: number): number => {
+          if (colIdx < 0 || colIdx >= row.length) return 0;
+          const cellVal = row[colIdx];
+          const rawStr = String(cellVal ?? '').trim();
+          if (/^rp\.?$/i.test(rawStr) || (rawStr === '' && colIdx + 1 < row.length)) {
+            const nextVal = parseNum(row[colIdx + 1]);
+            if (nextVal > 0) return nextVal;
+          }
+          const direct = parseNum(cellVal);
+          if (direct === 0 && colIdx + 1 < row.length) {
+            const nextRaw = String(row[colIdx + 1] ?? '').trim();
+            if (/^[\d.,]+$/.test(nextRaw)) {
+              return parseNum(row[colIdx + 1]);
+            }
+          }
+          return direct;
+        };
 
-          // Skip header row
+        const parseExcelDate = (val: any): string => {
+          if (typeof val === 'number' && val > 25000 && val < 80000) {
+            const d = XLSX.SSF.parse_date_code(val);
+            if (d && d.y && d.m && d.d) {
+              return `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
+            }
+          }
+          const s = String(val || '').trim();
+          if (!s) return '';
+          if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+          const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+          if (dmy) {
+            const yr = dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3];
+            return `${yr}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+          }
+          return '';
+        };
+
+        let currentSales = '';
+        let currentCustomer = '';
+        let currentInvoiceNo = '';
+        let currentInvoiceDate = todayIso;
+        let skippedZeroNominal = 0;
+        const invoiceMap = new Map<string, MarketingInvoiceValidationItem>();
+
+        for (let rIdx = headerRowIdx + 1; rIdx < rows.length; rIdx++) {
+          const row = rows[rIdx];
+          if (!Array.isArray(row) || row.length === 0) continue;
+
+          const rawSales = colMap.sales >= 0 ? String(row[colMap.sales] || '').trim() : '';
+          const rawCustomer = colMap.customer >= 0 ? String(row[colMap.customer] || '').trim() : '';
+          const rawInvoiceNo = colMap.invoiceNo >= 0 ? String(row[colMap.invoiceNo] || '').trim() : '';
+          const rawItemDesc = colMap.itemDesc >= 0 ? String(row[colMap.itemDesc] || '').trim() : '';
+          const rawInvDate = colMap.invoiceDate >= 0 ? parseExcelDate(row[colMap.invoiceDate]) : '';
+
           if (
-            col0.toLowerCase().includes('nama sales') ||
-            col2.toLowerCase().includes('no faktur') ||
-            col3.toLowerCase().includes('keterangan barang')
+            normHdr(rawSales) === 'nama penjual' ||
+            normHdr(rawInvoiceNo) === 'no faktur' ||
+            normHdr(rawItemDesc) === 'keterangan barang'
           ) {
-            return;
+            continue;
           }
 
-          if (col0) currentSales = col0.toUpperCase();
-          if (col1) currentCustomer = col1.toUpperCase();
-          if (col2) currentInvoiceNo = col2.toUpperCase();
+          if (rawSales) currentSales = rawSales.toUpperCase();
+          if (rawCustomer) currentCustomer = rawCustomer.toUpperCase();
+          if (rawInvoiceNo) currentInvoiceNo = rawInvoiceNo.toUpperCase();
+          if (rawInvDate) currentInvoiceDate = rawInvDate;
 
-          if (!currentInvoiceNo || !col3) return;
+          if (!currentInvoiceNo || !rawItemDesc) continue;
+          if (/^(total|subtotal|grand total)$/i.test(rawItemDesc)) continue;
 
-          const kts = parseNum(row[4]);
-          const sat = String(row[5] || 'PAK').trim().toUpperCase();
-          const hargaSatuan = parseNum(row[6]);
-          const persenVal = parseNum(row[7]);
+          const kts = parseNum(colMap.qty >= 0 ? row[colMap.qty] : 0);
+          const sat = String(colMap.unit >= 0 ? row[colMap.unit] || 'PAK' : 'PAK').trim().toUpperCase();
+          const hargaSatuan = parseCurrencyWithSplitRp(row, colMap.price);
+          const persenVal = parseNum(colMap.discPct >= 0 ? row[colMap.discPct] : 0);
           const persenRaw = persenVal > 0 ? persenVal : '';
-          const rawTotalHarga = parseNum(row[8]);
-          const ketCol10 = String(row[9] || '').trim().toUpperCase();
+          const rawTotalHarga = parseCurrencyWithSplitRp(row, colMap.total);
+          const ketCol10 = String(colMap.ket >= 0 ? row[colMap.ket] || '' : '').trim().toUpperCase();
           const diskon =
             persenVal > 0 && kts > 0 && hargaSatuan > 0
               ? Math.round((kts * hargaSatuan * persenVal) / 100)
@@ -1705,15 +1881,14 @@ export const MarketingInvoiceValidationView: React.FC<{
               ? Math.max(0, kts * hargaSatuan - diskon)
               : 0;
 
-          // Request 4: Untuk nominal yang kosongan tidak perlu terbaca untuk dimasukkan ke dalam data tabel
           if (computedTotal <= 0 && hargaSatuan <= 0) {
             skippedZeroNominal += 1;
-            return;
+            continue;
           }
 
           const lineItem: InvoiceLineItem = {
             id: `LI-XLS-${Date.now()}-${rIdx}`,
-            keteranganBarang: col3.toUpperCase(),
+            keteranganBarang: rawItemDesc.toUpperCase(),
             ktsFaktur: kts > 0 ? kts : 1,
             satuan: sat || 'PAK',
             hargaSatuan: hargaSatuan > 0 ? hargaSatuan : computedTotal,
@@ -1731,7 +1906,7 @@ export const MarketingInvoiceValidationView: React.FC<{
             const tempRecord: MarketingInvoiceValidationItem = {
               id: `MIV-XLS-${Date.now()}-${rIdx}`,
               noInvoice: currentInvoiceNo,
-              invoiceDate: todayIso,
+              invoiceDate: currentInvoiceDate || todayIso,
               deliveryTomorrowDate: uploadTargetDate || tomorrowIso,
               customerName: currentCustomer || 'PELANGGAN',
               areaName: ketCol10 || 'BANYUWANGI',
@@ -1751,7 +1926,7 @@ export const MarketingInvoiceValidationView: React.FC<{
             tempRecord.salesWhatsapp = resolved.userPhone;
             invoiceMap.set(currentInvoiceNo, tempRecord);
           }
-        });
+        }
 
         const parsedInvoices = Array.from(invoiceMap.values()).filter(inv => inv.nominalTagihan > 0);
         setUploadPreviewInvoices(parsedInvoices);
@@ -1773,7 +1948,7 @@ export const MarketingInvoiceValidationView: React.FC<{
         if (excelInputRef.current) excelInputRef.current.value = '';
       }
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
   };
 
   const handleConfirmSaveUploadedExcel = async () => {
@@ -2702,8 +2877,8 @@ export const MarketingInvoiceValidationView: React.FC<{
         </div>
       )}
 
-      {/* Top Header & KPI Strip (Tanpa tombol Mapping Nama Sales & tanpa Sinkron Form Kirim / SO) */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-2xs">
+      {/* Top Header & KPI Strip (Flat / Modern Clean Design) */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5">
         <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
           <div className="flex items-start gap-3 min-w-0">
             <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0">
@@ -2732,7 +2907,7 @@ export const MarketingInvoiceValidationView: React.FC<{
             <button
               type="button"
               onClick={() => setViewMode('upload_excel')}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold transition cursor-pointer whitespace-nowrap"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold transition cursor-pointer whitespace-nowrap"
             >
               <Upload className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
               <span>Upload Excel</span>
@@ -2741,7 +2916,7 @@ export const MarketingInvoiceValidationView: React.FC<{
             <button
               type="button"
               onClick={() => openBatchWaModalForSales(selectedSalesUserFilter)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition cursor-pointer whitespace-nowrap"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition cursor-pointer whitespace-nowrap"
             >
               <MessageSquare className="w-3.5 h-3.5" />
               <span>Rekap WA Sales</span>
@@ -2750,7 +2925,7 @@ export const MarketingInvoiceValidationView: React.FC<{
             <button
               type="button"
               onClick={openAddModal}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition cursor-pointer whitespace-nowrap"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition cursor-pointer whitespace-nowrap"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Tambah Faktur</span>
@@ -2758,9 +2933,9 @@ export const MarketingInvoiceValidationView: React.FC<{
           </div>
         </div>
 
-        {/* 4 Summary Metrics */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
-          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800">
+        {/* 4 Summary Metrics (Uniform Flat White Cards, No Pastel Backgrounds) */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-200 dark:border-slate-800">
+          <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
               Total Faktur &amp; Baris Barang
             </span>
@@ -2769,7 +2944,7 @@ export const MarketingInvoiceValidationView: React.FC<{
             </div>
           </div>
 
-          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800">
+          <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
               Total Nilai Faktur
             </span>
@@ -2778,20 +2953,20 @@ export const MarketingInvoiceValidationView: React.FC<{
             </div>
           </div>
 
-          <div className="p-3 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-800/50">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300 block">
+          <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
               Tervalidasi Siap Kirim
             </span>
-            <div className="text-lg font-extrabold text-emerald-700 dark:text-emerald-300 mt-0.5 font-mono tabular-nums">
+            <div className="text-lg font-extrabold text-emerald-700 dark:text-emerald-400 mt-0.5 font-mono tabular-nums">
               {stats.validated} Faktur
             </div>
           </div>
 
-          <div className="p-3 rounded-xl bg-amber-50/60 dark:bg-amber-950/30 border border-amber-200/70 dark:border-amber-800/50">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300 block">
+          <div className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
               Menunggu Validasi &amp; Revisi
             </span>
-            <div className="text-lg font-extrabold text-amber-700 dark:text-amber-300 mt-0.5 font-mono tabular-nums">
+            <div className="text-lg font-extrabold text-amber-700 dark:text-amber-400 mt-0.5 font-mono tabular-nums">
               {stats.pending} Menunggu <span className="text-xs font-normal text-rose-600 dark:text-rose-400">&middot; {stats.revision} Revisi</span>
             </div>
           </div>
@@ -2799,7 +2974,7 @@ export const MarketingInvoiceValidationView: React.FC<{
       </div>
 
       {/* Filter Bar dengan Custom Kalender & Custom Dropdown UI/UX + Akun Sales Scoping */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-2xs space-y-3">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 space-y-3">
         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
           <div className="relative flex-1 min-w-0">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -3059,9 +3234,9 @@ export const MarketingInvoiceValidationView: React.FC<{
             return (
               <div
                 key={invoice.id}
-                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden"
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden"
               >
-                <div className="px-4 py-3.5 bg-slate-50/70 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div className="px-4 py-3.5 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                   <div className="flex flex-wrap items-center gap-2.5 min-w-0">
                     <span className="px-2.5 py-1 rounded-lg bg-blue-600 text-white font-mono text-xs font-extrabold tracking-tight">
                       {invoice.noInvoice}
@@ -3077,7 +3252,10 @@ export const MarketingInvoiceValidationView: React.FC<{
                         KET: {ketTag}
                       </span>
                     )}
-                    <span className="text-[11px] font-mono text-slate-500">
+                    <span className="text-[11px] font-mono text-slate-500 tabular-nums">
+                      Tgl Faktur: {formatReadableDate(invoice.invoiceDate || invoice.deliveryTomorrowDate)}
+                    </span>
+                    <span className="text-[11px] font-mono text-slate-500 tabular-nums">
                       Kirim: {formatReadableDate(invoice.deliveryTomorrowDate)}
                     </span>
                   </div>
@@ -3087,7 +3265,7 @@ export const MarketingInvoiceValidationView: React.FC<{
                       <span className="text-[10px] font-bold uppercase text-slate-400 block leading-none">
                         Subtotal Faktur ({validLines.length} Item)
                       </span>
-                      <span className="text-sm font-mono font-extrabold text-slate-900 dark:text-white">
+                      <span className="text-sm font-mono tabular-nums font-extrabold text-slate-900 dark:text-white">
                         Rp {formatRupiahNumber(invoice.nominalTagihan)}
                       </span>
                     </div>
@@ -3107,8 +3285,8 @@ export const MarketingInvoiceValidationView: React.FC<{
 
                     <button
                       type="button"
-                      onClick={() => openSingleInvoiceWaModal(invoice)}
-                      className="h-7 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-extrabold flex items-center gap-1 transition cursor-pointer"
+                      onClick={() => openWaModalForInvoice(invoice)}
+                      className="h-7 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold flex items-center gap-1 transition cursor-pointer"
                       title={`Kirim WA ke ${resolvedSales.userFullName} (${resolvedSales.userPhone})`}
                     >
                       <Send className="w-3 h-3" />
@@ -3117,43 +3295,44 @@ export const MarketingInvoiceValidationView: React.FC<{
                   </div>
                 </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs text-left border-collapse">
+                {/* Borderless aligned columns (border-0) */}
+                <div className="overflow-x-auto px-3 py-2">
+                  <table className="w-full text-xs text-left border-collapse border-0">
                     <thead>
-                      <tr className="h-8 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-                        <th className="w-10 px-4 text-center">No</th>
-                        <th className="px-3">Keterangan Barang</th>
-                        <th className="w-24 px-3 text-center">Kts. Faktur</th>
-                        <th className="w-20 px-3 text-center">sat</th>
-                        <th className="w-32 px-3 text-right">Harga</th>
-                        <th className="w-16 px-2 text-center">%</th>
-                        <th className="w-36 px-4 text-right">Total Harga</th>
+                      <tr className="h-8 bg-white dark:bg-slate-900 border-0 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                        <th className="w-10 px-3 text-center border-0">No</th>
+                        <th className="px-3 border-0">Keterangan Barang</th>
+                        <th className="w-24 px-3 text-center border-0">Kts. Faktur</th>
+                        <th className="w-20 px-3 text-center border-0">sat</th>
+                        <th className="w-32 px-3 text-right border-0">Harga</th>
+                        <th className="w-16 px-2 text-center border-0">%</th>
+                        <th className="w-36 px-3 text-right border-0">Total Harga</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+                    <tbody className="border-0">
                       {validLines.map((li, idx) => (
-                        <tr key={li.id || idx} className="h-9 hover:bg-slate-50/70 dark:hover:bg-slate-800/30">
-                          <td className="px-4 text-center font-mono text-slate-400">{idx + 1}</td>
-                          <td className="px-3 font-semibold text-slate-800 dark:text-slate-200">
+                        <tr key={li.id || idx} className="h-9 border-0 hover:bg-slate-50/80 dark:hover:bg-slate-800/30 rounded-lg transition-colors">
+                          <td className="px-3 text-center font-mono tabular-nums text-slate-400 border-0">{idx + 1}</td>
+                          <td className="px-3 font-semibold text-slate-800 dark:text-slate-200 border-0">
                             {li.keteranganBarang}
                           </td>
-                          <td className="px-3 text-center font-mono font-bold text-slate-900 dark:text-white">
+                          <td className="px-3 text-center font-mono tabular-nums font-bold text-slate-900 dark:text-white border-0">
                             {li.ktsFaktur}
                           </td>
-                          <td className="px-3 text-center font-bold text-slate-500 uppercase">
+                          <td className="px-3 text-center font-bold text-slate-500 uppercase border-0">
                             {li.satuan}
                           </td>
-                          <td className="px-3 text-right font-mono text-slate-700 dark:text-slate-300">
+                          <td className="px-3 text-right font-mono tabular-nums text-slate-700 dark:text-slate-300 border-0">
                             {formatRupiahNumber(li.hargaSatuan)
                               ? `Rp ${formatRupiahNumber(li.hargaSatuan)}`
                               : '-'}
                           </td>
-                          <td className="px-2 text-center font-mono text-slate-500">
+                          <td className="px-2 text-center font-mono tabular-nums text-slate-500 border-0">
                             {li.persenDiskon !== '' && Number(li.persenDiskon) > 0
                               ? `${li.persenDiskon}%`
                               : '-'}
                           </td>
-                          <td className="px-4 text-right font-mono font-extrabold text-slate-900 dark:text-white">
+                          <td className="px-3 text-right font-mono tabular-nums font-extrabold text-slate-900 dark:text-white border-0">
                             {formatRupiahNumber(li.totalHarga)
                               ? `Rp ${formatRupiahNumber(li.totalHarga)}`
                               : '-'}

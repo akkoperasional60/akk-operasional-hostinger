@@ -239,9 +239,15 @@ export const DepartureFormModal: React.FC<DepartureFormModalProps> = ({
     const allUsers = logisticsStore.getUsers().filter(u => u.status === 'approved');
     const targetBranchId = trip.branchId || 'cab-banyuwangi';
     const inBranch = (u: any) => {
-      const perms = branchStore.getUserBranchPermissions(u.id);
-      if (!perms || perms.length === 0) return true;
-      return perms.some((p: any) => p.branchId === targetBranchId && p.canAccess !== false);
+      const permsMap = branchStore.getUserBranchPermissions(
+        u.id,
+        u.role,
+        u.permissions?.modules,
+        u.permissions?.branchPermissions
+      );
+      const entry = permsMap?.[targetBranchId];
+      if (!entry) return true;
+      return Boolean(entry.enabled);
     };
     const branchUsers = allUsers.filter(inBranch);
     const pool = branchUsers.length > 0 ? branchUsers : allUsers;
@@ -329,6 +335,8 @@ export const DepartureFormModal: React.FC<DepartureFormModalProps> = ({
         helperName: trip.helper?.name || actorName || '-',
         fleetLabel: trip.fleetLabel || '-',
         areaName: trip.area || '-',
+        branchName: branchLabel,
+        departureTime: trip.departureTime || wibStamp,
         recordedAt: nowIso,
         recordedAtWib: wibStamp
       },
@@ -341,6 +349,12 @@ export const DepartureFormModal: React.FC<DepartureFormModalProps> = ({
         spvOperasional: signatures.spvOperasional,
         security: signatures.security,
         crew: signatures.crew
+      },
+      signerNames: {
+        spvLogistik: selectedSignerNames.spvLogistik,
+        spvOperasional: selectedSignerNames.spvOperasional,
+        security: selectedSignerNames.security,
+        crew: selectedSignerNames.crew
       },
       signedAt: nowIso,
       signedBy: actorName || trip.helper?.name || 'Helper'
@@ -434,7 +448,7 @@ export const DepartureFormModal: React.FC<DepartureFormModalProps> = ({
 
       <Button disabled={busy || !isReady} loading={busy} onClick={handleSave}>
         <Check size={18} />
-        {isReady ? 'Simpan Form Keluar & Validasi' : `Lengkapi Ceklis & ${4 - signedCount} TTD Tersisa`}
+        {isReady ? 'Simpan Form Keluar & Validasi' : `Lengkapi ${4 - signedCount} TTD Tersisa`}
       </Button>
       {!qa && (
         <p className="cv66-meta cv66-gps">

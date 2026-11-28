@@ -124,17 +124,32 @@ async function connectCrewSse() {
 export function canClaimLive(): boolean { return CREW_CLAIM_LIVE_ENABLED; }
 
 async function jsonRequest(url: string, method: string, body: any): Promise<any> {
-  let response = await fetch(url, {
-    method, headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-    credentials: 'same-origin', cache: 'no-store', body: JSON.stringify(body)
-  });
+  const runFetch = async () => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 8000);
+    try {
+      return await fetch(url, {
+        method,
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        cache: 'no-store',
+        body: JSON.stringify(body),
+        signal: controller.signal
+      });
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        throw new Error('Koneksi lambat (batas waktu 8000ms). Tekan Coba Lagi.');
+      }
+      throw err;
+    } finally {
+      window.clearTimeout(timer);
+    }
+  };
+  let response = await runFetch();
   if (response.status === 401 && logisticsStore.isPreviewEnvironment()) {
     const recovered = await logisticsStore.ensurePreviewServerSession(true);
     if (recovered) {
-      response = await fetch(url, {
-        method, headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        credentials: 'same-origin', cache: 'no-store', body: JSON.stringify(body)
-      });
+      response = await runFetch();
     }
   }
   const payload = await response.json().catch(() => ({}));
@@ -169,7 +184,7 @@ export function listenCrewChanged(listener: () => void): () => void {
 }
 
 export async function getTripsForUser(user: UserProfile): Promise<FieldTrip[]> {
-  if (!isQaAccount(user)) {
+  if (!isQaAccount(user) && branchStore.getActiveBranches().length === 0) {
     await branchStore.syncFromServer().catch(() => {});
   }
   const all = isQaAccount(user) ? await fetchQaTrips() : await fetchLiveTrips();
@@ -504,12 +519,6 @@ export async function moveTrip(user: UserProfile, tripId: string, next: 'going' 
     notifyCrewChanged();
     return;
   }
-  const live = (await fetchLiveTrips()).find(t => t.id === tripId);
-  if (!live || !assertTripVisible(user, live)) throw new Error('Kiriman tidak ditemukan.');
-  if (!slotForUser(live, user)) throw new Error('Kamu belum mengambil posisi pada kiriman ini.');
-  if (!live.driver || !live.helper) throw new Error('Tim belum lengkap.');
-  if (next === 'going' && live.phase !== 'waiting') throw new Error('Kiriman sudah berjalan.');
-  if (next === 'returned' && live.phase !== 'going') throw new Error('Kiriman belum berjalan.');
   const gps = await freshGps();
   // One authenticated MySQL transaction updates the shared trip and shift check-in/out for both accounts.
   await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/action`, 'POST', {

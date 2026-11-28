@@ -120,31 +120,10 @@ const playChime = (soundType: 'normal' | 'urgent' | 'success') => {
 };
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [notifications, setNotifications] = useState<ToastNotification[]>(() => {
-    try {
-      const saved = localStorage.getItem('akk_notifications_v1');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
+  const [notifications, setNotifications] = useState<ToastNotification[]>([]);
   const [visibleToasts, setVisibleToasts] = useState<ToastNotification[]>([]);
-  const [soundEnabled, setSoundEnabled] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('akk_notif_sound_v1') !== 'false';
-    } catch {
-      return true;
-    }
-  });
-  
-  const [simulationEnabled, setSimulationEnabled] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('akk_notif_sim_v1') === 'true';
-    } catch {
-      return false; // Disabled by default, easily toggleable
-    }
-  });
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const [simulationEnabled, setSimulationEnabled] = useState<boolean>(false);
 
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const onNavigateRef = useRef<((tab: string) => void) | undefined>(undefined);
@@ -152,25 +131,6 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const setOnNavigateCallback = useCallback((cb: (tab: string) => void) => {
     onNavigateRef.current = cb;
   }, []);
-
-  // Keep state synced to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem('akk_notifications_v1', JSON.stringify(notifications));
-    } catch {}
-  }, [notifications]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('akk_notif_sound_v1', String(soundEnabled));
-    } catch {}
-  }, [soundEnabled]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('akk_notif_sim_v1', String(simulationEnabled));
-    } catch {}
-  }, [simulationEnabled]);
 
   const addNotification = useCallback((
     type: 'delivery' | 'checker' | 'schedule' | 'sla_warning' | 'geofence' | 'tax_kir_reminder', 

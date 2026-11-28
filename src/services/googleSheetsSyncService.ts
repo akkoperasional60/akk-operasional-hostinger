@@ -302,40 +302,11 @@ class GoogleSheetsSyncService {
 
   private loadConfig(): GoogleSheetsSyncConfig {
     try {
-      const saved = localStorage.getItem(SYNC_CONFIG_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const savedUrl = String(parsed.spreadsheetUrl || '').trim();
-        // Clean up legacy sample student spreadsheet URL if still cached in browser localStorage
-        const isLegacyDemoUrl = savedUrl.includes('1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms');
-        if (isLegacyDemoUrl) {
-          const cleaned: GoogleSheetsSyncConfig = {
-            isAutoSyncEnabled: false,
-            autoSyncIntervalMinutes: Number(parsed.autoSyncIntervalMinutes) || 60,
-            lastSyncTimestamp: null,
-            sheetName: parsed.sheetName || 'DATA FIX',
-            spreadsheetUrl: '',
-            syncOnAppLaunch: false
-          };
-          try {
-            localStorage.setItem(SYNC_CONFIG_STORAGE_KEY, JSON.stringify(cleaned));
-          } catch {
-            // ignore storage errors
-          }
-          return cleaned;
-        }
-        return {
-          isAutoSyncEnabled: Boolean(parsed.isAutoSyncEnabled && savedUrl),
-          autoSyncIntervalMinutes: Number(parsed.autoSyncIntervalMinutes) || 60,
-          lastSyncTimestamp: parsed.lastSyncTimestamp || null,
-          sheetName: parsed.sheetName || 'DATA FIX',
-          spreadsheetUrl: savedUrl,
-          syncOnAppLaunch: Boolean(parsed.syncOnAppLaunch && savedUrl)
-        };
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(SYNC_CONFIG_STORAGE_KEY);
+        localStorage.removeItem(SYNC_LOGS_STORAGE_KEY);
       }
-    } catch (e) {
-      console.warn('Failed to load gsheets sync config:', e);
-    }
+    } catch {}
     return {
       isAutoSyncEnabled: false,
       autoSyncIntervalMinutes: 60,
@@ -347,30 +318,15 @@ class GoogleSheetsSyncService {
   }
 
   private saveConfig() {
-    try {
-      localStorage.setItem(SYNC_CONFIG_STORAGE_KEY, JSON.stringify(this.config));
-    } catch (e) {
-      console.warn('Failed to save gsheets sync config:', e);
-    }
     this.notify();
   }
 
   private loadLogs(): SyncLogEntry[] {
-    try {
-      const saved = localStorage.getItem(SYNC_LOGS_STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.warn('Failed to load sync logs:', e);
-    }
     return [];
   }
 
   private saveLogs() {
-    try {
-      localStorage.setItem(SYNC_LOGS_STORAGE_KEY, JSON.stringify(this.syncLogs.slice(0, 50)));
-    } catch (e) {
-      console.warn('Failed to save sync logs:', e);
-    }
+    this.syncLogs = this.syncLogs.slice(0, 50);
     this.notify();
   }
 

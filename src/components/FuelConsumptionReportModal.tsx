@@ -62,7 +62,7 @@ export const FuelConsumptionReportModal: React.FC<FuelConsumptionReportModalProp
   }, [allFleetSummaries, selectedWeek, filterFleet, searchQuery]);
 
   const activeMetrics = useMemo(() => {
-    const totalLiters = Number(filteredFleetSummaries.reduce((sum, f) => sum + f.totalLiters, 0).toFixed(1));
+    const totalLiters = Number(filteredFleetSummaries.reduce((sum, f) => sum + f.totalLiters, 0).toFixed(2));
     const totalCost = filteredFleetSummaries.reduce((sum, f) => sum + f.totalCost, 0);
     const totalDistance = filteredFleetSummaries.reduce((sum, f) => sum + f.totalDistanceKm, 0);
     const totalRefuels = filteredFleetSummaries.reduce((sum, f) => sum + f.refuelCount, 0);
@@ -257,7 +257,7 @@ export const FuelConsumptionReportModal: React.FC<FuelConsumptionReportModalProp
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
             <div className="bg-white p-3 rounded-lg border border-slate-200">
               <span className="text-xs text-slate-500 block">Total BBM</span>
-              <span className="text-lg font-bold text-slate-900 font-mono tabular-nums">{activeMetrics.totalLiters.toLocaleString('id-ID')} L</span>
+              <span className="text-lg font-bold text-slate-900 font-mono tabular-nums">{activeMetrics.totalLiters.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L</span>
               <span className="text-xs text-slate-500 block">{activeMetrics.totalRefuels}x isi</span>
             </div>
 
@@ -331,7 +331,7 @@ export const FuelConsumptionReportModal: React.FC<FuelConsumptionReportModalProp
                       </td>
                       <td className="py-2.5 px-3 text-slate-600 text-xs whitespace-nowrap">{f.vehicleType}</td>
                       <td className="py-2.5 px-3 text-right font-mono tabular-nums">{f.refuelCount}x</td>
-                      <td className="py-2.5 px-3 text-right font-mono tabular-nums font-semibold text-slate-900">{f.totalLiters} L</td>
+                      <td className="py-2.5 px-3 text-right font-mono tabular-nums font-semibold text-slate-900">{Number(f.totalLiters || 0).toFixed(2)} L</td>
                       <td className="py-2.5 px-3 text-right font-mono tabular-nums font-semibold text-blue-600">{f.totalDistanceKm.toLocaleString('id-ID')}</td>
                       <td className="py-2.5 px-3 text-right font-mono tabular-nums font-semibold text-slate-900">{formatRupiah(f.totalCost)}</td>
                       <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-slate-900">{f.avgKmPerLiter}</td>
