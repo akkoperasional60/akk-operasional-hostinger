@@ -8351,7 +8351,424 @@ Kembalikan HANYA JSON valid:
     }
   };
 
-  app.get('/api/marketing-invoice-validations', async (req, res) => {
+    // ============================================================================
+  // RELATIONAL MYSQL ENDPOINTS: /api/sales-mappings & /api/invoice-validations
+  // ============================================================================
+  const ensureMarketingRelationalTables = async () => {
+    if (!isDatabaseConfigured()) return false;
+    await mysqlQuery(`
+      CREATE TABLE IF NOT EXISTS sales_mappings (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        user_full_name VARCHAR(150) NOT NULL,
+        user_phone VARCHAR(40) NULL,
+        master_sales_name_1 VARCHAR(150) NOT NULL,
+        master_sales_name_2 VARCHAR(150) NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_sales_mappings_user (user_id),
+        INDEX idx_sales_mappings_m1 (master_sales_name_1),
+        INDEX idx_sales_mappings_m2 (master_sales_name_2)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    await mysqlQuery(`
+      CREATE TABLE IF NOT EXISTS invoice_validations (
+        id VARCHAR(64) PRIMARY KEY,
+        no_invoice VARCHAR(64) NOT NULL,
+        invoice_date DATE NULL,
+        delivery_date DATE NOT NULL,
+        customer_name VARCHAR(200) NOT NULL,
+        area_name VARCHAR(120) NULL,
+        payment_category VARCHAR(20) NOT NULL DEFAULT 'TEMPO',
+        nominal_tagihan DECIMAL(15,2) NOT NULL DEFAULT 0,
+        item_summary TEXT NULL,
+        master_sales_name VARCHAR(150) NOT NULL,
+        sales_user_id VARCHAR(64) NULL,
+        sales_name VARCHAR(150) NULL,
+        sales_whatsapp VARCHAR(40) NULL,
+        validation_status VARCHAR(40) NOT NULL DEFAULT 'Menunggu Validasi',
+        validated_by VARCHAR(150) NULL,
+        validated_at DATETIME NULL,
+        marketing_notes TEXT NULL,
+        line_items_json LONGTEXT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_invoice_validations_no (no_invoice),
+        INDEX idx_inv_val_delivery (delivery_date),
+        INDEX idx_inv_val_master_sales (master_sales_name),
+        INDEX idx_inv_val_sales_user (sales_user_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    await mysqlQuery(`
+      CREATE TABLE IF NOT EXISTS invoice_validation_items (
+        id VARCHAR(64) PRIMARY KEY,
+        invoice_id VARCHAR(64) NOT NULL,
+        no_invoice VARCHAR(64) NOT NULL,
+        keterangan_barang VARCHAR(255) NOT NULL,
+        kts_faktur DECIMAL(12,2) NOT NULL DEFAULT 1,
+        satuan VARCHAR(24) NOT NULL DEFAULT 'PAK',
+        harga_satuan DECIMAL(15,2) NOT NULL DEFAULT 0,
+        persen_diskon DECIMAL(6,2) NOT NULL DEFAULT 0,
+        total_harga DECIMAL(15,2) NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_inv_items_invoice (invoice_id),
+        INDEX idx_inv_items_no (no_invoice)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    return true;
+  };
+
+  app.get('/api/sales-mappings', async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      if (await ensureMarketingRelationalTables()) {
+        const rows = await mysqlQuery<any[]>(
+          `SELECT id, user_id, user_full_name, user_phone, master_sales_name_1, master_sales_name_2
+           FROM sales_mappings ORDER BY created_at ASC`
+        );
+        const userRows = await mysqlQuery<any[]>(
+          `SELECT id, full_name, email, phone, role, status
+           FROM users WHERE LOWER(TRIM(role)) = 'marketing_offline' AND LOWER(TRIM(status)) = 'approved'`
+        ).catch(() => []);
+
+        const mapped = (Array.isArray(rows) ? rows : []).map((r: any) => ({
+          id: r.id,
+          userId: r.user_id,
+          userFullName: r.user_full_name,
+          userPhone: r.user_phone || '-',
+          masterSalesName1: r.master_sales_name_1,
+          masterSalesName2: r.master_sales_name_2 || ''
+        }));
+        inMemoryMarketingSalesMappings = mapped;
+
+        const offlineUsers = (Array.isArray(userRows) ? userRows : []).map((u: any) => ({
+          id: u.id,
+          fullName: u.full_name,
+          email: u.email,
+          phone: u.phone || '-',
+          role: 'marketing_offline',
+          status: 'approved'
+        }));
+
+        return res.json({
+          success: true,
+          salesMappings: mapped,
+          marketingOfflineUsers: offlineUsers,
+          source: 'mysql'
+        });
+      }
+      return res.json({
+        success: true,
+        salesMappings: inMemoryMarketingSalesMappings,
+        marketingOfflineUsers: [],
+        source: 'memory'
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        message: err?.message || 'Gagal mengambil data sales_mappings dari MySQL.'
+      });
+    }
+  });
+
+  app.post('/api/sales-mappings', express.json(), async (req, res) => {
+    try {
+      const { userId, userFullName, userPhone, masterSalesName1, masterSalesName2 } = req.body || {};
+      if (!userId || !masterSalesName1) {
+        return res.status(400).json({ success: false, message: 'userId dan masterSalesName1 wajib diisi.' });
+      }
+      const id = `MAP-SLS-${Date.now()}`;
+      const m1 = String(masterSalesName1).trim().toUpperCase();
+      const m2 = String(masterSalesName2 || '').trim().toUpperCase();
+      if (await ensureMarketingRelationalTables()) {
+        await mysqlQuery(
+          `INSERT INTO sales_mappings (id, user_id, user_full_name, user_phone, master_sales_name_1, master_sales_name_2)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [id, String(userId), String(userFullName || ''), String(userPhone || '-'), m1, m2]
+        );
+      }
+      const entry = {
+        id,
+        userId: String(userId),
+        userFullName: String(userFullName || ''),
+        userPhone: String(userPhone || '-'),
+        masterSalesName1: m1,
+        masterSalesName2: m2
+      };
+      inMemoryMarketingSalesMappings = [...inMemoryMarketingSalesMappings, entry];
+      return res.json({ success: true, mapping: entry });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err?.message || 'Gagal menyimpan sales_mappings ke MySQL.' });
+    }
+  });
+
+  app.put('/api/sales-mappings/:id', express.json(), async (req, res) => {
+    try {
+      const id = String(req.params.id || '').trim();
+      const { userId, userFullName, userPhone, masterSalesName1, masterSalesName2 } = req.body || {};
+      if (!id || !userId || !masterSalesName1) {
+        return res.status(400).json({ success: false, message: 'ID, userId, dan masterSalesName1 wajib diisi.' });
+      }
+      const m1 = String(masterSalesName1).trim().toUpperCase();
+      const m2 = String(masterSalesName2 || '').trim().toUpperCase();
+      if (await ensureMarketingRelationalTables()) {
+        await mysqlQuery(
+          `UPDATE sales_mappings
+           SET user_id = ?, user_full_name = ?, user_phone = ?, master_sales_name_1 = ?, master_sales_name_2 = ?
+           WHERE id = ?`,
+          [String(userId), String(userFullName || ''), String(userPhone || '-'), m1, m2, id]
+        );
+      }
+      inMemoryMarketingSalesMappings = inMemoryMarketingSalesMappings.map((m: any) =>
+        m.id === id
+          ? {
+              ...m,
+              userId: String(userId),
+              userFullName: String(userFullName || m.userFullName),
+              userPhone: String(userPhone || m.userPhone || '-'),
+              masterSalesName1: m1,
+              masterSalesName2: m2
+            }
+          : m
+      );
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err?.message || 'Gagal memperbarui sales_mappings di MySQL.' });
+    }
+  });
+
+  app.delete('/api/sales-mappings/:id', async (req, res) => {
+    try {
+      const id = String(req.params.id || '').trim();
+      if (await ensureMarketingRelationalTables()) {
+        await mysqlQuery(`DELETE FROM sales_mappings WHERE id = ?`, [id]);
+      }
+      inMemoryMarketingSalesMappings = inMemoryMarketingSalesMappings.filter((m: any) => m.id !== id);
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err?.message || 'Gagal menghapus sales_mappings di MySQL.' });
+    }
+  });
+
+  app.get('/api/invoice-validations', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const reqUserId = String(req.query.userId || req.headers['x-user-id'] || '').trim();
+      const reqRole = String(req.query.role || req.headers['x-user-role'] || '').toLowerCase().trim();
+
+      if (await ensureMarketingRelationalTables()) {
+        const mapRows = await mysqlQuery<any[]>(
+          `SELECT id, user_id, user_full_name, user_phone, master_sales_name_1, master_sales_name_2 FROM sales_mappings`
+        );
+        const mappedList = (Array.isArray(mapRows) ? mapRows : []).map((r: any) => ({
+          id: r.id,
+          userId: r.user_id,
+          userFullName: r.user_full_name,
+          userPhone: r.user_phone || '-',
+          masterSalesName1: r.master_sales_name_1,
+          masterSalesName2: r.master_sales_name_2 || ''
+        }));
+
+        let invRows: any[] = [];
+        if (reqRole === 'marketing_offline' && reqUserId) {
+          // Strict MySQL JOIN / WHERE filtering for Marketing Offline user
+          invRows = await mysqlQuery<any[]>(
+            `SELECT DISTINCT iv.*
+             FROM invoice_validations iv
+             INNER JOIN sales_mappings sm
+               ON sm.user_id = ?
+              AND (
+                UPPER(TRIM(iv.master_sales_name)) = UPPER(TRIM(sm.master_sales_name_1))
+                OR (sm.master_sales_name_2 IS NOT NULL AND sm.master_sales_name_2 <> '' AND UPPER(TRIM(iv.master_sales_name)) = UPPER(TRIM(sm.master_sales_name_2)))
+                OR iv.sales_user_id = sm.user_id
+              )
+             ORDER BY iv.delivery_date DESC, iv.no_invoice ASC`,
+            [reqUserId]
+          );
+        } else {
+          invRows = await mysqlQuery<any[]>(
+            `SELECT * FROM invoice_validations ORDER BY delivery_date DESC, no_invoice ASC`
+          );
+        }
+
+        const records = (Array.isArray(invRows) ? invRows : []).map((r: any) => {
+          let lineItems = [];
+          try {
+            lineItems = r.line_items_json ? JSON.parse(r.line_items_json) : [];
+          } catch {
+            lineItems = [];
+          }
+          return {
+            id: r.id,
+            noInvoice: r.no_invoice,
+            invoiceDate: r.invoice_date ? String(r.invoice_date).slice(0, 10) : '',
+            deliveryTomorrowDate: r.delivery_date ? String(r.delivery_date).slice(0, 10) : '',
+            customerName: r.customer_name,
+            areaName: r.area_name || 'BANYUWANGI',
+            paymentCategory: r.payment_category || 'TEMPO',
+            nominalTagihan: Number(r.nominal_tagihan) || 0,
+            itemSummary: r.item_summary || '',
+            masterSalesName: r.master_sales_name,
+            salesName: r.sales_name || r.master_sales_name,
+            salesUserId: r.sales_user_id || undefined,
+            salesWhatsapp: r.sales_whatsapp || '-',
+            validationStatus: r.validation_status || 'Menunggu Validasi',
+            validatedBy: r.validated_by || undefined,
+            validatedAt: r.validated_at || undefined,
+            marketingNotes: r.marketing_notes || '',
+            lineItems
+          };
+        });
+
+        return res.json({
+          success: true,
+          records,
+          salesMappings: mappedList,
+          count: records.length,
+          source: 'mysql'
+        });
+      }
+
+      return res.json({
+        success: true,
+        records: inMemoryMarketingValidations,
+        salesMappings: inMemoryMarketingSalesMappings,
+        count: inMemoryMarketingValidations.length,
+        source: 'memory'
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        message: err?.message || 'Gagal memuat Validasi Faktur dari MySQL.'
+      });
+    }
+  });
+
+  app.post('/api/invoice-validations/import', express.json({ limit: '20mb' }), async (req, res) => {
+    try {
+      const incoming = Array.isArray(req.body?.invoices)
+        ? req.body.invoices
+        : Array.isArray(req.body?.records)
+        ? req.body.records
+        : [];
+      const sanitized = sanitizeMarketingValidations(incoming);
+
+      if (await ensureMarketingRelationalTables()) {
+        for (const inv of sanitized) {
+          const lineItems = Array.isArray(inv.lineItems) ? inv.lineItems : [];
+          await mysqlQuery(
+            `INSERT INTO invoice_validations (
+              id, no_invoice, invoice_date, delivery_date, customer_name, area_name,
+              payment_category, nominal_tagihan, item_summary, master_sales_name,
+              sales_user_id, sales_name, sales_whatsapp, validation_status,
+              marketing_notes, line_items_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+              delivery_date = VALUES(delivery_date),
+              customer_name = VALUES(customer_name),
+              area_name = VALUES(area_name),
+              nominal_tagihan = VALUES(nominal_tagihan),
+              item_summary = VALUES(item_summary),
+              master_sales_name = VALUES(master_sales_name),
+              sales_user_id = VALUES(sales_user_id),
+              sales_name = VALUES(sales_name),
+              sales_whatsapp = VALUES(sales_whatsapp),
+              marketing_notes = VALUES(marketing_notes),
+              line_items_json = VALUES(line_items_json),
+              updated_at = NOW()`,
+            [
+              inv.id,
+              inv.noInvoice,
+              inv.invoiceDate || null,
+              inv.deliveryTomorrowDate,
+              inv.customerName,
+              inv.areaName || 'BANYUWANGI',
+              inv.paymentCategory || 'TEMPO',
+              Number(inv.nominalTagihan) || 0,
+              inv.itemSummary || '',
+              inv.masterSalesName || inv.salesName || '',
+              inv.salesUserId || null,
+              inv.salesName || '',
+              inv.salesWhatsapp || '-',
+              inv.validationStatus || 'Menunggu Validasi',
+              inv.marketingNotes || '',
+              JSON.stringify(lineItems)
+            ]
+          );
+
+          await mysqlQuery(`DELETE FROM invoice_validation_items WHERE no_invoice = ?`, [inv.noInvoice]);
+          for (let idx = 0; idx < lineItems.length; idx++) {
+            const li = lineItems[idx];
+            await mysqlQuery(
+              `INSERT INTO invoice_validation_items (
+                id, invoice_id, no_invoice, keterangan_barang, kts_faktur, satuan, harga_satuan, persen_diskon, total_harga
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                li.id || `${inv.id}-ITM-${idx + 1}`,
+                inv.id,
+                inv.noInvoice,
+                li.keteranganBarang || '',
+                Number(li.ktsFaktur) || 1,
+                li.satuan || 'PAK',
+                Number(li.hargaSatuan) || 0,
+                Number(li.persenDiskon) || 0,
+                Number(li.totalHarga) || 0
+              ]
+            );
+          }
+        }
+      }
+
+      return res.json({ success: true, importedCount: sanitized.length });
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        message: err?.message || 'Gagal mengimpor data faktur ke database MySQL.'
+      });
+    }
+  });
+
+  app.patch('/api/invoice-validations/:id/status', express.json(), async (req, res) => {
+    try {
+      const id = String(req.params.id || '').trim();
+      const { validationStatus, validatedBy } = req.body || {};
+      if (!id || !validationStatus) {
+        return res.status(400).json({ success: false, message: 'ID dan validationStatus wajib diisi.' });
+      }
+      if (await ensureMarketingRelationalTables()) {
+        await mysqlQuery(
+          `UPDATE invoice_validations
+           SET validation_status = ?, validated_by = ?, validated_at = NOW(), updated_at = NOW()
+           WHERE id = ?`,
+          [String(validationStatus), String(validatedBy || 'Marketing'), id]
+        );
+      }
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        message: err?.message || 'Gagal memperbarui status faktur di MySQL.'
+      });
+    }
+  });
+
+  app.delete('/api/invoice-validations/:id', async (req, res) => {
+    try {
+      const id = String(req.params.id || '').trim();
+      if (await ensureMarketingRelationalTables()) {
+        await mysqlQuery(`DELETE FROM invoice_validation_items WHERE invoice_id = ?`, [id]);
+        await mysqlQuery(`DELETE FROM invoice_validations WHERE id = ?`, [id]);
+      }
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        message: err?.message || 'Gagal menghapus faktur dari MySQL.'
+      });
+    }
+  });
+
+app.get('/api/marketing-invoice-validations', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     try {
       if (isDatabaseConfigured() && (!inMemoryMarketingValidationsLoaded || Date.now() - lastMarketingValidationsSyncAt > 3000)) {

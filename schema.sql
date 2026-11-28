@@ -220,4 +220,67 @@ ALTER TABLE `schedules` ADD COLUMN IF NOT EXISTS `payload_json` JSON NULL AFTER 
 -- Ini mencegah data contoh/demo tampil seolah-olah data nyata setelah deploy.
 -- Super Admin pertama tetap dibuat oleh server melalui BOOTSTRAP_ADMIN_* ENV.
 
+
+-- ====================================================================
+-- RELATIONAL TABLES: MAPPING NAMA SALES & VALIDASI FAKTUR PENGIRIMAN
+-- ====================================================================
+CREATE TABLE IF NOT EXISTS `sales_mappings` (
+  `id` VARCHAR(64) NOT NULL,
+  `user_id` VARCHAR(64) NOT NULL,
+  `user_full_name` VARCHAR(150) NOT NULL,
+  `user_phone` VARCHAR(40) NULL,
+  `master_sales_name_1` VARCHAR(150) NOT NULL,
+  `master_sales_name_2` VARCHAR(150) NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  INDEX `idx_sales_mappings_user` (`user_id`),
+  INDEX `idx_sales_mappings_m1` (`master_sales_name_1`),
+  INDEX `idx_sales_mappings_m2` (`master_sales_name_2`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `invoice_validations` (
+  `id` VARCHAR(64) NOT NULL,
+  `no_invoice` VARCHAR(64) NOT NULL,
+  `invoice_date` DATE NULL,
+  `delivery_date` DATE NOT NULL,
+  `customer_name` VARCHAR(200) NOT NULL,
+  `area_name` VARCHAR(120) NULL,
+  `payment_category` VARCHAR(20) NOT NULL DEFAULT 'TEMPO',
+  `nominal_tagihan` DECIMAL(15,2) NOT NULL DEFAULT 0,
+  `item_summary` TEXT NULL,
+  `master_sales_name` VARCHAR(150) NOT NULL,
+  `sales_user_id` VARCHAR(64) NULL,
+  `sales_name` VARCHAR(150) NULL,
+  `sales_whatsapp` VARCHAR(40) NULL,
+  `validation_status` VARCHAR(40) NOT NULL DEFAULT 'Menunggu Validasi',
+  `validated_by` VARCHAR(150) NULL,
+  `validated_at` DATETIME NULL,
+  `marketing_notes` TEXT NULL,
+  `line_items_json` LONGTEXT NULL,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_invoice_validations_no` (`no_invoice`),
+  INDEX `idx_inv_val_delivery` (`delivery_date`),
+  INDEX `idx_inv_val_master_sales` (`master_sales_name`),
+  INDEX `idx_inv_val_sales_user` (`sales_user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `invoice_validation_items` (
+  `id` VARCHAR(64) NOT NULL,
+  `invoice_id` VARCHAR(64) NOT NULL,
+  `no_invoice` VARCHAR(64) NOT NULL,
+  `keterangan_barang` VARCHAR(255) NOT NULL,
+  `kts_faktur` DECIMAL(12,2) NOT NULL DEFAULT 1,
+  `satuan` VARCHAR(24) NOT NULL DEFAULT 'PAK',
+  `harga_satuan` DECIMAL(15,2) NOT NULL DEFAULT 0,
+  `persen_diskon` DECIMAL(6,2) NOT NULL DEFAULT 0,
+  `total_harga` DECIMAL(15,2) NOT NULL DEFAULT 0,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  INDEX `idx_inv_items_invoice` (`invoice_id`),
+  INDEX `idx_inv_items_no` (`no_invoice`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

@@ -31,6 +31,29 @@ import { branchStore } from '../../services/branchStore';
 import { canAccess, getUserRoleDisplayTitle } from '../../utils/rbac';
 import { UserProfile } from '../../types';
 
+async function fetchJsonWithTimeout<T = any>(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs = 8000
+): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      cache: 'no-store'
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data?.success === false) {
+      throw new Error(data?.message || data?.error || `HTTP ${res.status}`);
+    }
+    return data as T;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function getEligibleMarketingSalesUsers(
   allUsers: UserProfile[],
   _activeBranchId: string
@@ -940,37 +963,18 @@ const RowStatusDropdown: React.FC<{
 export const MarketingSalesMappingView: React.FC<{
   onNavigateTab?: (tab: string) => void;
 }> = ({ onNavigateTab }) => {
-  const [allUsers, setAllUsers] = useState<UserProfile[]>(() => logisticsStore.getUsers());
-  const [activeBranchId, setActiveBranchId] = useState<string>(() => branchStore.getSelectedOriginBranchId());
-  useEffect(() => {
-    const syncUsers = () => setAllUsers([...logisticsStore.getUsers()]);
-    const unsubUsers = logisticsStore.subscribe(syncUsers);
-    const unsubBranch = branchStore.subscribe(() => setActiveBranchId(branchStore.getSelectedOriginBranchId()));
-    return () => {
-      unsubUsers();
-      unsubBranch();
-    };
-  }, []);
-
-  const validationUsers = useMemo(
-    () => getEligibleMarketingSalesUsers(allUsers, activeBranchId),
-    [allUsers, activeBranchId]
+  const [marketingOfflineUsers, setMarketingOfflineUsers] = useState<UserProfile[]>(() =>
+    getEligibleMarketingSalesUsers(logisticsStore.getUsers(), branchStore.getSelectedOriginBranchId())
   );
-
-  const [salesMappings, setSalesMappings] = useState<SalesNameMappingRecord[]>(DEFAULT_SALES_MAPPINGS);
+  const [salesMappings, setSalesMappings] = useState<SalesNameMappingRecord[]>([]);
   const [editingMappingId, setEditingMappingId] = useState<string | null>(null);
-  const [mapUserId, setMapUserId] = useState<string>(() => validationUsers[0]?.id || '');
-  useEffect(() => {
-    if (validationUsers.length === 0) {
-      setMapUserId('');
-    } else if (!validationUsers.some(u => u.id === mapUserId)) {
-      setMapUserId(validationUsers[0].id);
-    }
-  }, [validationUsers, mapUserId]);
+  const [mapUserId, setMapUserId] = useState<string>('');
   const [mapMasterName1, setMapMasterName1] = useState<string>('');
   const [mapMasterName2, setMapMasterName2] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [isLoadingMysql, setIsLoadingMysql] = useState<boolean>(true);
   const [isSavingMysql, setIsSavingMysql] = useState<boolean>(false);
+  const [dbErrorMessage, setDbErrorMessage] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -978,77 +982,111 @@ export const MarketingSalesMappingView: React.FC<{
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  useEffect(() => {
-    let active = true;
-    fetch('/api/marketing-invoice-validations', { cache: 'no-store' })
-      .then(r => r.json())
-      .then(res => {
-        if (!active) return;
-        if (res && res.success && Array.isArray(res.salesMappings) && res.salesMappings.length > 0) {
-          setSalesMappings(res.salesMappings);
-          cachedSalesMappings = res.salesMappings;
-        } else {
-          setSalesMappings(DEFAULT_SALES_MAPPINGS);
-          cachedSalesMappings = DEFAULT_SALES_MAPPINGS;
-          void fetch('/api/marketing-invoice-validations', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ salesMappings: DEFAULT_SALES_MAPPINGS })
-          });
-        }
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const persistMappingsToMysql = async (nextMappings: SalesNameMappingRecord[]) => {
-    setIsSavingMysql(true);
+  const loadMappingsAndUsersFromMysql = async () => {
+    setIsLoadingMysql(true);
+    setDbErrorMessage(null);
     try {
-      cachedSalesMappings = nextMappings;
-      window.dispatchEvent(new CustomEvent(SALES_MAPPINGS_UPDATED_EVENT, { detail: nextMappings }));
-      await fetch('/api/marketing-invoice-validations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ salesMappings: nextMappings })
+      const res = await fetchJsonWithTimeout<{
+        success: boolean;
+        salesMappings: SalesNameMappingRecord[];
+        marketingOfflineUsers?: UserProfile[];
+      }>('/api/sales-mappings', { method: 'GET' }, 8000);
+
+      const dbMappings = Array.isArray(res.salesMappings) ? res.salesMappings : [];
+      setSalesMappings(dbMappings);
+      cachedSalesMappings = dbMappings;
+      window.dispatchEvent(new CustomEvent(SALES_MAPPINGS_UPDATED_EVENT, { detail: dbMappings }));
+
+      const storeOffline = getEligibleMarketingSalesUsers(
+        logisticsStore.getUsers(),
+        branchStore.getSelectedOriginBranchId()
+      );
+      const apiOffline = Array.isArray(res.marketingOfflineUsers) ? res.marketingOfflineUsers : [];
+      const mergedMap = new Map<string, UserProfile>();
+      [...apiOffline, ...storeOffline].forEach(u => {
+        if (u && u.id) mergedMap.set(u.id, u);
       });
-    } catch (err) {
-      console.warn('[MySQL Sales Mapping Sync Error]', err);
+      const finalUsers = Array.from(mergedMap.values());
+      setMarketingOfflineUsers(finalUsers);
+      if (finalUsers.length > 0) {
+        setMapUserId(prev => (prev && finalUsers.some(u => u.id === prev) ? prev : finalUsers[0].id));
+      }
+    } catch (err: any) {
+      setDbErrorMessage(err?.message || 'Gagal memuat Mapping Nama Sales dari database MySQL.');
     } finally {
-      setIsSavingMysql(false);
+      setIsLoadingMysql(false);
     }
   };
 
-  const handleSaveMapping = (e: React.FormEvent) => {
+  useEffect(() => {
+    void loadMappingsAndUsersFromMysql();
+  }, []);
+
+  const selectedAccount = useMemo(
+    () => marketingOfflineUsers.find(u => u.id === mapUserId),
+    [marketingOfflineUsers, mapUserId]
+  );
+
+  const handleSaveMapping = async (e: React.FormEvent) => {
     e.preventDefault();
-    const targetUser = allUsers.find(u => u.id === mapUserId);
+    const targetUser = marketingOfflineUsers.find(u => u.id === mapUserId);
     if (!targetUser || !mapMasterName1.trim()) {
-      showToast('Pilih Akun User Management dan isi minimal Master Nama Sales 1.');
+      showToast('Pilih Akun Marketing Offline dan isi minimal Master Nama Sales 1.');
       return;
     }
 
-    const entry: SalesNameMappingRecord = {
-      id: editingMappingId || `MAP-SLS-${Date.now()}`,
+    const prevSnapshot = [...salesMappings];
+    const payload = {
       userId: targetUser.id,
       userFullName: targetUser.fullName,
-      userPhone: targetUser.phone || '0813-4455-6677',
+      userPhone: targetUser.phone || '-',
       masterSalesName1: mapMasterName1.trim().toUpperCase(),
       masterSalesName2: mapMasterName2.trim().toUpperCase()
     };
 
-    const nextMappings = editingMappingId
-      ? salesMappings.map(m => (m.id === editingMappingId ? entry : m))
-      : [...salesMappings, entry];
+    const optimisticId = editingMappingId || `MAP-TMP-${Date.now()}`;
+    const optimisticEntry: SalesNameMappingRecord = { id: optimisticId, ...payload };
+    const optimisticList = editingMappingId
+      ? salesMappings.map(m => (m.id === editingMappingId ? optimisticEntry : m))
+      : [...salesMappings, optimisticEntry];
+    setSalesMappings(optimisticList);
+    setIsSavingMysql(true);
+    setDbErrorMessage(null);
 
-    setSalesMappings(nextMappings);
-    void persistMappingsToMysql(nextMappings);
-    setEditingMappingId(null);
-    setMapMasterName1('');
-    setMapMasterName2('');
-    showToast(
-      `Mapping Nama Sales untuk ${entry.userFullName} tersimpan ke database & terintegrasi ke Validasi Faktur dan Aplikasi Penagihan.`
-    );
+    try {
+      if (editingMappingId) {
+        await fetchJsonWithTimeout(
+          `/api/sales-mappings/${encodeURIComponent(editingMappingId)}`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          },
+          8000
+        );
+        showToast(`Perubahan Mapping Nama Sales untuk ${payload.userFullName} tersimpan ke MySQL.`);
+      } else {
+        await fetchJsonWithTimeout(
+          '/api/sales-mappings',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          },
+          8000
+        );
+        showToast(`Mapping Nama Sales untuk ${payload.userFullName} tersimpan ke MySQL.`);
+      }
+      setEditingMappingId(null);
+      setMapMasterName1('');
+      setMapMasterName2('');
+      await loadMappingsAndUsersFromMysql();
+    } catch (err: any) {
+      setSalesMappings(prevSnapshot);
+      setDbErrorMessage(err?.message || 'Gagal menyimpan Mapping Nama Sales ke MySQL.');
+    } finally {
+      setIsSavingMysql(false);
+    }
   };
 
   const handleEditMapping = (m: SalesNameMappingRecord) => {
@@ -1061,11 +1099,21 @@ export const MarketingSalesMappingView: React.FC<{
     }
   };
 
-  const handleDeleteMapping = (id: string) => {
-    const nextMappings = salesMappings.filter(m => m.id !== id);
-    setSalesMappings(nextMappings);
-    void persistMappingsToMysql(nextMappings);
-    showToast('Data Mapping Nama Sales berhasil dihapus dari database.');
+  const handleDeleteMapping = async (id: string) => {
+    const prevSnapshot = [...salesMappings];
+    setSalesMappings(salesMappings.filter(m => m.id !== id));
+    setIsSavingMysql(true);
+    setDbErrorMessage(null);
+    try {
+      await fetchJsonWithTimeout(`/api/sales-mappings/${encodeURIComponent(id)}`, { method: 'DELETE' }, 8000);
+      showToast('Data Mapping Nama Sales berhasil dihapus dari database MySQL.');
+      await loadMappingsAndUsersFromMysql();
+    } catch (err: any) {
+      setSalesMappings(prevSnapshot);
+      setDbErrorMessage(err?.message || 'Gagal menghapus data dari database MySQL.');
+    } finally {
+      setIsSavingMysql(false);
+    }
   };
 
   const filteredMappings = useMemo(() => {
@@ -1075,40 +1123,55 @@ export const MarketingSalesMappingView: React.FC<{
       m =>
         m.userFullName.toLowerCase().includes(q) ||
         m.masterSalesName1.toLowerCase().includes(q) ||
-        m.masterSalesName2.toLowerCase().includes(q) ||
-        m.userPhone.toLowerCase().includes(q)
+        (m.masterSalesName2 || '').toLowerCase().includes(q) ||
+        (m.userPhone || '').toLowerCase().includes(q)
     );
   }, [salesMappings, searchQuery]);
 
   return (
-    <div className="space-y-5 w-full max-w-full">
+    <div className="space-y-4 w-full max-w-full bg-slate-50 dark:bg-slate-950">
       {toastMessage && (
-        <div className="fixed bottom-5 right-5 z-50 bg-emerald-600 text-white px-4 py-2.5 rounded-xl shadow-xl text-xs font-bold flex items-center gap-2">
+        <div className="fixed bottom-5 right-5 z-50 bg-blue-600 text-white px-4 py-2.5 rounded-xl border border-blue-500 text-xs font-bold flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 shrink-0" />
           <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* Header Sub-Menu Mapping Nama Sales */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-2xs">
+      {dbErrorMessage && (
+        <div className="bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs font-bold text-rose-700 dark:text-rose-300">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>Koneksi API/MySQL Gagal: {dbErrorMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadMappingsAndUsersFromMysql()}
+            className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold cursor-pointer self-start sm:self-auto"
+          >
+            Coba Lagi
+          </button>
+        </div>
+      )}
+
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div className="flex items-start gap-3.5">
-            <div className="w-11 h-11 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+            <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0">
               <Link2 className="w-5 h-5" />
             </div>
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-                  Mapping Nama Sales (1 Sales = 2 Master Nama Sales)
+                  Mapping Nama Sales (1 Akun Marketing Offline = 2 Nama Penjual)
                 </h1>
                 {isSavingMysql && (
-                  <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+                  <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">
                     &middot; Menyimpan ke database...
                   </span>
                 )}
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Hubungkan 1 Akun Sales pada User Management (beserta Nomor WA) dengan 2 Master Nama Sales yang terintegrasi otomatis ke Validasi Faktur &amp; Aplikasi Penagihan Pelanggan.
+                Hubungkan akun User Management role Marketing Offline (beserta Nomor WA) langsung ke database MySQL untuk filter hak akses Validasi Faktur &amp; Penagihan.
               </p>
             </div>
           </div>
@@ -1127,7 +1190,7 @@ export const MarketingSalesMappingView: React.FC<{
                 <button
                   type="button"
                   onClick={() => onNavigateTab('marketing_billing_app')}
-                  className="px-3.5 py-2 rounded-xl bg-amber-50 dark:bg-amber-950/50 hover:bg-amber-100 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                  className="px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
                 >
                   <DollarSign className="w-3.5 h-3.5" />
                   <span>Buka Aplikasi Penagihan</span>
@@ -1136,44 +1199,11 @@ export const MarketingSalesMappingView: React.FC<{
             )}
           </div>
         </div>
-
-        {/* Ringkasan Integrasi */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
-          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/80 dark:border-slate-800">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
-              Total Akun Sales Termapping
-            </span>
-            <div className="text-lg font-extrabold text-slate-900 dark:text-white mt-0.5 font-mono tabular-nums">
-              {salesMappings.length} Akun Sales
-            </div>
-          </div>
-          <div className="p-3 rounded-xl bg-blue-50/50 dark:bg-blue-950/30 border border-blue-200/70 dark:border-blue-800/50">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 dark:text-blue-300 block">
-              Total Master Nama Sales Aktif
-            </span>
-            <div className="text-lg font-extrabold text-blue-700 dark:text-blue-300 mt-0.5 font-mono tabular-nums">
-              {salesMappings.reduce(
-                (acc, m) => acc + (m.masterSalesName1 ? 1 : 0) + (m.masterSalesName2 ? 1 : 0),
-                0
-              )}{' '}
-              Master Nama
-            </div>
-          </div>
-          <div className="p-3 rounded-xl bg-emerald-50/50 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-800/50">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300 block">
-              Modul Terintegrasi Otomatis
-            </span>
-            <div className="text-xs font-extrabold text-emerald-700 dark:text-emerald-300 mt-1">
-              Validasi Faktur &bull; Aplikasi Penagihan &bull; WA Sales
-            </div>
-          </div>
-        </div>
       </div>
 
-      {/* Form Input / Edit Mapping Nama Sales */}
       <form
         onSubmit={handleSaveMapping}
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-2xs space-y-4"
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4"
       >
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
           <div>
@@ -1181,7 +1211,7 @@ export const MarketingSalesMappingView: React.FC<{
               {editingMappingId ? 'Perbarui Data Mapping Nama Sales' : 'Tambah Mapping Nama Sales Baru'}
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Pilih Akun User Management yang memiliki akses validasi/penagihan lalu hubungkan dengan Master Nama Sales 1 &amp; Master Nama Sales 2
+              Dropdown sumber akun hanya menarik user database dengan role Marketing Offline
             </p>
           </div>
           {editingMappingId && (
@@ -1210,13 +1240,7 @@ export const MarketingSalesMappingView: React.FC<{
               icon={<User className="w-3.5 h-3.5" />}
               searchable
               searchPlaceholder="Cari user Marketing Offline..."
-              options={(editingMappingId && !validationUsers.some(u => u.id === mapUserId)
-                ? [
-                    ...validationUsers,
-                    ...allUsers.filter(u => u.id === mapUserId)
-                  ]
-                : validationUsers
-              ).map(u => ({
+              options={marketingOfflineUsers.map(u => ({
                 value: u.id,
                 label: u.fullName,
                 subLabel: `Marketing Offline • WA: ${u.phone || '-'}`,
@@ -1228,19 +1252,19 @@ export const MarketingSalesMappingView: React.FC<{
 
           <div className="md:col-span-2">
             <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1.5">
-              No. Telepon / WA
+              No. Telepon / WA Sales
             </label>
             <input
               type="text"
               readOnly
-              value={allUsers.find(u => u.id === mapUserId)?.phone || '-'}
-              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-mono font-bold text-emerald-700 dark:text-emerald-400"
+              value={selectedAccount?.phone || '-'}
+              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-mono font-bold text-slate-800 dark:text-slate-200"
             />
           </div>
 
           <div className="md:col-span-3">
             <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1.5">
-              Master Nama Sales 1 (Pada Faktur / Excel) *
+              Master Nama Sales 1 (Nama Penjual) *
             </label>
             <input
               type="text"
@@ -1248,7 +1272,7 @@ export const MarketingSalesMappingView: React.FC<{
               value={mapMasterName1}
               onChange={e => setMapMasterName1(e.target.value)}
               placeholder="Contoh: 17. ZAINAL LKT BALI"
-              className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-900 dark:text-white uppercase focus:outline-none focus:border-blue-500"
+              className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-900 dark:text-white uppercase focus:outline-none focus:border-blue-600"
             />
           </div>
 
@@ -1261,7 +1285,7 @@ export const MarketingSalesMappingView: React.FC<{
               value={mapMasterName2}
               onChange={e => setMapMasterName2(e.target.value)}
               placeholder="Contoh: 18. ZAINAL BANYUWANGI"
-              className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-900 dark:text-white uppercase focus:outline-none focus:border-blue-500"
+              className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-900 dark:text-white uppercase focus:outline-none focus:border-blue-600"
             />
           </div>
         </div>
@@ -1269,7 +1293,8 @@ export const MarketingSalesMappingView: React.FC<{
         <div className="flex items-center justify-end pt-1">
           <button
             type="submit"
-            className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-extrabold flex items-center gap-2 shadow-xs transition cursor-pointer"
+            disabled={isSavingMysql}
+            className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white text-xs font-extrabold flex items-center gap-2 transition cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>{editingMappingId ? 'Simpan Perubahan Mapping' : 'Simpan Mapping Nama Sales'}</span>
@@ -1277,15 +1302,14 @@ export const MarketingSalesMappingView: React.FC<{
         </div>
       </form>
 
-      {/* Tabel Daftar Mapping Nama Sales */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-2xs">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
         <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">
               Daftar Mapping Nama Sales Aktif ({filteredMappings.length})
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Setiap Master Nama Sales otomatis terhubung dengan Nomor WA Sales pada Validasi Faktur &amp; Aplikasi Penagihan
+              Data tersimpan langsung di tabel sales_mappings database MySQL
             </p>
           </div>
           <div className="relative w-full sm:w-72">
@@ -1295,7 +1319,7 @@ export const MarketingSalesMappingView: React.FC<{
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder="Cari akun sales atau master nama..."
-              className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-blue-500"
+              className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
             />
           </div>
         </div>
@@ -1304,58 +1328,70 @@ export const MarketingSalesMappingView: React.FC<{
           <table className="w-full text-xs text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 text-[10px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400 h-10">
-                <th className="px-4">No</th>
-                <th className="px-4">Akun User Management</th>
-                <th className="px-4">No. Telepon / WA Sales</th>
-                <th className="px-4">Master Nama Sales 1</th>
-                <th className="px-4">Master Nama Sales 2</th>
-                <th className="px-4 text-right">Aksi</th>
+                <th className="px-4">NO</th>
+                <th className="px-4">AKUN USER MANAGEMENT</th>
+                <th className="px-4">NO. TELEPON / WA SALES</th>
+                <th className="px-4">MASTER NAMA SALES 1</th>
+                <th className="px-4">MASTER NAMA SALES 2</th>
+                <th className="px-4 text-right">AKSI</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-              {filteredMappings.map((m, idx) => {
-                const liveUser = allUsers.find(u => u.id === m.userId);
-                const phoneDisplay = liveUser?.phone || m.userPhone || '-';
-                const nameDisplay = liveUser?.fullName || m.userFullName;
-                return (
-                  <tr key={m.id} className="h-11 hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
-                    <td className="px-4 font-mono font-bold text-slate-500">{idx + 1}</td>
-                    <td className="px-4 font-extrabold text-slate-900 dark:text-white whitespace-nowrap">
-                      {nameDisplay}
-                      {liveUser && (
+              {isLoadingMysql ? (
+                <tr className="h-16">
+                  <td colSpan={6} className="px-4 text-center text-slate-400">
+                    Memuat data Mapping Nama Sales dari MySQL...
+                  </td>
+                </tr>
+              ) : filteredMappings.length === 0 ? (
+                <tr className="h-16">
+                  <td colSpan={6} className="px-4 text-center text-slate-400">
+                    Belum ada data Mapping Nama Sales di database MySQL.
+                  </td>
+                </tr>
+              ) : (
+                filteredMappings.map((m, idx) => {
+                  const liveUser = marketingOfflineUsers.find(u => u.id === m.userId);
+                  const phoneDisplay = liveUser?.phone || m.userPhone || '-';
+                  const nameDisplay = liveUser?.fullName || m.userFullName;
+                  return (
+                    <tr key={m.id} className="h-11 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                      <td className="px-4 font-mono font-bold text-slate-500">{idx + 1}</td>
+                      <td className="px-4 font-extrabold text-slate-900 dark:text-white whitespace-nowrap">
+                        {nameDisplay}
                         <span className="ml-2 text-[10px] font-medium text-slate-400">
-                          &middot; {getUserRoleDisplayTitle(liveUser.role)}
+                          &middot; Marketing Offline
                         </span>
-                      )}
-                    </td>
-                    <td className="px-4 font-mono font-bold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
-                      {phoneDisplay}
-                    </td>
-                    <td className="px-4 font-extrabold text-blue-700 dark:text-blue-300 whitespace-nowrap">
-                      {m.masterSalesName1}
-                    </td>
-                    <td className="px-4 font-extrabold text-indigo-700 dark:text-indigo-300 whitespace-nowrap">
-                      {m.masterSalesName2 || '-'}
-                    </td>
-                    <td className="px-4 text-right whitespace-nowrap">
-                      <button
-                        type="button"
-                        onClick={() => handleEditMapping(m)}
-                        className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/50 mr-1 cursor-pointer"
-                      >
-                        Ubah
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteMapping(m.id)}
-                        className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 cursor-pointer"
-                      >
-                        Hapus
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
+                      </td>
+                      <td className="px-4 font-mono font-bold text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
+                        {phoneDisplay}
+                      </td>
+                      <td className="px-4 font-extrabold text-blue-600 dark:text-blue-400 whitespace-nowrap">
+                        {m.masterSalesName1}
+                      </td>
+                      <td className="px-4 font-extrabold text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                        {m.masterSalesName2 || '-'}
+                      </td>
+                      <td className="px-4 text-right whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => handleEditMapping(m)}
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/50 mr-1 cursor-pointer"
+                        >
+                          Ubah
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteMapping(m.id)}
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 cursor-pointer"
+                        >
+                          Hapus
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -1431,6 +1467,7 @@ export const MarketingInvoiceValidationView: React.FC<{
   const [salesMappings, setSalesMappings] = useState<SalesNameMappingRecord[]>(DEFAULT_SALES_MAPPINGS);
   const [isLoadingMysql, setIsLoadingMysql] = useState<boolean>(true);
   const [isSyncingMysql, setIsSyncingMysql] = useState<boolean>(false);
+  const [dbErrorMessage, setDbErrorMessage] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Filters
@@ -1504,64 +1541,80 @@ export const MarketingInvoiceValidationView: React.FC<{
     setTimeout(() => setToastMessage(null), 3500);
   };
 
+  const loadInvoiceValidationsFromMysql = async () => {
+    setIsLoadingMysql(true);
+    setDbErrorMessage(null);
+    try {
+      const params = new URLSearchParams();
+      if (currentUser?.id) params.set('userId', currentUser.id);
+      if (currentUser?.role) params.set('role', currentUser.role);
+      const res = await fetchJsonWithTimeout<{
+        success: boolean;
+        records: MarketingInvoiceValidationItem[];
+        salesMappings: SalesNameMappingRecord[];
+      }>(
+        `/api/invoice-validations?${params.toString()}`,
+        {
+          method: 'GET',
+          headers: {
+            'x-user-id': currentUser?.id || '',
+            'x-user-role': currentUser?.role || ''
+          }
+        },
+        8000
+      );
+
+      const normalized = (Array.isArray(res.records) ? res.records : [])
+        .map((r: MarketingInvoiceValidationItem) => ({
+          ...r,
+          validationStatus: normalizeValidationStatus(r.validationStatus),
+          lineItems: (Array.isArray(r.lineItems) ? r.lineItems : []).filter(
+            li => (Number(li.totalHarga) || 0) > 0 || (Number(li.hargaSatuan) || 0) > 0
+          )
+        }))
+        .filter((r: MarketingInvoiceValidationItem) => (Number(r.nominalTagihan) || 0) > 0);
+      setRecords(normalized);
+
+      if (Array.isArray(res.salesMappings)) {
+        setSalesMappings(res.salesMappings);
+        cachedSalesMappings = res.salesMappings;
+      }
+    } catch (err: any) {
+      setDbErrorMessage(err?.message || 'Gagal memuat Validasi Faktur dari database MySQL.');
+    } finally {
+      setIsLoadingMysql(false);
+    }
+  };
+
   const persistToMysql = async (
     nextRecords?: MarketingInvoiceValidationItem[],
     nextMappings?: SalesNameMappingRecord[]
   ) => {
     setIsSyncingMysql(true);
+    setDbErrorMessage(null);
     try {
       const payload: Record<string, any> = {};
       if (nextRecords) payload.records = nextRecords;
       if (nextMappings) payload.salesMappings = nextMappings;
-      await fetch('/api/marketing-invoice-validations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-    } catch (err) {
-      console.warn('[MySQL Marketing Invoice Validations Sync Error]', err);
+      await fetchJsonWithTimeout(
+        '/api/invoice-validations/import',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        },
+        8000
+      );
+    } catch (err: any) {
+      setDbErrorMessage(err?.message || 'Gagal menyimpan data ke database MySQL.');
+      throw err;
     } finally {
       setIsSyncingMysql(false);
     }
   };
 
-  // Hydrate murni dari MySQL (/api/marketing-invoice-validations)
   useEffect(() => {
-    let active = true;
-    setIsLoadingMysql(true);
-    fetch('/api/marketing-invoice-validations', { cache: 'no-store' })
-      .then(r => r.json())
-      .then(res => {
-        if (!active) return;
-        if (res && res.success && Array.isArray(res.records)) {
-          const normalized = res.records
-            .map((r: MarketingInvoiceValidationItem) => ({
-              ...r,
-              validationStatus: normalizeValidationStatus(r.validationStatus),
-              lineItems: (Array.isArray(r.lineItems) ? r.lineItems : []).filter(
-                li => (Number(li.totalHarga) || 0) > 0 || (Number(li.hargaSatuan) || 0) > 0
-              )
-            }))
-            .filter((r: MarketingInvoiceValidationItem) => (Number(r.nominalTagihan) || 0) > 0);
-          setRecords(normalized);
-        } else {
-          setRecords([]);
-        }
-
-        if (res && res.success && Array.isArray(res.salesMappings) && res.salesMappings.length > 0) {
-          setSalesMappings(res.salesMappings);
-          cachedSalesMappings = res.salesMappings;
-        } else {
-          setSalesMappings(DEFAULT_SALES_MAPPINGS);
-          cachedSalesMappings = DEFAULT_SALES_MAPPINGS;
-        }
-      })
-      .catch(err => {
-        console.warn('[MySQL Marketing Validations Fetch Error]', err);
-      })
-      .finally(() => {
-        if (active) setIsLoadingMysql(false);
-      });
+    void loadInvoiceValidationsFromMysql();
 
     const handleMappingUpdated = (evt: Event) => {
       const customEvt = evt as CustomEvent<SalesNameMappingRecord[]>;
@@ -1571,19 +1624,9 @@ export const MarketingInvoiceValidationView: React.FC<{
     };
     window.addEventListener(SALES_MAPPINGS_UPDATED_EVENT, handleMappingUpdated);
     return () => {
-      active = false;
       window.removeEventListener(SALES_MAPPINGS_UPDATED_EVENT, handleMappingUpdated);
     };
-  }, []);
-
-  const resolveSalesInfo = (item: MarketingInvoiceValidationItem) => {
-    return resolveSalesFromMappings(
-      item.masterSalesName || item.salesName,
-      salesMappings,
-      allUsers,
-      item.salesUserId
-    );
-  };
+  }, [currentUser?.id, currentUser?.role]);
 
   // Parse file Excel pada Halaman Upload Excel (mengabaikan baris dengan nominal kosong / 0)
   const handleExcelFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1739,37 +1782,28 @@ export const MarketingInvoiceValidationView: React.FC<{
       ...inv,
       deliveryTomorrowDate: uploadTargetDate || inv.deliveryTomorrowDate || tomorrowIso
     }));
-    const importedNoSet = new Set(syncedWithDate.map(i => i.noInvoice.toUpperCase()));
-
-    // Tarik snapshot server terbaru sebelum menggabungkan agar data sales lain tidak tertimpa
-    let latestServerRecords = records;
+    setIsSyncingMysql(true);
+    setDbErrorMessage(null);
     try {
-      const latestRes = await fetch('/api/marketing-invoice-validations', { cache: 'no-store' }).then(r => r.json());
-      if (latestRes?.success && Array.isArray(latestRes.records)) {
-        latestServerRecords = latestRes.records;
-      }
-    } catch {}
-
-    const merged = [
-      ...syncedWithDate,
-      ...latestServerRecords.filter(r => !importedNoSet.has(r.noInvoice.toUpperCase()))
-    ];
-    setRecords(merged);
-    await persistToMysql(merged, undefined);
-
-    if (isPersonalSalesMode) {
-      const ownCount = syncedWithDate.filter(inv =>
-        doesInvoiceBelongToUser(inv, currentUser, salesMappings, allUsers)
-      ).length;
-      showToast(
-        `${syncedWithDate.length} faktur tersimpan ke database (${ownCount} faktur milik akun ${currentUser.fullName} ditampilkan).`
+      await fetchJsonWithTimeout(
+        '/api/invoice-validations/import',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ invoices: syncedWithDate })
+        },
+        8000
       );
-    } else {
-      showToast(`${syncedWithDate.length} faktur berhasil disimpan ke database.`);
+      await loadInvoiceValidationsFromMysql();
+      showToast(`${syncedWithDate.length} faktur berhasil disimpan ke database MySQL.`);
+      setUploadPreviewInvoices([]);
+      setUploadFileName('');
+      setViewMode('table');
+    } catch (err: any) {
+      setDbErrorMessage(err?.message || 'Gagal mengimpor batch Excel ke database MySQL.');
+    } finally {
+      setIsSyncingMysql(false);
     }
-    setUploadPreviewInvoices([]);
-    setUploadFileName('');
-    setViewMode('table');
   };
 
   // Scoping per akun: Akun Sales hanya melihat faktur miliknya; Admin/SPV melihat semua & bisa filter per akun
@@ -1967,6 +2001,7 @@ export const MarketingInvoiceValidationView: React.FC<{
   }, [filteredRecords, flattenedExcelRows]);
 
   const handleQuickStatusUpdate = async (id: string, nextStatus: MarketingValidationStatus) => {
+    const prevSnapshot = [...records];
     const validatorName = currentUser?.fullName || 'Tim Marketing Offline';
     const nowIso = new Date().toISOString();
 
@@ -1982,23 +2017,28 @@ export const MarketingInvoiceValidationView: React.FC<{
     );
     setRecords(next);
     setIsSyncingMysql(true);
+    setDbErrorMessage(null);
     try {
-      await fetch('/api/marketing-invoice-validations/status', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id,
-          validationStatus: nextStatus,
-          validatedBy: validatorName,
-          validatedAt: nowIso
-        })
-      });
-    } catch {
-      void persistToMysql(next, undefined);
+      await fetchJsonWithTimeout(
+        `/api/invoice-validations/${encodeURIComponent(id)}/status`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            validationStatus: nextStatus,
+            validatedBy: validatorName,
+            validatedAt: nowIso
+          })
+        },
+        8000
+      );
+      showToast(`Status faktur diperbarui menjadi "${nextStatus}" di MySQL.`);
+    } catch (err: any) {
+      setRecords(prevSnapshot);
+      setDbErrorMessage(err?.message || 'Gagal memperbarui status faktur di MySQL.');
     } finally {
       setIsSyncingMysql(false);
     }
-    showToast(`Status faktur diperbarui menjadi "${nextStatus}".`);
   };
 
   const openAddModal = () => {
@@ -2321,23 +2361,23 @@ export const MarketingInvoiceValidationView: React.FC<{
   const READABLE_EXCEL_COLUMNS = [
     {
       no: '01',
-      name: 'Nama Sales',
-      desc: 'Nama Master Sales pada Faktur (otomatis terhubung ke Akun User Management & WA Sales melalui Mapping Nama Sales).'
+      name: 'Nama Penjual',
+      desc: 'Nama Penjual pada faktur (forward-fill otomatis & terhubung ke Mapping Nama Sales).'
     },
     {
       no: '02',
       name: 'Nama Pelanggan',
-      desc: 'Nama Toko / Pelanggan tujuan pengiriman (otomatis meneruskan nama pelanggan untuk baris berikutnya).'
+      desc: 'Nama Toko / Pelanggan tujuan pengiriman (forward-fill otomatis).'
     },
     {
       no: '03',
       name: 'No Faktur',
-      desc: 'Nomor Faktur Penjualan (contoh: FJ02-1126-1384). Multi-baris barang otomatis digabung per faktur.'
+      desc: 'Nomor Faktur Penjualan (forward-fill otomatis; multi-item dikelompokkan per faktur).'
     },
     {
       no: '04',
       name: 'Keterangan Barang',
-      desc: 'Nama lengkap dan spesifikasi kemasan barang yang dikirimkan.'
+      desc: 'Nama lengkap dan spesifikasi kemasan barang.'
     },
     {
       no: '05',
@@ -2347,33 +2387,30 @@ export const MarketingInvoiceValidationView: React.FC<{
     {
       no: '06',
       name: 'sat',
-      desc: 'Satuan kemasan barang (ZAK, CRT, PAK, SLP, ROL, SET, KG, PCS, DZN, BOX).'
+      desc: 'Satuan kemasan (PAK, CRT, KG, ZAK, DZN, BAL, SET, PCS, SLP).'
     },
     {
       no: '07',
-      name: 'Harga satuan',
+      name: 'Harga',
       desc: 'Harga satuan barang dalam Rupiah.'
     },
     {
       no: '08',
       name: '%',
-      desc: 'Persentase diskon item barang (opsional; dikosongkan bila tanpa diskon).'
+      desc: 'Persentase diskon item barang (opsional).'
     },
     {
       no: '09',
-      name: 'Diskon',
-      desc: 'Nominal potongan diskon Rupiah (jika kosong / Rp - otomatis dikosongkan tanpa menampilkan Rp -).'
+      name: 'Total Harga',
+      desc: 'Total nilai item barang pada baris faktur.'
     },
     {
       no: '10',
-      name: 'Total Harga',
-      desc: 'Total nilai bersih baris barang. Baris dengan nominal kosong / 0 otomatis tidak dimasukkan ke tabel.'
+      name: 'KET',
+      desc: 'Keterangan area pengiriman / catatan khusus faktur (menggantikan kolom diskon Rp).'
     }
   ];
 
-  // ==========================================================================
-  // RENDER HALAMAN UPLOAD EXCEL VALIDASI FAKTUR (Request 1)
-  // ==========================================================================
   if (viewMode === 'upload_excel') {
     const totalPreviewLines = uploadPreviewInvoices.reduce(
       (acc, inv) => acc + (inv.lineItems?.length || 0),
@@ -2925,239 +2962,211 @@ export const MarketingInvoiceValidationView: React.FC<{
         )}
       </div>
 
-      {/* Tabel Spreadsheet Validasi Faktur dengan Ukuran Baris Seragam (h-10) & Tanpa Ikon Pensil/Sampah */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-2xs w-full">
-        <table className="w-full table-fixed border-collapse text-[11px]">
-          <thead>
-            <tr className="h-10 bg-slate-100/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-extrabold uppercase tracking-wider text-[10px]">
-              <th className="w-[14%] px-2.5 text-left border-r border-slate-200 dark:border-slate-700">
-                Nama Sales
-              </th>
-              <th className="w-[13%] px-2.5 text-left border-r border-slate-200 dark:border-slate-700">
-                Nama Pelanggan
-              </th>
-              <th className="w-[10%] px-2.5 text-left border-r border-slate-200 dark:border-slate-700">
-                No Faktur
-              </th>
-              <th className="w-[21%] px-2.5 text-left border-r border-slate-200 dark:border-slate-700">
-                Keterangan Barang
-              </th>
-              <th className="w-[5%] px-1.5 text-center border-r border-slate-200 dark:border-slate-700">
-                Kts. Faktur
-              </th>
-              <th className="w-[4%] px-1.5 text-center border-r border-slate-200 dark:border-slate-700">
-                sat
-              </th>
-              <th className="w-[8%] px-2 text-right border-r border-slate-200 dark:border-slate-700">
-                Harga satuan
-              </th>
-              <th className="w-[3%] px-1 text-center border-r border-slate-200 dark:border-slate-700">
-                %
-              </th>
-              <th className="w-[6%] px-2 text-right border-r border-slate-200 dark:border-slate-700">
-                Diskon
-              </th>
-              <th className="w-[8%] px-2 text-right border-r border-slate-200 dark:border-slate-700">
-                Total Harga
-              </th>
-              <th className="w-[8%] px-2 text-center">
-                Validasi &amp; WA
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200/80 dark:divide-slate-800">
-            {isLoadingMysql ? (
-              <tr className="h-24">
-                <td colSpan={11} className="px-4 text-center text-slate-400 text-xs">
-                  Memuat data Validasi Faktur dari Server Database...
-                </td>
-              </tr>
-            ) : flattenedExcelRows.length === 0 ? (
-              <tr className="h-32">
-                <td colSpan={11} className="px-4 text-center">
-                  <div className="max-w-md mx-auto space-y-2 py-4">
-                    <div className="text-xs font-extrabold text-slate-700 dark:text-slate-200">
-                      {isPersonalSalesMode && records.length > 0 && accountScopedRecords.length === 0
-                        ? `Belum Ada Faktur untuk Akun ${currentUser.fullName}`
-                        : 'Belum Ada Data Validasi Faktur di Database'}
-                    </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      {isPersonalSalesMode && records.length > 0 && accountScopedRecords.length === 0
-                        ? `Saat ini tersedia ${records.length} faktur milik akun Sales lain. Akun Anda (${currentUser.fullName}) hanya menampilkan faktur yang terdaftar atas nama Sales Anda.`
-                        : 'Silakan unggah file Excel melalui tombol Upload Excel atau klik Tambah Faktur untuk menambahkan data ke database.'}
-                    </p>
-                    <div className="flex items-center justify-center gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => setViewMode('upload_excel')}
-                        className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold cursor-pointer"
-                      >
-                        Buka Halaman Upload Excel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={openAddModal}
-                        className="px-3.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-bold cursor-pointer"
-                      >
-                        + Tambah Faktur Manual
-                      </button>
-                    </div>
+      {/* Error Banner Koneksi MySQL */}
+      {dbErrorMessage && (
+        <div className="bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs font-bold text-rose-700 dark:text-rose-300">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>Koneksi API/MySQL Gagal: {dbErrorMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadInvoiceValidationsFromMysql()}
+            className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold cursor-pointer self-start sm:self-auto"
+          >
+            Coba Lagi
+          </button>
+        </div>
+      )}
+
+      {/* Desain Modern Kartu Faktur Terkelompok (Grouped Invoice Cards per No Faktur) */}
+      <div className="space-y-3 w-full">
+        {isLoadingMysql ? (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 text-center text-xs font-semibold text-slate-400">
+            Memuat data Validasi Faktur dari database MySQL...
+          </div>
+        ) : filteredRecords.length === 0 ? (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 text-center">
+            <div className="max-w-md mx-auto space-y-2">
+              <div className="text-xs font-extrabold text-slate-700 dark:text-slate-200">
+                {isPersonalSalesMode
+                  ? `Belum Ada Faktur Ter-mapping untuk Akun ${currentUser.fullName}`
+                  : 'Belum Ada Data Validasi Faktur di Database MySQL'}
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                {isPersonalSalesMode
+                  ? `Akun Marketing Offline Anda (${currentUser.fullName}) hanya menampilkan faktur milik Nama Penjual yang terhubung di Mapping Nama Sales.`
+                  : 'Silakan unggah file Excel 10 kolom melalui tombol Upload Excel atau klik Tambah Faktur.'}
+              </p>
+              <div className="flex items-center justify-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('upload_excel')}
+                  className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold cursor-pointer"
+                >
+                  Buka Halaman Upload Excel
+                </button>
+                <button
+                  type="button"
+                  onClick={openAddModal}
+                  className="px-3.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-bold cursor-pointer"
+                >
+                  + Tambah Faktur Manual
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          filteredRecords.map(invoice => {
+            const resolvedSales = resolveSalesInfo(invoice);
+            const normStatus = normalizeValidationStatus(invoice.validationStatus);
+            const statusLabel =
+              normStatus === 'Tervalidasi Siap Kirim'
+                ? 'Tervalidasi Siap Kirim'
+                : normStatus === 'Revisi'
+                ? 'Perlu Revisi'
+                : 'Menunggu';
+            const statusBadgeClass =
+              normStatus === 'Tervalidasi Siap Kirim'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800'
+                : normStatus === 'Revisi'
+                ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800'
+                : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800';
+
+            const ketTag =
+              (invoice.areaName && invoice.areaName !== 'BANYUWANGI' ? invoice.areaName : '') ||
+              (invoice.marketingNotes && !invoice.marketingNotes.startsWith('Diimpor dari')
+                ? invoice.marketingNotes
+                : invoice.areaName || 'UMUM');
+
+            const validLines: InvoiceLineItem[] = (
+              Array.isArray(invoice.lineItems) && invoice.lineItems.length > 0
+                ? invoice.lineItems
+                : [
+                    {
+                      id: `${invoice.id}-LI-0`,
+                      keteranganBarang: invoice.itemSummary || 'BARANG KEMASAN',
+                      ktsFaktur: 1,
+                      satuan: 'CRT',
+                      hargaSatuan: invoice.nominalTagihan || 0,
+                      persenDiskon: '',
+                      nominalDiskon: 0,
+                      totalHarga: invoice.nominalTagihan || 0
+                    }
+                  ]
+            ).filter(li => (Number(li.totalHarga) || 0) > 0 || (Number(li.hargaSatuan) || 0) > 0);
+
+            return (
+              <div
+                key={invoice.id}
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden"
+              >
+                <div className="px-4 py-3.5 bg-slate-50/70 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2.5 min-w-0">
+                    <span className="px-2.5 py-1 rounded-lg bg-blue-600 text-white font-mono text-xs font-extrabold tracking-tight">
+                      {invoice.noInvoice}
+                    </span>
+                    <span className="text-sm font-extrabold text-slate-900 dark:text-white uppercase truncate">
+                      {invoice.customerName}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                      Penjual: {resolvedSales.masterSalesName} ({resolvedSales.userFullName})
+                    </span>
+                    {ketTag && (
+                      <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 text-[10px] font-extrabold text-blue-700 dark:text-blue-300 uppercase">
+                        KET: {ketTag}
+                      </span>
+                    )}
+                    <span className="text-[11px] font-mono text-slate-500">
+                      Kirim: {formatReadableDate(invoice.deliveryTomorrowDate)}
+                    </span>
                   </div>
-                </td>
-              </tr>
-            ) : (
-              flattenedExcelRows.map(row => {
-                const {
-                  rowKey,
-                  invoice,
-                  resolvedSales,
-                  lineItem,
-                  isFirstOfSales,
-                  isFirstOfCustomer,
-                  isFirstOfInvoice
-                } = row;
 
-                const hargaFormatted = formatRupiahNumber(lineItem.hargaSatuan);
-                const diskonFormatted = formatRupiahNumber(lineItem.nominalDiskon);
-                const totalFormatted = formatRupiahNumber(lineItem.totalHarga);
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <div className="text-right mr-1">
+                      <span className="text-[10px] font-bold uppercase text-slate-400 block leading-none">
+                        Subtotal Faktur ({validLines.length} Item)
+                      </span>
+                      <span className="text-sm font-mono font-extrabold text-slate-900 dark:text-white">
+                        Rp {formatRupiahNumber(invoice.nominalTagihan)}
+                      </span>
+                    </div>
 
-                return (
-                  <tr
-                    key={rowKey}
-                    className={`h-10 hover:bg-blue-50/40 dark:hover:bg-slate-800/50 transition-colors ${
-                      isFirstOfSales ? 'border-t border-slate-300 dark:border-slate-700' : ''
-                    }`}
-                  >
-                    {/* 1. Nama Sales — Baris seragam 1 baris (h-10) */}
-                    <td
-                      className="h-10 px-2.5 align-middle border-r border-slate-200/80 dark:border-slate-800 overflow-hidden"
-                      title={
-                        isFirstOfSales
-                          ? `${resolvedSales.masterSalesName} • ${resolvedSales.userFullName} (${resolvedSales.userPhone})`
-                          : undefined
-                      }
+                    <span
+                      className={`px-2.5 py-1 rounded-lg border text-[11px] font-extrabold ${statusBadgeClass}`}
                     >
-                      {isFirstOfSales ? (
-                        <div className="flex items-center justify-between gap-1.5 truncate">
-                          <span className="font-extrabold text-slate-900 dark:text-white uppercase truncate">
-                            {resolvedSales.masterSalesName}
-                          </span>
-                          <span className="text-[10px] font-mono font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
-                            {resolvedSales.userPhone}
-                          </span>
-                        </div>
-                      ) : null}
-                    </td>
+                      {statusLabel}
+                    </span>
 
-                    {/* 2. Nama Pelanggan — Baris seragam 1 baris (h-10) */}
-                    <td
-                      className="h-10 px-2.5 align-middle border-r border-slate-200/80 dark:border-slate-800 overflow-hidden"
-                      title={isFirstOfCustomer ? invoice.customerName : undefined}
+                    <div className="w-36">
+                      <RowStatusDropdown
+                        value={normStatus}
+                        onChange={nextStatus => void handleQuickStatusUpdate(invoice.id, nextStatus)}
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => openSingleInvoiceWaModal(invoice)}
+                      className="h-7 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-extrabold flex items-center gap-1 transition cursor-pointer"
+                      title={`Kirim WA ke ${resolvedSales.userFullName} (${resolvedSales.userPhone})`}
                     >
-                      {isFirstOfCustomer ? (
-                        <div className="font-extrabold text-slate-900 dark:text-white uppercase truncate">
-                          {invoice.customerName}
-                        </div>
-                      ) : null}
-                    </td>
+                      <Send className="w-3 h-3" />
+                      <span>WA Sales</span>
+                    </button>
+                  </div>
+                </div>
 
-                    {/* 3. No Faktur — Baris seragam 1 baris (h-10) */}
-                    <td
-                      className="h-10 px-2.5 align-middle border-r border-slate-200/80 dark:border-slate-800 overflow-hidden"
-                      title={
-                        isFirstOfInvoice
-                          ? `${invoice.noInvoice} • Kirim: ${invoice.deliveryTomorrowDate}`
-                          : undefined
-                      }
-                    >
-                      {isFirstOfInvoice ? (
-                        <div className="font-mono font-extrabold text-blue-700 dark:text-blue-300 truncate">
-                          {invoice.noInvoice}
-                        </div>
-                      ) : null}
-                    </td>
-
-                    {/* 4. Keterangan Barang — Baris seragam 1 baris (h-10) */}
-                    <td
-                      className="h-10 px-2.5 align-middle border-r border-slate-200/80 dark:border-slate-800 text-slate-800 dark:text-slate-200 font-medium overflow-hidden"
-                      title={lineItem.keteranganBarang}
-                    >
-                      <div className="truncate">{lineItem.keteranganBarang}</div>
-                    </td>
-
-                    {/* 5. Kts. Faktur */}
-                    <td className="h-10 px-1.5 align-middle text-center border-r border-slate-200/80 dark:border-slate-800 font-mono tabular-nums font-bold text-slate-900 dark:text-white whitespace-nowrap">
-                      {lineItem.ktsFaktur}
-                    </td>
-
-                    {/* 6. sat */}
-                    <td className="h-10 px-1.5 align-middle text-center border-r border-slate-200/80 dark:border-slate-800 font-semibold text-slate-600 dark:text-slate-300 uppercase whitespace-nowrap">
-                      {lineItem.satuan}
-                    </td>
-
-                    {/* 7. Harga satuan (Tanpa Rp - jika kosong) */}
-                    <td className="h-10 px-2 align-middle text-right border-r border-slate-200/80 dark:border-slate-800 font-mono tabular-nums text-slate-800 dark:text-slate-200 whitespace-nowrap">
-                      {hargaFormatted ? (
-                        <>
-                          <span className="text-slate-400 mr-0.5">Rp</span>
-                          {hargaFormatted}
-                        </>
-                      ) : null}
-                    </td>
-
-                    {/* 8. % */}
-                    <td className="h-10 px-1 align-middle text-center border-r border-slate-200/80 dark:border-slate-800 font-mono tabular-nums text-slate-700 dark:text-slate-300 whitespace-nowrap">
-                      {lineItem.persenDiskon !== '' && Number(lineItem.persenDiskon) > 0
-                        ? lineItem.persenDiskon
-                        : ''}
-                    </td>
-
-                    {/* 9. Diskon (Request 4: Kosongkan jika 0, tidak menampilkan Rp -) */}
-                    <td className="h-10 px-2 align-middle text-right border-r border-slate-200/80 dark:border-slate-800 font-mono tabular-nums text-slate-700 dark:text-slate-300 whitespace-nowrap">
-                      {diskonFormatted ? (
-                        <>
-                          <span className="text-slate-400 mr-0.5">Rp</span>
-                          {diskonFormatted}
-                        </>
-                      ) : null}
-                    </td>
-
-                    {/* 10. Total Harga */}
-                    <td className="h-10 px-2 align-middle text-right border-r border-slate-200/80 dark:border-slate-800 font-mono tabular-nums font-extrabold text-slate-900 dark:text-white whitespace-nowrap">
-                      {totalFormatted ? (
-                        <>
-                          <span className="text-slate-400 font-normal mr-0.5">Rp</span>
-                          {totalFormatted}
-                        </>
-                      ) : null}
-                    </td>
-
-                    {/* 11. Validasi & WA (Request 3, 5, 6: Satu baris sejajar tanpa ikon pensil & sampah) */}
-                    <td className="h-10 px-2 align-middle">
-                      {isFirstOfInvoice ? (
-                        <div className="flex items-center gap-1 h-7">
-                          <RowStatusDropdown
-                            value={invoice.validationStatus}
-                            onChange={nextSt => handleQuickStatusUpdate(invoice.id, nextSt)}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => openWaModalForInvoice(invoice)}
-                            className="h-7 px-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-extrabold flex items-center justify-center gap-1 transition cursor-pointer shrink-0"
-                            title={`Kirim WA ke ${resolvedSales.userFullName} (${resolvedSales.userPhone})`}
-                          >
-                            <Send className="w-2.5 h-2.5 shrink-0" />
-                            <span>WA</span>
-                          </button>
-                        </div>
-                      ) : null}
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs text-left border-collapse">
+                    <thead>
+                      <tr className="h-8 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                        <th className="w-10 px-4 text-center">No</th>
+                        <th className="px-3">Keterangan Barang</th>
+                        <th className="w-24 px-3 text-center">Kts. Faktur</th>
+                        <th className="w-20 px-3 text-center">sat</th>
+                        <th className="w-32 px-3 text-right">Harga</th>
+                        <th className="w-16 px-2 text-center">%</th>
+                        <th className="w-36 px-4 text-right">Total Harga</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+                      {validLines.map((li, idx) => (
+                        <tr key={li.id || idx} className="h-9 hover:bg-slate-50/70 dark:hover:bg-slate-800/30">
+                          <td className="px-4 text-center font-mono text-slate-400">{idx + 1}</td>
+                          <td className="px-3 font-semibold text-slate-800 dark:text-slate-200">
+                            {li.keteranganBarang}
+                          </td>
+                          <td className="px-3 text-center font-mono font-bold text-slate-900 dark:text-white">
+                            {li.ktsFaktur}
+                          </td>
+                          <td className="px-3 text-center font-bold text-slate-500 uppercase">
+                            {li.satuan}
+                          </td>
+                          <td className="px-3 text-right font-mono text-slate-700 dark:text-slate-300">
+                            {formatRupiahNumber(li.hargaSatuan)
+                              ? `Rp ${formatRupiahNumber(li.hargaSatuan)}`
+                              : '-'}
+                          </td>
+                          <td className="px-2 text-center font-mono text-slate-500">
+                            {li.persenDiskon !== '' && Number(li.persenDiskon) > 0
+                              ? `${li.persenDiskon}%`
+                              : '-'}
+                          </td>
+                          <td className="px-4 text-right font-mono font-extrabold text-slate-900 dark:text-white">
+                            {formatRupiahNumber(li.totalHarga)
+                              ? `Rp ${formatRupiahNumber(li.totalHarga)}`
+                              : '-'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
 
       {/* Modal Tambah Faktur & Rincian Barang */}

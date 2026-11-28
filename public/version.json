@@ -1,9 +1,9 @@
 {
-  "versionCode": 10062,
-  "versionName": "1.0.62",
-  "updatedAt": "2026-11-28T10:25:00+07:00",
-  "changelog": "Update V84: Integrasi Mapping Nama Sales khusus role Marketing Offline (tanpa kolom Integrasi Modul & perbaikan tombol Ubah), pembatasan visibilitas faktur per akun Marketing Offline di frontend & API backend MySQL, serta parser Upload Excel 10 kolom standar (termasuk KET & auto forward-fill).",
+  "versionCode": 10063,
+  "versionName": "1.0.63",
+  "updatedAt": "2026-11-28T10:45:00+07:00",
+  "changelog": "Update V85: Penyimpanan langsung ke tabel relasional MySQL (/api/sales-mappings & /api/invoice-validations) tanpa localStorage, Optimistic UI + timeout 8000ms + Coba Lagi, Grouped Invoice Cards per No Faktur, parser 10 kolom Excel (termasuk KET), dan filter JOIN MySQL per role Marketing Offline.",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V84 (v1.0.62): Pembaruan menyeluruh modul Mapping Nama Sales dan Validasi Faktur & Rincian Barang Pengiriman."
+  "releaseNotes": "Update V85 (v1.0.63): Integrasi penuh database MySQL untuk Mapping Nama Sales & Validasi Faktur Pengiriman."
 }
