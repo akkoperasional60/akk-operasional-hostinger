@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Crew, DriverShiftCheckin, Fleet } from '../types';
 import { driverShiftService } from '../services/driverShiftService';
+import { getLocalDateStr } from '../services/driverReportService';
 import { useToast } from '../context/ToastContext';
 import { getOfficialAreasForBranch } from '../utils/areaNormalizer';
 import { logisticsStore } from '../services/store';
@@ -444,13 +445,62 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
     return [emptyOpt, ...memberOpts];
   }, [crewPool, selectedHelper1Id]);
 
+  // Single Source of Truth: Deteksi jadwal kiriman aktif milik Driver/Helper pada hari ini
+  const activeCrewSchedule = useMemo(() => {
+    const todayStr = getLocalDateStr();
+    const norm = (v?: string) => String(v || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const targetId = norm(driverId).replace(/^crw/, '');
+    const targetName = norm(driverName);
+    const allSchedules = logisticsStore.getSchedules();
+    const todaySchedules = allSchedules.filter(
+      s => s.status !== 'delivered' && getLocalDateStr(s.departureDate) === todayStr
+    );
+    const pool = todaySchedules.length > 0 ? todaySchedules : allSchedules.filter(s => s.status !== 'delivered');
+    return (
+      pool.find(s => {
+        const ids = [s.crewId, s.crewHelperId, s.crewHelper2Id, s.portalCrewId, s.portalCrewHelperId]
+          .filter(Boolean)
+          .map(x => norm(x).replace(/^crw/, ''));
+        const names = [
+          s.crew?.name,
+          s.crewHelper?.name,
+          s.crewHelper2?.name,
+          s.portalCrew?.name,
+          s.portalCrewHelper?.name
+        ]
+          .filter(Boolean)
+          .map(x => norm(x));
+        return (targetId && ids.includes(targetId)) || (targetName && names.includes(targetName));
+      }) || null
+    );
+  }, [driverId, driverName, storeTick, isOpen]);
+
+  const scheduledFleetForCrew = useMemo(() => {
+    if (!activeCrewSchedule) return null;
+    const byId = activeCrewSchedule.fleetId
+      ? fleetOptions.find(f => f.id === activeCrewSchedule.fleetId)
+      : undefined;
+    if (byId) return byId;
+    const rawCode = String(activeCrewSchedule.armada || activeCrewSchedule.fleet?.initialCode || activeCrewSchedule.fleet?.plateNumber || '').trim();
+    if (!rawCode) return null;
+    const normCode = rawCode.replace(/\s+/g, '').toLowerCase();
+    return (
+      fleetOptions.find(
+        f =>
+          (f.initialCode && f.initialCode.replace(/\s+/g, '').toLowerCase() === normCode) ||
+          f.plateNumber.replace(/\s+/g, '').toLowerCase() === normCode
+      ) || null
+    );
+  }, [activeCrewSchedule, fleetOptions]);
+
   const chosenFleet = useMemo(() => {
     return (
       fleetOptions.find(f => f.id === selectedFleetId) ||
+      scheduledFleetForCrew ||
       (fleetId ? fleetOptions.find(f => f.id === fleetId) : undefined) ||
       null
     );
-  }, [fleetOptions, selectedFleetId, fleetId]);
+  }, [fleetOptions, selectedFleetId, scheduledFleetForCrew, fleetId]);
 
   // Step 1 & Step 2 untuk Verifikasi (Check-In 1x, Ubah PIN 2x)
   const [step, setStep] = useState<1 | 2>(1);
@@ -534,11 +584,12 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
           })
         : null;
 
-    const cleanInitArea = String(areaName || partnerDriver?.selectedArea || '').trim();
+    const scheduleInitArea = String(activeCrewSchedule?.areaName || activeCrewSchedule?.store?.storeName || '').trim();
+    const cleanInitArea = String(scheduleInitArea || areaName || partnerDriver?.selectedArea || '').trim();
     const matchedArea = areaOptions.find(a => a.value.toLowerCase() === cleanInitArea.toLowerCase())?.value || '';
     setSelectedArea(matchedArea);
 
-    const targetFleetId = fleetId || partnerDriver?.fleetId;
+    const targetFleetId = scheduledFleetForCrew?.id || activeCrewSchedule?.fleetId || fleetId || partnerDriver?.fleetId;
     const validFleet = targetFleetId
       ? fleetOptions.find(f => f.id === targetFleetId && f.status !== 'maintenance')
       : partnerDriver?.plateNumber
@@ -681,6 +732,7 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
     setIsSubmitting(true);
     const res = await driverShiftService.checkInDriver({
       branchId,
+      scheduleId: activeCrewSchedule?.id,
       driverId,
       driverName,
       userRole: roleLabel,

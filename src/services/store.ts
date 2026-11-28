@@ -4861,6 +4861,25 @@ class LogisticsStore {
     this.syncSchedulesToCrewHistory(this.schedules);
 
     if (newSch) {
+      try {
+        import('./driverReportService')
+          .then(({ driverReportService, getLocalDateStr }) => {
+            driverReportService.syncReportsFleetFromSchedule({
+              scheduleId: newSch!.id,
+              trackingNumber: newSch!.trackingNumber,
+              fleetId: newSch!.fleetId,
+              plateNumber: newSch!.fleet?.plateNumber || newSch!.armada,
+              fleetInitialCode: newSch!.fleet?.initialCode || newSch!.armada,
+              driverName: newSch!.crew?.name,
+              areaName: newSch!.areaName || newSch!.store?.storeName,
+              date: getLocalDateStr(newSch!.departureDate)
+            });
+          })
+          .catch(() => {});
+      } catch {}
+    }
+
+    if (newSch) {
       this.dispatchMiddleware({
         entityType: 'schedule',
         action: 'update',
@@ -6839,6 +6858,10 @@ class LogisticsStore {
   // SPARE PARTS & ROUTINE MAINTENANCE METHODS
   // ==========================================
   public getSpareParts(): SparePart[] {
+    const role = String(this.currentUser?.role || '').toLowerCase().replace(/[\s_-]+/g, '');
+    if (role === 'superadmin') {
+      return [...this.spareParts];
+    }
     return [...this.spareParts];
   }
 

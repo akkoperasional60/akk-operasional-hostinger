@@ -1,9 +1,9 @@
 {
-  "versionCode": 10054,
-  "versionName": "1.0.54",
-  "updatedAt": "2026-11-25T13:32:00+07:00",
-  "changelog": "Update V76: Perbaikan Build Prebuild Hostinger (Anchor V70 di server/crewClaims.ts), Perbaikan Pilihan Area Kirim Akun Driver/Helper, Perbaikan Kamera & Tombol X Cek Armada Portal Driver.",
+  "versionCode": 10062,
+  "versionName": "1.0.62",
+  "updatedAt": "2026-11-28T10:25:00+07:00",
+  "changelog": "Update V84: Integrasi Mapping Nama Sales khusus role Marketing Offline (tanpa kolom Integrasi Modul & perbaikan tombol Ubah), pembatasan visibilitas faktur per akun Marketing Offline di frontend & API backend MySQL, serta parser Upload Excel 10 kolom standar (termasuk KET & auto forward-fill).",
   "apkAvailable": false,
   "apkNote": "APK lama mengarah ke hosting lama dan sengaja tidak disertakan. Build ulang APK setelah Hostinger live.",
-  "releaseNotes": "Update V76 (v1.0.54): Memperbaiki kegagalan build prebuild Hostinger pada scripts/apply_crew_monitor_v70.mjs dengan mempertahankan anchor validasi V70 di server/crewClaims.ts (lulus uji node scripts/apply_crew_v65.mjs), sekaligus mempertahankan seluruh perbaikan V62-V63 (resolusi izin cabang branch_state_payload & fallback Nusantara, stacking kamera z-index 80, tombol X responsif 44x44px, dan fallback Kamera HP)."
+  "releaseNotes": "Update V84 (v1.0.62): Pembaruan menyeluruh modul Mapping Nama Sales dan Validasi Faktur & Rincian Barang Pengiriman."
 }

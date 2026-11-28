@@ -25,6 +25,12 @@ export interface DriverHelperReport {
     | 'salah_muat';
   areaName: string;
   deliveryId?: string;
+  scheduleId?: string;
+  fleetId?: string;
+  fleetInitialCode?: string;
+  scheduledPlateNumber?: string;
+  scheduledFleetInitialCode?: string;
+  fleetSyncStatus?: 'synced' | 'mismatch' | 'unscheduled';
   notes: string;
   photoUrl?: string | null;
   photoUrls?: string[];
@@ -590,6 +596,9 @@ class DriverReportService {
    */
   public upsertShiftCheckinCheckoutReport(params: {
     shiftId: string;
+    scheduleId?: string;
+    fleetId?: string;
+    fleetInitialCode?: string;
     driverId: string;
     driverName: string;
     userRole?: string;
@@ -645,12 +654,20 @@ class DriverReportService {
         ? `[PRESENSI SHIFT TERPADU] Check-In: ${existing.checkinTimeFormatted || params.checkinTimeFormatted} | Check-Out: ${mergedCheckout}${helperSuffix} | PIN Keamanan: Terverifikasi`
         : `[PRESENSI CHECK-IN] Waktu Masuk: ${params.checkinTimeFormatted} (Status: Sedang Bertugas)${helperSuffix} | PIN Keamanan: Terverifikasi`;
 
+      const resolvedPlateExisting = safePlate !== '-' ? safePlate : sanitizeOperationalPlate(existing.plateNumber);
       list[existingIdx] = {
         ...existing,
+        scheduleId: params.scheduleId || existing.scheduleId,
+        deliveryId: params.scheduleId || existing.deliveryId,
+        fleetId: params.fleetId || existing.fleetId,
+        fleetInitialCode: params.fleetInitialCode || existing.fleetInitialCode,
+        scheduledPlateNumber: resolvedPlateExisting !== '-' ? resolvedPlateExisting : existing.scheduledPlateNumber,
+        scheduledFleetInitialCode: params.fleetInitialCode || existing.scheduledFleetInitialCode,
+        fleetSyncStatus: (params.scheduleId || existing.scheduleId) ? 'synced' : existing.fleetSyncStatus,
         driverName: params.driverName || existing.driverName,
         userRole: nextRole,
         helperName: mergedHelperName,
-        plateNumber: safePlate !== '-' ? safePlate : sanitizeOperationalPlate(existing.plateNumber),
+        plateNumber: resolvedPlateExisting,
         areaName: params.areaName || existing.areaName,
         checkoutTimeFormatted: mergedCheckout,
         securityPin: mergedPin,
@@ -678,6 +695,13 @@ class DriverReportService {
       : `[PRESENSI CHECK-IN] Waktu Masuk: ${params.checkinTimeFormatted} (Status: Sedang Bertugas)${helperSuffix} | PIN Keamanan: Terverifikasi`;
 
     return this.addReport({
+      scheduleId: params.scheduleId,
+      deliveryId: params.scheduleId,
+      fleetId: params.fleetId,
+      fleetInitialCode: params.fleetInitialCode,
+      scheduledPlateNumber: safePlate !== '-' ? safePlate : undefined,
+      scheduledFleetInitialCode: params.fleetInitialCode,
+      fleetSyncStatus: params.scheduleId ? 'synced' : undefined,
       driverId: params.driverId,
       driverName: params.driverName,
       userRole: params.userRole || 'Driver',
@@ -1357,6 +1381,91 @@ class DriverReportService {
       longitude: params.longitude,
       photoUrl: params.photoUrl
     });
+  }
+
+  /**
+   * Sinkronkan armada seluruh laporan terkait sebuah jadwal kiriman admin (Single Source of Truth)
+   */
+  public syncReportsFleetFromSchedule(params: {
+    scheduleId: string;
+    trackingNumber?: string;
+    fleetId?: string;
+    plateNumber?: string;
+    fleetInitialCode?: string;
+    driverName?: string;
+    areaName?: string;
+    date?: string;
+  }): number {
+    const cleanSchedId = String(params.scheduleId || '').trim();
+    const safePlate = sanitizeOperationalPlate(params.plateNumber);
+    if (!cleanSchedId && safePlate === '-') return 0;
+
+    const list = [...this.getReports()];
+    let updatedCount = 0;
+    const normStr = (v?: string) => String(v || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const targetDriver = normStr(params.driverName);
+    const targetArea = normStr(params.areaName);
+    const targetDate = String(params.date || '').trim();
+
+    const nextList = list.map(rep => {
+      const sameSched =
+        (cleanSchedId && (rep.scheduleId === cleanSchedId || rep.deliveryId === cleanSchedId)) ||
+        (params.trackingNumber && (rep.scheduleId === params.trackingNumber || rep.deliveryId === params.trackingNumber));
+      const sameCrewDay =
+        !rep.scheduleId &&
+        targetDate &&
+        rep.date === targetDate &&
+        targetDriver &&
+        (normStr(rep.driverName) === targetDriver || normStr(rep.helperName).includes(targetDriver)) &&
+        (!targetArea || !rep.areaName || normStr(rep.areaName).includes(targetArea) || targetArea.includes(normStr(rep.areaName)));
+
+      if (!sameSched && !sameCrewDay) return rep;
+
+      const nextPlate = safePlate !== '-' ? safePlate : rep.plateNumber;
+      const nextInitial = params.fleetInitialCode || rep.fleetInitialCode;
+      const changed =
+        rep.plateNumber !== nextPlate ||
+        rep.fleetId !== (params.fleetId || rep.fleetId) ||
+        rep.fleetInitialCode !== nextInitial ||
+        rep.fleetSyncStatus !== 'synced' ||
+        (cleanSchedId && rep.scheduleId !== cleanSchedId);
+
+      if (!changed) return rep;
+      updatedCount += 1;
+      const updatedRep: DriverHelperReport = {
+        ...rep,
+        scheduleId: cleanSchedId || rep.scheduleId,
+        deliveryId: cleanSchedId || rep.deliveryId,
+        fleetId: params.fleetId || rep.fleetId,
+        fleetInitialCode: nextInitial,
+        scheduledPlateNumber: nextPlate !== '-' ? nextPlate : rep.scheduledPlateNumber,
+        scheduledFleetInitialCode: nextInitial,
+        plateNumber: nextPlate,
+        fleetSyncStatus: 'synced'
+      };
+      this.pushReportToServer(updatedRep);
+      return updatedRep;
+    });
+
+    if (updatedCount > 0) {
+      this.saveReports(nextList);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('driver-report-updated'));
+      }
+      if (cleanSchedId && typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+        fetch(`/api/schedules/${encodeURIComponent(cleanSchedId)}/sync-fleet`, {
+          method: 'POST',
+          headers: this.getAuthHeaders(),
+          credentials: 'include',
+          body: JSON.stringify({
+            fleetId: params.fleetId,
+            plateNumber: safePlate !== '-' ? safePlate : undefined,
+            fleetInitialCode: params.fleetInitialCode
+          })
+        }).catch(() => {});
+      }
+    }
+    return updatedCount;
   }
 
   public resolveReport(

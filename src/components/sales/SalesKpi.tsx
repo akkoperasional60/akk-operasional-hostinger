@@ -792,15 +792,15 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                 prevMonthRecord.pembuatanFaktur +
                 prevMonthRecord.pengecekanFaktur) /
               3
-            ).toFixed(1)
+            ).toFixed(2)
           )
         : Number(existing?.lastMonthPct || 0);
 
       if (existing) {
         const avg = Number(
-          ((existing.validasiSoWeb + existing.pembuatanFaktur + existing.pengecekanFaktur) / 3).toFixed(1)
+          ((existing.validasiSoWeb + existing.pembuatanFaktur + existing.pengecekanFaktur) / 3).toFixed(2)
         );
-        const gapPct = Number(Math.max(0, 100 - avg).toFixed(1));
+        const gapPct = Number(Math.max(0, 100 - avg).toFixed(2));
         return {
           ...existing,
           isInactive: Boolean(existing.isInactive),
@@ -896,21 +896,21 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       };
     }
     const prevMonthPct = Number(
-      (sourceRows.reduce((s, r) => s + (r.prevMonthPct || 0), 0) / sourceRows.length).toFixed(1)
+      (sourceRows.reduce((s, r) => s + (r.prevMonthPct || 0), 0) / sourceRows.length).toFixed(2)
     );
     const actualPct = Number(
-      (sourceRows.reduce((s, r) => s + r.avgMonthlyPct, 0) / sourceRows.length).toFixed(1)
+      (sourceRows.reduce((s, r) => s + r.avgMonthlyPct, 0) / sourceRows.length).toFixed(2)
     );
     const targetPct = 100;
-    const gapPct = Number((targetPct - actualPct).toFixed(1));
+    const gapPct = Number((targetPct - actualPct).toFixed(2));
     const avgValidasi = Number(
-      (sourceRows.reduce((s, r) => s + r.validasiSoWeb, 0) / sourceRows.length).toFixed(1)
+      (sourceRows.reduce((s, r) => s + r.validasiSoWeb, 0) / sourceRows.length).toFixed(2)
     );
     const avgFaktur = Number(
       (
         sourceRows.reduce((s, r) => s + (r.pembuatanFaktur + r.pengecekanFaktur) / 2, 0) /
         sourceRows.length
-      ).toFixed(1)
+      ).toFixed(2)
     );
     const totalDiscountErrors = activeDisplayedKpiList.reduce((s, r) => s + r.discountErrorsCount, 0);
 
@@ -1914,8 +1914,8 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       const totalReorder = rows.reduce((s, r) => s + r.totalReorder, 0);
       const terkirimFaktur = rows.reduce((s, r) => s + r.terkirimFaktur, 0);
       const belumTerkirimSo = rows.reduce((s, r) => s + r.belumTerkirimSo, 0);
-      const pctTerkirim = totalReorder > 0 ? Number(((terkirimFaktur / totalReorder) * 100).toFixed(1)) : 0;
-      const pctBelumTerkirim = totalReorder > 0 ? Number(((belumTerkirimSo / totalReorder) * 100).toFixed(1)) : 0;
+      const pctTerkirim = totalReorder > 0 ? Number(((terkirimFaktur / totalReorder) * 100).toFixed(2)) : 0;
+      const pctBelumTerkirim = totalReorder > 0 ? Number(((belumTerkirimSo / totalReorder) * 100).toFixed(2)) : 0;
 
       // Previous month calculation from MySQL reorderList or manual override
       const prevRows = reorderList.filter(
@@ -1924,7 +1924,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       const prevTotalReorder = prevRows.reduce((s, r) => s + r.totalReorder, 0);
       const prevTerkirim = prevRows.reduce((s, r) => s + r.terkirimFaktur, 0);
       const computedPrevMonthPct =
-        prevTotalReorder > 0 ? Number(((prevTerkirim / prevTotalReorder) * 100).toFixed(1)) : 0;
+        prevTotalReorder > 0 ? Number(((prevTerkirim / prevTotalReorder) * 100).toFixed(2)) : 0;
       const customKey = `${unitName}_${selectedMonth}_${selectedYear}`;
       const prevMonthPct =
         unitPrevMonthPct[customKey] !== undefined
@@ -1932,7 +1932,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
           : computedPrevMonthPct;
       const targetPct = 100;
       const actualPct = pctTerkirim;
-      const gapPct = Number((targetPct - actualPct).toFixed(1));
+      const gapPct = Number((targetPct - actualPct).toFixed(2));
 
       return {
         rows,
@@ -1951,10 +1951,10 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     const soetomo = computeUnit('Nusantara Dr. Soetomo');
     const expand = computeUnit('Nusantara Expand');
     // Gabungan Nusantara Dr. Soetomo & Nusantara Expand: (Prosentase Dr. Soetomo + Prosentase Nusantara Expand) / 2 * 100%
-    const combinedPrevMonthPct = Number(((soetomo.prevMonthPct + expand.prevMonthPct) / 2).toFixed(1));
+    const combinedPrevMonthPct = Number(((soetomo.prevMonthPct + expand.prevMonthPct) / 2).toFixed(2));
     const combinedTargetPct = 100;
-    const combinedActualPct = Number(((soetomo.actualPct + expand.actualPct) / 2).toFixed(1));
-    const combinedGapPct = Number(Math.max(0, combinedTargetPct - combinedActualPct).toFixed(1));
+    const combinedActualPct = Number(((soetomo.actualPct + expand.actualPct) / 2).toFixed(2));
+    const combinedGapPct = Number(Math.max(0, combinedTargetPct - combinedActualPct).toFixed(2));
 
     return {
       soetomo,
@@ -1981,8 +1981,8 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     const lastMonthQty = synchronizedOmsetRows.reduce((s, r) => s + r.lastMonthQty, 0);
 
     const diffOmzet = omzetNetto - lastMonthOmzet;
-    const diffOmzetPct = lastMonthOmzet > 0 ? ((diffOmzet / lastMonthOmzet) * 100).toFixed(1) : '0.0';
-    const achvPct = targetBulanIni > 0 ? ((omzetNetto / targetBulanIni) * 100).toFixed(1) : '0.0';
+    const diffOmzetPct = lastMonthOmzet > 0 ? ((diffOmzet / lastMonthOmzet) * 100).toFixed(2) : '0.0';
+    const achvPct = targetBulanIni > 0 ? ((omzetNetto / targetBulanIni) * 100).toFixed(2) : '0.0';
     const gapTarget = omzetNetto - targetBulanIni;
 
     const pembagiHarian = 26;
@@ -1993,7 +1993,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     const qtyHarian = qtyNetto > 0 ? qtyNetto / pembagiHarian : 0;
 
     const diffHarianPct =
-      rataBulanLalu > 0 ? (((rataHarianIni - rataBulanLalu) / rataBulanLalu) * 100).toFixed(1) : '0.0';
+      rataBulanLalu > 0 ? (((rataHarianIni - rataBulanLalu) / rataBulanLalu) * 100).toFixed(2) : '0.0';
 
     return {
       omzetNetto,
@@ -2033,7 +2033,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     const maxOmzet = Math.max(...arr.map(x => x.omzet), 1);
     return arr.map(item => {
       const diff = item.omzet - item.lastOmzet;
-      const pct = item.lastOmzet > 0 ? ((diff / item.lastOmzet) * 100).toFixed(1) : '0.0';
+      const pct = item.lastOmzet > 0 ? ((diff / item.lastOmzet) * 100).toFixed(2) : '0.0';
       const isPositive = diff >= 0;
       return {
         kota: item.kota,
@@ -2064,7 +2064,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     const maxOmzet = Math.max(...arr.map(x => x.omzet), 1);
     return arr.map(c => {
       const diff = c.omzet - c.lastOmzet;
-      const pct = c.lastOmzet > 0 ? ((diff / c.lastOmzet) * 100).toFixed(1) : '0.0';
+      const pct = c.lastOmzet > 0 ? ((diff / c.lastOmzet) * 100).toFixed(2) : '0.0';
       const isPos = diff >= 0;
       return {
         name: c.name,
@@ -2095,7 +2095,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     const maxOmzet = Math.max(...arr.map(x => x.omzet), 1);
     return arr.map(b => {
       const diff = b.omzet - b.lastOmzet;
-      const pct = b.lastOmzet > 0 ? ((diff / b.lastOmzet) * 100).toFixed(1) : '0.0';
+      const pct = b.lastOmzet > 0 ? ((diff / b.lastOmzet) * 100).toFixed(2) : '0.0';
       const isPos = diff >= 0;
       return {
         name: b.name,
@@ -2153,7 +2153,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
 
         const valM = Number((rawNetto / 1e9).toFixed(2));
         const compM = Number((rawComp / 1e9).toFixed(2));
-        const pct = rawComp > 0 ? ((rawNetto / rawComp) * 100).toFixed(1).replace('.', ',') : '0,0';
+        const pct = rawComp > 0 ? ((rawNetto / rawComp) * 100).toFixed(2).replace('.', ',') : '0,0';
         const topLabel = rawNetto > 0 ? `${(rawNetto / 1e9).toFixed(2).replace('.', ',')} M` : '';
         return {
           label: m.short,
@@ -2193,13 +2193,13 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       const series = rawWeeks.map(w => {
         const valM = Number((w.rawNetto / 1e9).toFixed(2));
         const compM = Number((w.rawComp / 1e9).toFixed(2));
-        const pct = w.rawComp > 0 ? ((w.rawNetto / w.rawComp) * 100).toFixed(1).replace('.', ',') : '0,0';
+        const pct = w.rawComp > 0 ? ((w.rawNetto / w.rawComp) * 100).toFixed(2).replace('.', ',') : '0,0';
         const topLabel =
           w.rawNetto <= 0
             ? ''
             : w.rawNetto >= 1e9
             ? `${(w.rawNetto / 1e9).toFixed(2).replace('.', ',')} M`
-            : `${(w.rawNetto / 1e6).toFixed(1).replace('.', ',')} jt`;
+            : `${(w.rawNetto / 1e6).toFixed(2).replace('.', ',')} jt`;
         return {
           label: w.label,
           omzetNetto: valM,
@@ -2234,8 +2234,8 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       const rawComp = w === 0 ? 0 : dailyCompRp;
       const valJt = Number((rawNetto / 1e6).toFixed(2));
       const compJt = Number((rawComp / 1e6).toFixed(2));
-      const pct = rawComp > 0 ? ((rawNetto / rawComp) * 100).toFixed(1).replace('.', ',') : '0,0';
-      const topLabel = rawNetto > 0 ? `${valJt.toFixed(1).replace('.', ',')} jt` : '';
+      const pct = rawComp > 0 ? ((rawNetto / rawComp) * 100).toFixed(2).replace('.', ',') : '0,0';
+      const topLabel = rawNetto > 0 ? `${valJt.toFixed(2).replace('.', ',')} jt` : '';
       return {
         label: String(dayNum),
         omzetNetto: valJt,
@@ -2434,8 +2434,8 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-slate-800 tabular-nums">
                     {kpiPreviewRows.map((row, idx) => {
-                      const avg = Number(((row.validasiSoWeb + row.pembuatanFaktur + row.pengecekanFaktur) / 3).toFixed(1));
-                      const gap = Number(Math.max(0, 100 - avg).toFixed(1));
+                      const avg = Number(((row.validasiSoWeb + row.pembuatanFaktur + row.pengecekanFaktur) / 3).toFixed(2));
+                      const gap = Number(Math.max(0, 100 - avg).toFixed(2));
                       return (
                         <tr key={row.id}>
                           <td className="py-2 px-3">{idx + 1}</td>
@@ -2444,7 +2444,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                             {row.branchId === 'cab-sidoarjo' ? 'Cabang Sidoarjo' : 'Cabang Nusantara'}
                           </td>
                           <td className="py-2 px-3 text-center font-medium text-slate-600 dark:text-slate-300">
-                            {Number(row.lastMonthPct ?? 0).toFixed(1)}%
+                            {Number(row.lastMonthPct ?? 0).toFixed(2)}%
                           </td>
                           <td className="py-2 px-3 text-center font-medium">{row.validasiSoWeb}%</td>
                           <td className="py-2 px-3 text-center font-medium">{row.pembuatanFaktur}%</td>
@@ -3119,7 +3119,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     </label>
                     <input
                       type="number"
-                      step="0.1"
+                      step="0.01"
                       min={0}
                       max={100}
                       value={manualKpiPrevPct}
@@ -3135,7 +3135,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     </label>
                     <input
                       type="number"
-                      step="0.1"
+                      step="0.01"
                       min={0}
                       max={100}
                       value={manualKpiValidasi}
@@ -3151,7 +3151,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     </label>
                     <input
                       type="number"
-                      step="0.1"
+                      step="0.01"
                       min={0}
                       max={100}
                       value={manualKpiPembuatan}
@@ -3167,7 +3167,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     </label>
                     <input
                       type="number"
-                      step="0.1"
+                      step="0.01"
                       min={0}
                       max={100}
                       value={manualKpiPengecekan}
@@ -3246,7 +3246,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                             Math.min(100, Math.max(0, parseNum(manualKpiPembuatan))) +
                             Math.min(100, Math.max(0, parseNum(manualKpiPengecekan)))) /
                           3
-                        ).toFixed(1)}
+                        ).toFixed(2)}
                         %
                       </strong>
                     </span>
@@ -3260,7 +3260,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                               Math.min(100, Math.max(0, parseNum(manualKpiPembuatan))) +
                               Math.min(100, Math.max(0, parseNum(manualKpiPengecekan)))) /
                               3
-                        ).toFixed(1)}
+                        ).toFixed(2)}
                         %
                       </strong>
                     </span>
@@ -3356,8 +3356,8 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                   </div>
                   <p className="text-xs font-medium text-blue-700/80 dark:text-blue-300/80 mt-1 tabular-nums">
                     {kpiOverallSummary.actualPct >= kpiOverallSummary.prevMonthPct
-                      ? `+${(kpiOverallSummary.actualPct - kpiOverallSummary.prevMonthPct).toFixed(1)}% vs bulan lalu`
-                      : `${(kpiOverallSummary.actualPct - kpiOverallSummary.prevMonthPct).toFixed(1)}% vs bulan lalu`}
+                      ? `+${(kpiOverallSummary.actualPct - kpiOverallSummary.prevMonthPct).toFixed(2)}% vs bulan lalu`
+                      : `${(kpiOverallSummary.actualPct - kpiOverallSummary.prevMonthPct).toFixed(2)}% vs bulan lalu`}
                   </p>
                 </div>
 
@@ -3410,7 +3410,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       ? (
                           activeDisplayedKpiList.reduce((s, r) => s + r.validasiSoWeb, 0) /
                           activeDisplayedKpiList.length
-                        ).toFixed(1)
+                        ).toFixed(2)
                       : '0.0'}
                     %
                   </div>
@@ -3433,7 +3433,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                             (s, r) => s + (r.pembuatanFaktur + r.pengecekanFaktur) / 2,
                             0
                           ) / activeDisplayedKpiList.length
-                        ).toFixed(1)
+                        ).toFixed(2)
                       : '0.0'}
                     %
                   </div>
@@ -4203,7 +4203,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                   const terkirim = Math.max(0, Math.round(parseNum(reoTerkirimFaktur)));
                   const belum = Math.max(0, Math.round(parseNum(reoBelumTerkirimSo)));
                   const total = terkirim + belum;
-                  const customPrevPct = Math.min(100, Math.max(0, Number(parseNum(reoPrevMonthPctInput).toFixed(1))));
+                  const customPrevPct = Math.min(100, Math.max(0, Number(parseNum(reoPrevMonthPctInput).toFixed(2))));
 
                   const nextUnitPrev = {
                     ...unitPrevMonthPct,
@@ -4590,7 +4590,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                             ...r,
                             pctTerkirim:
                               r.totalReorder > 0
-                                ? Number(((r.terkirimFaktur / r.totalReorder) * 100).toFixed(1))
+                                ? Number(((r.terkirimFaktur / r.totalReorder) * 100).toFixed(2))
                                 : 0
                           }))}
                           margin={{ top: 5, right: 5, left: -20, bottom: 5 }}
@@ -4631,8 +4631,8 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                           </tr>
                         ) : (
                           panel.data.rows.map(r => {
-                            const pKirim = r.totalReorder > 0 ? Number(((r.terkirimFaktur / r.totalReorder) * 100).toFixed(1)) : 0;
-                            const pGap = Number(Math.max(0, 100 - pKirim).toFixed(1));
+                            const pKirim = r.totalReorder > 0 ? Number(((r.terkirimFaktur / r.totalReorder) * 100).toFixed(2)) : 0;
+                            const pGap = Number(Math.max(0, 100 - pKirim).toFixed(2));
                             return (
                               <tr key={r.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
                                 <td className="py-2 px-3 font-bold whitespace-nowrap">{r.weekLabel}</td>
@@ -5160,9 +5160,9 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                   {synchronizedOmsetRows.map((adm, idx) => {
                     const maxOmzet = Math.max(...synchronizedOmsetRows.map(x => x.omzetNetto), 1);
                     const widthPct = adm.omzetNetto > 0 ? Math.max(8, Math.round((adm.omzetNetto / maxOmzet) * 100)) : 0;
-                    const vsLastRatio = adm.lastMonthOmzet > 0 ? ((adm.omzetNetto / adm.lastMonthOmzet) * 100).toFixed(1) : '0.0';
+                    const vsLastRatio = adm.lastMonthOmzet > 0 ? ((adm.omzetNetto / adm.lastMonthOmzet) * 100).toFixed(2) : '0.0';
                     const diffVsLast = adm.omzetNetto - adm.lastMonthOmzet;
-                    const diffVsLastPct = adm.lastMonthOmzet > 0 ? ((diffVsLast / adm.lastMonthOmzet) * 100).toFixed(1) : '0.0';
+                    const diffVsLastPct = adm.lastMonthOmzet > 0 ? ((diffVsLast / adm.lastMonthOmzet) * 100).toFixed(2) : '0.0';
                     return (
                       <div key={adm.id} className={idx > 0 ? 'pt-3.5 space-y-2' : 'space-y-2'}>
                         <div className="flex items-center justify-between gap-2">
@@ -5446,11 +5446,11 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                 {synchronizedOmsetRows.map((adm, idx) => {
                   const sharePct =
                     omsetSummary.omzetNetto > 0
-                      ? ((adm.omzetNetto / omsetSummary.omzetNetto) * 100).toFixed(1)
+                      ? ((adm.omzetNetto / omsetSummary.omzetNetto) * 100).toFixed(2)
                       : '0.0';
                   const vsLastPct =
                     adm.lastMonthOmzet > 0
-                      ? ((adm.omzetNetto / adm.lastMonthOmzet) * 100).toFixed(1)
+                      ? ((adm.omzetNetto / adm.lastMonthOmzet) * 100).toFixed(2)
                       : '0.0';
                   return (
                     <div

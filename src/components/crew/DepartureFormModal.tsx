@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, CheckCircle2, ClipboardCheck, Eraser, MapPin, PenTool, Truck, Users } from 'lucide-react';
 import type { DepartureSignatureKey, DepartureValidationData, FieldTrip } from './crewModel';
+import { logisticsStore } from '../../services/store';
+import { branchStore } from '../../services/branchStore';
 import { Button, Dialog } from './CrewFieldUI';
 
 interface SignatureBoxDef {
@@ -213,7 +215,6 @@ export const DepartureFormModal: React.FC<DepartureFormModalProps> = ({
   onClose,
   onSubmit
 }) => {
-  const [checks, setChecks] = useState<[boolean, boolean]>([false, false]);
   const [signatures, setSignatures] = useState<Record<DepartureSignatureKey, string>>({
     spvLogistik: '',
     spvOperasional: '',
@@ -227,12 +228,92 @@ export const DepartureFormModal: React.FC<DepartureFormModalProps> = ({
     return () => clearInterval(t);
   }, []);
 
+  // Auto-resolve penandatangan berdasarkan Role + Cabang dari Manajemen User & Hak Akses Cabang
+  const branchLabel = useMemo(() => {
+    const bId = trip.branchId || 'cab-banyuwangi';
+    if (bId === 'cab-sidoarjo') return 'Sidoarjo';
+    return 'Nusantara';
+  }, [trip.branchId]);
+
+  const roleCandidates = useMemo(() => {
+    const allUsers = logisticsStore.getUsers().filter(u => u.status === 'approved');
+    const targetBranchId = trip.branchId || 'cab-banyuwangi';
+    const inBranch = (u: any) => {
+      const perms = branchStore.getUserBranchPermissions(u.id);
+      if (!perms || perms.length === 0) return true;
+      return perms.some((p: any) => p.branchId === targetBranchId && p.canAccess !== false);
+    };
+    const branchUsers = allUsers.filter(inBranch);
+    const pool = branchUsers.length > 0 ? branchUsers : allUsers;
+
+    const spvLogList = pool.filter(u =>
+      ['spv_logistik', 'admin_logistik', 'super_admin'].includes(String(u.role || '').toLowerCase()) ||
+      String(u.fullName || '').toLowerCase().includes('rachmat')
+    );
+    const spvOpsList = pool.filter(u =>
+      ['spv_operasional', 'operasional', 'super_admin'].includes(String(u.role || '').toLowerCase()) ||
+      String(u.fullName || '').toLowerCase().includes('jerry')
+    );
+    const secList = pool.filter(u =>
+      ['security', 'satpam'].includes(String(u.role || '').toLowerCase())
+    );
+    const crewNames = [trip.driver?.name, trip.helper?.name, actorName]
+      .filter((v): v is string => Boolean(v && v.trim() && v !== '-'))
+      .map((name, idx) => ({ id: `crew-${idx}`, fullName: name.trim() }));
+
+    return {
+      spvLogistik:
+        spvLogList.length > 0
+          ? spvLogList
+          : [{ id: 'def-spvlog', fullName: 'rachmat setiyadi' }],
+      spvOperasional:
+        spvOpsList.length > 0
+          ? spvOpsList
+          : [{ id: 'def-spvops', fullName: 'AHMAD JERRY KURNIAWAN' }],
+      security:
+        secList.length > 0
+          ? secList
+          : [{ id: 'def-sec', fullName: 'Hairul Rozikin' }],
+      crew: crewNames.length > 0 ? crewNames : [{ id: 'def-crew', fullName: actorName || 'Kru Pengiriman' }]
+    };
+  }, [trip.branchId, trip.driver?.name, trip.helper?.name, actorName]);
+
+  const [selectedSignerNames, setSelectedSignerNames] = useState<Record<DepartureSignatureKey, string>>(() => ({
+    spvLogistik:
+      roleCandidates.spvLogistik.find(u => u.fullName.toLowerCase().includes('rachmat'))?.fullName ||
+      roleCandidates.spvLogistik[0]?.fullName ||
+      'rachmat setiyadi',
+    spvOperasional:
+      roleCandidates.spvOperasional.find(u => u.fullName.toLowerCase().includes('jerry'))?.fullName ||
+      roleCandidates.spvOperasional[0]?.fullName ||
+      'AHMAD JERRY KURNIAWAN',
+    security: roleCandidates.security[0]?.fullName || 'Hairul Rozikin',
+    crew: roleCandidates.crew[0]?.fullName || actorName || 'Kru Pengiriman'
+  }));
+
+  useEffect(() => {
+    setSelectedSignerNames(prev => ({
+      spvLogistik:
+        prev.spvLogistik ||
+        roleCandidates.spvLogistik.find(u => u.fullName.toLowerCase().includes('rachmat'))?.fullName ||
+        roleCandidates.spvLogistik[0]?.fullName ||
+        'rachmat setiyadi',
+      spvOperasional:
+        prev.spvOperasional ||
+        roleCandidates.spvOperasional.find(u => u.fullName.toLowerCase().includes('jerry'))?.fullName ||
+        roleCandidates.spvOperasional[0]?.fullName ||
+        'AHMAD JERRY KURNIAWAN',
+      security: prev.security || roleCandidates.security[0]?.fullName || 'Hairul Rozikin',
+      crew: prev.crew || roleCandidates.crew[0]?.fullName || actorName || 'Kru Pengiriman'
+    }));
+  }, [roleCandidates, actorName]);
+
   const signedCount = useMemo(
     () => SIGNATURE_BOXES.filter(box => Boolean(signatures[box.key]?.startsWith('data:image/'))).length,
     [signatures]
   );
 
-  const isReady = checks[0] && checks[1] && signedCount === SIGNATURE_BOXES.length;
+  const isReady = signedCount === SIGNATURE_BOXES.length;
 
   const handleSigChange = useCallback((key: DepartureSignatureKey, dataUrl: string) => {
     setSignatures(prev => ({ ...prev, [key]: dataUrl }));
@@ -252,8 +333,8 @@ export const DepartureFormModal: React.FC<DepartureFormModalProps> = ({
         recordedAtWib: wibStamp
       },
       checks: {
-        waybillMatch: checks[0],
-        documentsReady: checks[1]
+        waybillMatch: true,
+        documentsReady: true
       },
       signatures: {
         spvLogistik: signatures.spvLogistik,
@@ -280,61 +361,74 @@ export const DepartureFormModal: React.FC<DepartureFormModalProps> = ({
         </div>
         <div className="cv75-summary-grid">
           <div className="cv75-summary-item">
-            <span className="cv75-summary-label"><Truck size={12} /> Driver</span>
+            <span className="cv75-summary-label">Cabang</span>
+            <span className="cv75-summary-val">{branchLabel}</span>
+          </div>
+          <div className="cv75-summary-item">
+            <span className="cv75-summary-label"><Truck size={12} /> Nama Driver</span>
             <span className="cv75-summary-val">{trip.driver?.name || '-'}</span>
           </div>
           <div className="cv75-summary-item">
-            <span className="cv75-summary-label"><Users size={12} /> Helper</span>
+            <span className="cv75-summary-label"><Users size={12} /> Nama Helper</span>
             <span className="cv75-summary-val">{trip.helper?.name || actorName || '-'}</span>
           </div>
           <div className="cv75-summary-item">
-            <span className="cv75-summary-label">Armada</span>
+            <span className="cv75-summary-label">Mobil Kiriman</span>
             <span className="cv75-summary-val">{trip.fleetLabel || '-'}</span>
           </div>
           <div className="cv75-summary-item">
-            <span className="cv75-summary-label"><MapPin size={12} /> Area Kiriman</span>
+            <span className="cv75-summary-label">Jam Berangkat</span>
+            <span className="cv75-summary-val">{trip.departureTime ? `${trip.departureTime} WIB` : clockLabel}</span>
+          </div>
+          <div className="cv75-summary-item">
+            <span className="cv75-summary-label"><MapPin size={12} /> Area Kirim</span>
             <span className="cv75-summary-val">{trip.area || '-'}</span>
           </div>
         </div>
       </div>
 
-      <div className="cv66-checklist">
-        {[
-          'Tujuan dan jumlah surat jalan sesuai',
-          'Dokumen lengkap dan siap dibawa'
-        ].map((label, idx) => (
-          <label key={label} className="cv75-check-row">
-            <input
-              type="checkbox"
-              checked={checks[idx]}
-              disabled={busy}
-              onChange={e => {
-                const checked = e.target.checked;
-                setChecks(prev => (idx === 0 ? [checked, prev[1]] : [prev[0], checked]));
-              }}
-            />
-            <span>{label}</span>
-          </label>
-        ))}
-      </div>
-
       <div className="cv75-sig-section">
         <div className="cv75-sig-section-head">
-          <span>Tanda Tangan Digital (4 Pihak)</span>
+          <span>Tanda Tangan Digital Otomatis (Cabang {branchLabel})</span>
           <span className={`cv75-badge ${signedCount === 4 ? 'cv75-badge--green' : 'cv75-badge--slate'}`}>
             {signedCount}/4 Lengkap
           </span>
         </div>
         <div className="cv75-sig-grid">
-          {SIGNATURE_BOXES.map(def => (
-            <SignaturePadCard
-              key={def.key}
-              def={def}
-              value={signatures[def.key]}
-              disabled={busy}
-              onChange={handleSigChange}
-            />
-          ))}
+          {SIGNATURE_BOXES.map(def => {
+            const cands = roleCandidates[def.key] || [];
+            const activeName = selectedSignerNames[def.key] || cands[0]?.fullName || '';
+            return (
+              <div key={def.key} className="space-y-1.5">
+                <div className="flex items-center justify-between gap-1.5 px-1">
+                  <span className="text-[11px] font-semibold text-slate-800 truncate">{activeName}</span>
+                  {cands.length > 1 && (
+                    <select
+                      aria-label={`Pilih kandidat ${def.title}`}
+                      value={activeName}
+                      disabled={busy}
+                      onChange={e =>
+                        setSelectedSignerNames(prev => ({ ...prev, [def.key]: e.target.value }))
+                      }
+                      className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-700"
+                    >
+                      {cands.map(c => (
+                        <option key={c.id} value={c.fullName}>
+                          {c.fullName}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <SignaturePadCard
+                  def={def}
+                  value={signatures[def.key]}
+                  disabled={busy}
+                  onChange={handleSigChange}
+                />
+              </div>
+            );
+          })}
         </div>
       </div>
 

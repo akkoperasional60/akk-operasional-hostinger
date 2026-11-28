@@ -650,6 +650,7 @@ class DriverShiftService {
    */
   public async checkInDriver(params: {
     branchId?: string;
+    scheduleId?: string;
     driverId: string;
     driverName: string;
     userRole?: string;
@@ -1010,9 +1011,12 @@ class DriverShiftService {
       newShift.synced = true;
     }
 
-    // Catat langsung ke Sub-Menu Laporan Kiriman Kru
+    // Catat langsung ke Sub-Menu Laporan Kiriman Kru dengan armada dari jadwal kiriman aktif
     driverReportService.upsertShiftCheckinCheckoutReport({
       shiftId: newShift.id,
+      scheduleId: params.scheduleId,
+      fleetId: effectiveFleetId,
+      fleetInitialCode: effectiveInitialCode,
       driverId: params.driverId,
       driverName: params.driverName,
       userRole: roleLabel,

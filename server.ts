@@ -5090,7 +5090,32 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     const { report, reports } = req.body || {};
 
     if (report && typeof report === 'object' && String(report.id || '').trim()) {
-      const safeReport = sanitizeReportRecord({ ...report, id: String(report.id).slice(0, 160) });
+      const incomingSchedId = String(report.scheduleId || report.deliveryId || '').trim();
+      let authoritativeFleetPatch: Record<string, any> = {};
+      if (incomingSchedId) {
+        const matchedSched = Array.isArray(inMemoryAdminCalendarSchedules)
+          ? inMemoryAdminCalendarSchedules.find(
+              (s: any) => String(s?.id || '') === incomingSchedId || String(s?.trackingNumber || '') === incomingSchedId
+            )
+          : null;
+        if (matchedSched) {
+          const schedPlate = sanitizeOperationalPlate(matchedSched.fleet?.plateNumber || matchedSched.armada);
+          const schedCode = String(matchedSched.fleet?.initialCode || matchedSched.armada || '').trim();
+          if (schedPlate !== '-' || schedCode) {
+            authoritativeFleetPatch = {
+              scheduleId: incomingSchedId,
+              deliveryId: incomingSchedId,
+              fleetId: matchedSched.fleetId || report.fleetId,
+              fleetInitialCode: schedCode || report.fleetInitialCode,
+              scheduledPlateNumber: schedPlate !== '-' ? schedPlate : undefined,
+              scheduledFleetInitialCode: schedCode || undefined,
+              plateNumber: schedPlate !== '-' ? schedPlate : report.plateNumber,
+              fleetSyncStatus: 'synced'
+            };
+          }
+        }
+      }
+      const safeReport = sanitizeReportRecord({ ...report, ...authoritativeFleetPatch, id: String(report.id).slice(0, 160) });
       if (deletedDriverReportIds.has(safeReport.id)) {
         return res.json({ success: true, ignoredDeleted: true, count: inMemoryDriverReports.length });
       }
@@ -5249,6 +5274,45 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err?.message || "Gagal menghapus laporan" });
+    }
+  });
+
+  app.post("/api/schedules/:id/sync-fleet", express.json(), async (req: any, res) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      const scheduleId = String(req.params.id || '').trim();
+      if (!scheduleId) {
+        return res.status(400).json({ success: false, error: 'scheduleId wajib diisi' });
+      }
+      await loadDriverReportsFromDbIfNeeded();
+      const bodyFleetId = String(req.body?.fleetId || '').trim();
+      const bodyPlate = sanitizeOperationalPlate(req.body?.plateNumber);
+      const bodyInitial = String(req.body?.fleetInitialCode || '').trim();
+
+      let updatedCount = 0;
+      inMemoryDriverReports = inMemoryDriverReports.map((r: any) => {
+        if (String(r?.scheduleId || r?.deliveryId || '').trim() !== scheduleId) return r;
+        updatedCount += 1;
+        return {
+          ...r,
+          scheduleId,
+          deliveryId: scheduleId,
+          fleetId: bodyFleetId || r.fleetId,
+          fleetInitialCode: bodyInitial || r.fleetInitialCode,
+          scheduledPlateNumber: bodyPlate !== '-' ? bodyPlate : r.scheduledPlateNumber,
+          scheduledFleetInitialCode: bodyInitial || r.scheduledFleetInitialCode,
+          plateNumber: bodyPlate !== '-' ? bodyPlate : r.plateNumber,
+          fleetSyncStatus: 'synced'
+        };
+      });
+
+      if (updatedCount > 0) {
+        await persistDriverReportsToDb(inMemoryDriverReports);
+        broadcastDriverReportEvent("reports_synced", { scheduleId, count: updatedCount });
+      }
+      return res.json({ success: true, scheduleId, updatedReports: updatedCount });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Gagal sinkronisasi armada laporan' });
     }
   });
 
@@ -8287,7 +8351,7 @@ Kembalikan HANYA JSON valid:
     }
   };
 
-  app.get('/api/marketing-invoice-validations', async (_req, res) => {
+  app.get('/api/marketing-invoice-validations', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     try {
       if (isDatabaseConfigured() && (!inMemoryMarketingValidationsLoaded || Date.now() - lastMarketingValidationsSyncAt > 3000)) {
@@ -8296,11 +8360,31 @@ Kembalikan HANYA JSON valid:
           new Promise<null>(resolve => setTimeout(() => resolve(null), 1200))
         ]);
       }
+      const reqUserId = String(req.query.userId || req.headers['x-user-id'] || '').trim();
+      const reqRole = String(req.query.role || req.headers['x-user-role'] || '').toLowerCase().trim();
+      let scopedRecords = inMemoryMarketingValidations;
+
+      if (reqUserId && reqRole === 'marketing_offline') {
+        const userMaps = inMemoryMarketingSalesMappings.filter(
+          (m: any) => String(m.userId || '').trim() === reqUserId
+        );
+        const allowedMasterNames = new Set(
+          userMaps
+            .flatMap((m: any) => [m.masterSalesName1, m.masterSalesName2])
+            .map((v: any) => String(v || '').trim().toUpperCase())
+            .filter(Boolean)
+        );
+        scopedRecords = inMemoryMarketingValidations.filter((rec: any) => {
+          const recMaster = String(rec.masterSalesName || rec.salesName || '').trim().toUpperCase();
+          return String(rec.salesUserId || '').trim() === reqUserId || allowedMasterNames.has(recMaster);
+        });
+      }
+
       return res.json({
         success: true,
-        records: inMemoryMarketingValidations,
+        records: scopedRecords,
         salesMappings: inMemoryMarketingSalesMappings,
-        count: inMemoryMarketingValidations.length,
+        count: scopedRecords.length,
         source: 'mysql'
       });
     } catch (err: any) {

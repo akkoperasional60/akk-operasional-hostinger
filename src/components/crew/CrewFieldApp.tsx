@@ -308,19 +308,47 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     setReturBarangEvidence(null);
   };
   const clearNotice = () => { setMessage(''); setFault(''); };
-  const nav = (next: Screen) => { if (mutationInFlight.current) return; setScreen(next); resetReport(); clearNotice(); main.current?.scrollTo({top:0}); };
+  const nav = (next: Screen) => {
+    setScreen(next);
+    resetReport();
+    clearNotice();
+    main.current?.scrollTo({ top: 0 });
+  };
   const choose = (id: string, next: Screen = 'tugas') => { setSelectedId(id); setScreen(next); resetReport(); clearNotice(); };
-  const invoke = async (fn: () => Promise<void>, success: string, after?: () => void) => {
+  const invoke = async (
+    fn: () => Promise<void>,
+    success: string,
+    after?: () => void,
+    optimisticUpdate?: () => (() => void) | void
+  ) => {
     if (mutationInFlight.current) return;
-    mutationInFlight.current = true; selfActionAtRef.current = Date.now(); setBusy(true); clearNotice();
+    mutationInFlight.current = true;
+    selfActionAtRef.current = Date.now();
+    setBusy(true);
+    clearNotice();
+    const rollback = optimisticUpdate?.();
+    let timer: number | undefined;
     try {
-      await fn();
-      // The API has acknowledged the write. A subsequent read failure must not encourage a duplicate write.
+      await Promise.race([
+        fn(),
+        new Promise<never>((_, reject) => {
+          timer = window.setTimeout(
+            () => reject(new Error('Koneksi lambat (batas waktu 8000ms). Tekan Coba Lagi.')),
+            8000
+          );
+        })
+      ]);
       after?.();
-      try { await refresh(true, true); setMessage(success); }
-      catch { setFault('Tersimpan, tetapi jadwal belum dapat dimuat. Tekan muat ulang.'); }
-    } catch (e) { setFault((e as Error)?.message || 'Gagal menyimpan. Coba lagi.'); }
-    finally { mutationInFlight.current = false; setBusy(false); }
+      setMessage(success);
+      void refresh(true, true).catch(() => {});
+    } catch (e) {
+      rollback?.();
+      setFault((e as Error)?.message || 'Gagal menyimpan. Tekan Coba Lagi.');
+    } finally {
+      if (timer !== undefined) window.clearTimeout(timer);
+      mutationInFlight.current = false;
+      setBusy(false);
+    }
   };
   const closeClaim = () => { if (mutationInFlight.current) return; setClaimId(null); setClaimPosition(null); clearNotice(); };
   const submitClaim = () => {
@@ -521,6 +549,7 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     if (slotForUser(trip, user) !== 'driver' || trip.odometerEnd) return;
     const rawValue = endKmByTrip[trip.id] || '';
     const minStartKm = Number(trip.odometerStart || 0);
+    const parsedEnd = Number(rawValue);
     void invoke(
       () => recordEndKm(user, trip.id, rawValue, minStartKm),
       'KM akhir tersimpan. Jarak tempuh otomatis tercatat di Rekap KM & BBM.',
@@ -529,12 +558,47 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
           const next = { ...prev };
           delete next[trip.id];
           return next;
-        })
+        }),
+      () => {
+        if (!Number.isFinite(parsedEnd) || parsedEnd <= minStartKm) return;
+        const snapshot = trips;
+        setTrips(prev =>
+          prev.map(t => (t.id === trip.id ? { ...t, odometerEnd: parsedEnd } : t))
+        );
+        return () => setTrips(snapshot);
+      }
     );
   };
   const handleMove = (phase: 'going' | 'returned') => {
     if (!activeTrip || !activeSlot) return;
-    void invoke(() => moveTrip(user,activeTrip.id,phase), phase === 'going' ? 'Keberangkatan tercatat.' : 'Kiriman selesai.', phase === 'returned' ? () => {setScreen('riwayat'); setExpandedHistory(activeTrip.id); resetReport();} : undefined);
+    const targetId = activeTrip.id;
+    const nowIso = new Date().toISOString();
+    void invoke(
+      () => moveTrip(user, targetId, phase),
+      phase === 'going' ? 'Keberangkatan tercatat.' : 'Tiba di Gudang / Selesai tercatat.',
+      phase === 'returned'
+        ? () => {
+            setScreen('riwayat');
+            setExpandedHistory(targetId);
+            resetReport();
+          }
+        : undefined,
+      () => {
+        const snapshot = trips;
+        setTrips(prev =>
+          prev.map(t =>
+            t.id === targetId
+              ? {
+                  ...t,
+                  phase,
+                  ...(phase === 'going' ? { departedAt: nowIso } : { returnedAt: nowIso })
+                }
+              : t
+          )
+        );
+        return () => setTrips(snapshot);
+      }
+    );
   };
   const inspectionEntries = useMemo<InspectionChecklistEntry[]>(() =>
     VEHICLE_CHECKLIST_ITEMS.map(item => {
@@ -617,7 +681,7 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
         </header>
         {!modalOpen && notice}
         <main ref={main} className="cv66-main" id="akk-crew-main-content" aria-busy={loading}>
-          {loading ? <div className="cv66-loading" role="status"><LoaderCircle size={24} className="cv66-spin"/>Memuat kiriman...</div> : !loadedOnce.current ? <Empty icon={CloudOff} title="Jadwal gagal dimuat" action={{label:'Muat Ulang',run:()=>void refresh()}}/> :
+          {(loading && !loadedOnce.current) ? <div className="cv66-loading" role="status"><LoaderCircle size={24} className="cv66-spin"/>Memuat kiriman...</div> : !loadedOnce.current ? <Empty icon={CloudOff} title="Jadwal gagal dimuat" action={{label:'Coba Lagi',run:()=>void refresh()}}/> :
           <AnimatePresence mode="wait" initial={false}>
             <motion.div className="cv66-screen" key={screen} initial={reduced ? false : {opacity:0,y:8}} animate={{opacity:1,y:0}} exit={reduced ? {opacity:1} : {opacity:0,y:-3}} transition={{duration:reduced ? 0 : .19,ease:[.2,.7,.3,1]}}>
               {screen === 'kiriman' && <>

@@ -131,6 +131,8 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterFuelType, setFilterFuelType] = useState<string>('all');
   const [filterSpbu, setFilterSpbu] = useState<'all' | 'Farly' | 'Gajah Mada' | 'SPBU Lain'>('all');
+  const [filterDate, setFilterDate] = useState<string>('');
+  const [filterArea, setFilterArea] = useState<string>('all');
   const [logSortBy, setLogSortBy] = useState<'date_desc' | 'date_asc' | 'efficient_asc' | 'wasteful_desc'>('date_desc');
   const [logsCurrentPage, setLogsCurrentPage] = useState<number>(1);
   const LOGS_PER_PAGE = 10;
@@ -1134,7 +1136,12 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
           ? gsLower.includes('gajah mada')
           : !gsLower.includes('farly') && !gsLower.includes('gajah mada');
 
-      return matchQuery && matchFleet && matchStatus && matchFuel && matchSpbu;
+      const matchDate = !filterDate || String(log.date || '').slice(0, 10) === filterDate;
+      const matchArea =
+        filterArea === 'all' ||
+        String(log.routeTrip || '').toLowerCase().includes(filterArea.toLowerCase());
+
+      return matchQuery && matchFleet && matchStatus && matchFuel && matchSpbu && matchDate && matchArea;
     });
 
     if (logSortBy === 'efficient_asc') {
@@ -2112,6 +2119,34 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                 ))}
               </select>
 
+              <input
+                type="date"
+                value={filterDate}
+                onChange={e => setFilterDate(e.target.value)}
+                aria-label="Filter Kalender BBM"
+                className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:border-blue-600"
+              />
+
+              <select
+                value={filterArea}
+                onChange={e => setFilterArea(e.target.value)}
+                aria-label="Filter Area BBM"
+                className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:border-blue-600 cursor-pointer"
+              >
+                <option value="all">Semua Area</option>
+                {Array.from(
+                  new Set(
+                    reconciledLogs
+                      .map(l => String(l.routeTrip || '').trim())
+                      .filter(Boolean)
+                  )
+                ).map(area => (
+                  <option key={area} value={area}>
+                    {area}
+                  </option>
+                ))}
+              </select>
+
               <select
                 value={filterSpbu}
                 onChange={e => setFilterSpbu(e.target.value as typeof filterSpbu)}
@@ -2627,9 +2662,9 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Volume BBM (Liter) *</label>
                   <input
                     type="number"
-                    step="0.1"
+                    step="0.01"
                     min="0"
-                    placeholder="Contoh: 25.5"
+                    placeholder="Contoh: 56.54"
                     value={formLiters}
                     onChange={e => setFormLiters(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm font-mono text-slate-900 focus:outline-none focus:border-blue-600"

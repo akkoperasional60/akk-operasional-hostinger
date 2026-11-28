@@ -149,6 +149,68 @@ export const DriverReportsManagement: React.FC = () => {
   const fleets = useMemo(() => logisticsStore.getFleets(), [storeTick]);
   const schedules = useMemo(() => logisticsStore.getSchedules(), [storeTick]);
 
+  // Single Source of Truth: Evaluasi kecocokan armada laporan terhadap jadwal kiriman admin
+  const resolveScheduleFleetAudit = (rep: {
+    scheduleId?: string;
+    deliveryId?: string;
+    driverName?: string;
+    helperName?: string;
+    areaName?: string;
+    date?: string;
+    timestamp?: string;
+    plateNumber?: string;
+    fleetId?: string;
+  }) => {
+    const rDate = rep.date || (rep.timestamp ? getLocalDateStr(rep.timestamp) : '');
+    const normStr = (v?: string) => String(v || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const targetDriver = normStr(rep.driverName);
+    const targetArea = normStr(rep.areaName);
+
+    const matchedSchedule =
+      schedules.find(
+        s =>
+          (rep.scheduleId && (s.id === rep.scheduleId || s.trackingNumber === rep.scheduleId)) ||
+          (rep.deliveryId && (s.id === rep.deliveryId || s.trackingNumber === rep.deliveryId))
+      ) ||
+      schedules.find(s => {
+        if (!rDate || getLocalDateStr(s.departureDate) !== rDate) return false;
+        const sDriver = normStr(s.crew?.name);
+        const sHelper = normStr(s.crewHelper?.name);
+        const sArea = normStr(s.areaName || s.store?.storeName);
+        const crewMatch = Boolean(targetDriver && (sDriver === targetDriver || sHelper === targetDriver));
+        const areaMatch = !targetArea || !sArea || sArea.includes(targetArea) || targetArea.includes(sArea);
+        return crewMatch && areaMatch;
+      });
+
+    if (!matchedSchedule) {
+      return { schedule: null, status: 'unscheduled' as const, expectedLabel: '' };
+    }
+
+    const schedFleetObj =
+      matchedSchedule.fleet ||
+      fleets.find(f => f.id === matchedSchedule.fleetId);
+    const schedPlateRaw = schedFleetObj?.plateNumber || matchedSchedule.armada || '';
+    const schedCodeRaw = schedFleetObj?.initialCode || matchedSchedule.armada || '';
+    const expectedLabel = schedPlateRaw
+      ? formatPlateWithInitial(schedPlateRaw)
+      : schedCodeRaw || '-';
+
+    const repClean = String(rep.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+    const schedPlateClean = String(schedPlateRaw || '').replace(/\s+/g, '').toUpperCase();
+    const schedCodeClean = String(schedCodeRaw || '').replace(/\s+/g, '').toUpperCase();
+
+    const isMatched =
+      (rep.fleetId && matchedSchedule.fleetId && rep.fleetId === matchedSchedule.fleetId) ||
+      (repClean && schedPlateClean && repClean === schedPlateClean) ||
+      (repClean && schedCodeClean && repClean === schedCodeClean);
+
+    return {
+      schedule: matchedSchedule,
+      status: isMatched ? ('synced' as const) : ('mismatch' as const),
+      expectedLabel
+    };
+  };
+
   // Helper untuk menampilkan Plat Nomor beserta Nama Inisial Armada (contoh: P 8711 UW (N21 / NL2))
   const formatPlateWithInitial = (plateRaw?: string): string => {
     const raw = (plateRaw || '-').trim();
@@ -1016,7 +1078,7 @@ export const DriverReportsManagement: React.FC = () => {
   // Data Laporan Check-In & Check-Out Terpadu + Ketepatan Waktu vs Target Jadwal (Terintegrasi dengan Modal Buat Kiriman)
   const checkinCheckoutSummary = useMemo(() => {
     const parseClockMinutes = (raw?: string): number | null => {
-      if (!raw || raw === '-' || raw === 'Belum Check-Out' || raw === 'Belum Check-In') return null;
+      if (!raw || raw === '-' || raw === 'Belum Tiba' || raw === 'Belum Berangkat') return null;
       const trimmed = String(raw).trim();
       // 1. Format HH:MM atau HH.MM langsung (tanpa T / timestamp ISO)
       if (!trimmed.includes('T')) {
@@ -1377,7 +1439,7 @@ export const DriverReportsManagement: React.FC = () => {
     });
 
     // Integrasi langsung Modal "Buat Kiriman" -> Laporan Check-In & Check-Out:
-    // Jadwal aktif yang baru diterbitkan Admin otomatis tampil sebagai "Terjadwal / Belum Check-In"
+    // Jadwal aktif yang baru diterbitkan Admin otomatis tampil sebagai "Terjadwal / Belum Berangkat"
     // sebelum kru melakukan Check-In, sehingga target jam & plat nomor langsung terbaca.
     schedules.forEach(sch => {
       if (String(sch.status) === 'cancelled' || matchedScheduleIds.has(sch.id)) return;
@@ -1681,7 +1743,7 @@ export const DriverReportsManagement: React.FC = () => {
                       ? 'Selesai Shift'
                       : item.status === 'sedang_bertugas'
                       ? 'Sedang Bertugas'
-                      : 'Terjadwal / Belum Check-In'
+                      : 'Terjadwal / Belum Berangkat'
                   ]);
                   const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
                   const link = document.createElement('a');
@@ -1737,7 +1799,7 @@ export const DriverReportsManagement: React.FC = () => {
             >
               <div>
                 <span className="text-sm font-semibold text-slate-600 dark:text-slate-400 block">
-                  Terjadwal / Belum Check-In
+                  Terjadwal / Belum Berangkat
                 </span>
                 <div className="text-3xl font-bold text-blue-600 dark:text-blue-400 font-mono tabular-nums mt-1.5">
                   {checkinCheckoutSummary.counts.belumCheckin}
@@ -1821,7 +1883,7 @@ export const DriverReportsManagement: React.FC = () => {
               className="px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm font-semibold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-600 cursor-pointer"
             >
               <option value="all">Semua Status ({checkinCheckoutSummary.counts.total})</option>
-              <option value="belum_checkin">Terjadwal / Belum Check-In ({checkinCheckoutSummary.counts.belumCheckin})</option>
+              <option value="belum_checkin">Terjadwal / Belum Berangkat ({checkinCheckoutSummary.counts.belumCheckin})</option>
               <option value="sedang_bertugas">Sedang Bertugas ({checkinCheckoutSummary.counts.sedangBertugas})</option>
               <option value="selesai_shift">Selesai Shift ({checkinCheckoutSummary.counts.selesaiShift})</option>
             </select>
@@ -1839,8 +1901,8 @@ export const DriverReportsManagement: React.FC = () => {
                     <th className="py-3.5 px-4">Nomor Kendaraan</th>
                     <th className="py-3.5 px-4">Area / Lokasi</th>
                     <th className="py-3.5 px-4 text-center">Target Berangkat &amp; Pulang</th>
-                    <th className="py-3.5 px-4 text-center">Waktu Check-In</th>
-                    <th className="py-3.5 px-4 text-center">Waktu Check-Out</th>
+                    <th className="py-3.5 px-4 text-center">Waktu Berangkat</th>
+                    <th className="py-3.5 px-4 text-center">Waktu Tiba</th>
                     <th className="py-3.5 px-4 text-center">Ketepatan Waktu &amp; Selisih</th>
                     <th className="py-3.5 px-4 text-center">Status Shift</th>
                     {isSuperAdmin && <th className="py-3.5 px-4 text-center">Tindakan</th>}
@@ -1907,7 +1969,7 @@ export const DriverReportsManagement: React.FC = () => {
                               {item.checkinTime}
                             </span>
                           ) : (
-                            <span className="text-slate-400 italic text-xs">Belum Check-In</span>
+                            <span className="text-slate-400 italic text-xs">Belum Berangkat</span>
                           )}
                         </td>
                         <td className="py-3.5 px-4 text-center whitespace-nowrap">
@@ -1916,7 +1978,7 @@ export const DriverReportsManagement: React.FC = () => {
                               {item.checkoutTime}
                             </span>
                           ) : (
-                            <span className="text-slate-400 italic text-xs">Belum Check-Out</span>
+                            <span className="text-slate-400 italic text-xs">Belum Tiba</span>
                           )}
                         </td>
                         <td className="py-3.5 px-4 text-center whitespace-nowrap">
@@ -1956,7 +2018,7 @@ export const DriverReportsManagement: React.FC = () => {
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[13px] font-bold bg-blue-50 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30">
-                              <Calendar className="w-3.5 h-3.5" /> Terjadwal / Belum Check-In
+                              <Calendar className="w-3.5 h-3.5" /> Terjadwal / Belum Berangkat
                             </span>
                           )}
                         </td>
@@ -3114,11 +3176,62 @@ export const DriverReportsManagement: React.FC = () => {
                             );
                           })()}
 
-                          {/* 3. Armada (Beserta Nama Inisial Armada) */}
+                          {/* 3. Armada (Single Source of Truth dari Jadwal Kiriman Admin) */}
                           <td className="py-3.5 px-4 align-middle whitespace-nowrap">
-                            <span className="inline-flex items-center gap-1.5 font-mono tabular-nums font-bold text-slate-900 dark:text-amber-300 text-sm bg-slate-100 dark:bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
-                              {formatPlateWithInitial(item.plateNumber)}
-                            </span>
+                            {(() => {
+                              const fleetAudit = resolveScheduleFleetAudit(item);
+                              return (
+                                <div className="flex flex-col items-start gap-1">
+                                  <span className="inline-flex items-center gap-1.5 font-mono tabular-nums font-bold text-slate-900 dark:text-amber-300 text-sm bg-slate-100 dark:bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
+                                    {formatPlateWithInitial(item.plateNumber)}
+                                  </span>
+                                  {fleetAudit.schedule && fleetAudit.status === 'synced' && (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-semibold">
+                                      <CheckCircle2 className="w-3 h-3" />
+                                      Sesuai Jadwal
+                                    </span>
+                                  )}
+                                  {fleetAudit.schedule && fleetAudit.status === 'mismatch' && (
+                                    <div className="flex flex-wrap items-center gap-1">
+                                      <span
+                                        title={`Armada pada jadwal admin: ${fleetAudit.expectedLabel}`}
+                                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-semibold"
+                                      >
+                                        <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                        Jadwal: {fleetAudit.expectedLabel}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const sch = fleetAudit.schedule!;
+                                          const schFleet = sch.fleet || fleets.find(f => f.id === sch.fleetId);
+                                          driverReportService.syncReportsFleetFromSchedule({
+                                            scheduleId: sch.id,
+                                            trackingNumber: sch.trackingNumber,
+                                            fleetId: sch.fleetId,
+                                            plateNumber: schFleet?.plateNumber || sch.armada,
+                                            fleetInitialCode: schFleet?.initialCode || sch.armada,
+                                            driverName: sch.crew?.name,
+                                            areaName: sch.areaName || sch.store?.storeName,
+                                            date: getLocalDateStr(sch.departureDate)
+                                          });
+                                          loadReports();
+                                          addNotification(
+                                            'schedule',
+                                            'Armada Laporan Disinkronkan',
+                                            `Armada laporan diperbarui mengikuti jadwal kiriman admin (${fleetAudit.expectedLabel}).`
+                                          );
+                                        }}
+                                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-semibold transition-colors"
+                                      >
+                                        <RefreshCw className="w-2.5 h-2.5" />
+                                        Sinkronkan
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </td>
 
                           {/* 4. Jenis Laporan */}

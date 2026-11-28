@@ -33,39 +33,13 @@ import { UserProfile } from '../../types';
 
 function getEligibleMarketingSalesUsers(
   allUsers: UserProfile[],
-  activeBranchId: string
+  _activeBranchId: string
 ): UserProfile[] {
   return allUsers.filter(u => {
     if (u.status !== 'approved') return false;
-    // Kecualikan Admin Penjualan & Super Admin dari daftar Sales Marketing
-    if (
-      u.role === 'sales_admin' ||
-      u.role === 'spv_sales_admin' ||
-      u.role === 'super_admin'
-    ) {
-      return false;
-    }
-    const branchPerms = branchStore.getUserBranchPermissions(
-      u.id,
-      u.role,
-      u.permissions?.modules,
-      u.permissions?.branchPermissions
-    );
-    const activePerm = branchPerms[activeBranchId];
-    if (!activePerm || !activePerm.enabled) return false;
-    const mktMod = activePerm.modules?.marketing;
-    if (!mktMod || !mktMod.enabled) return false;
-    const subs = mktMod.subMenus || {};
-    return (
-      subs.marketing_invoice_validation === 'full_access' ||
-      subs.marketing_invoice_validation === 'read_only' ||
-      subs.marketing_offline === 'full_access' ||
-      subs.marketing_offline === 'read_only' ||
-      subs.marketing_online === 'full_access' ||
-      subs.marketing_online === 'read_only' ||
-      subs.marketing_sales_mapping === 'full_access' ||
-      subs.marketing_sales_mapping === 'read_only'
-    );
+    const roleNorm = String(u.role || '').toLowerCase().trim();
+    const titleNorm = String(getUserRoleDisplayTitle(u.role) || '').toLowerCase().trim();
+    return roleNorm === 'marketing_offline' || titleNorm === 'marketing offline';
   });
 }
 
@@ -1080,8 +1054,11 @@ export const MarketingSalesMappingView: React.FC<{
   const handleEditMapping = (m: SalesNameMappingRecord) => {
     setEditingMappingId(m.id);
     setMapUserId(m.userId);
-    setMapMasterName1(m.masterSalesName1);
-    setMapMasterName2(m.masterSalesName2);
+    setMapMasterName1(m.masterSalesName1 || '');
+    setMapMasterName2(m.masterSalesName2 || '');
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   };
 
   const handleDeleteMapping = (id: string) => {
@@ -1222,28 +1199,46 @@ export const MarketingSalesMappingView: React.FC<{
           )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+          <div className="md:col-span-4">
             <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1.5">
-              Akun User Management (Akses Validasi &amp; Penagihan) *
+              Akun User Management (Role: Marketing Offline) *
             </label>
             <ModernValidationDropdown
               value={mapUserId}
               onChange={val => setMapUserId(val)}
               icon={<User className="w-3.5 h-3.5" />}
               searchable
-              searchPlaceholder="Cari nama user atau nomor WA..."
-              options={validationUsers.map(u => ({
+              searchPlaceholder="Cari user Marketing Offline..."
+              options={(editingMappingId && !validationUsers.some(u => u.id === mapUserId)
+                ? [
+                    ...validationUsers,
+                    ...allUsers.filter(u => u.id === mapUserId)
+                  ]
+                : validationUsers
+              ).map(u => ({
                 value: u.id,
                 label: u.fullName,
-                subLabel: `${getUserRoleDisplayTitle(u.role)} • WA: ${u.phone || '-'}`,
+                subLabel: `Marketing Offline • WA: ${u.phone || '-'}`,
                 badge: u.phone || 'No WA',
                 badgeTone: 'emerald'
               }))}
             />
           </div>
 
-          <div>
+          <div className="md:col-span-2">
+            <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1.5">
+              No. Telepon / WA
+            </label>
+            <input
+              type="text"
+              readOnly
+              value={allUsers.find(u => u.id === mapUserId)?.phone || '-'}
+              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-mono font-bold text-emerald-700 dark:text-emerald-400"
+            />
+          </div>
+
+          <div className="md:col-span-3">
             <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1.5">
               Master Nama Sales 1 (Pada Faktur / Excel) *
             </label>
@@ -1257,7 +1252,7 @@ export const MarketingSalesMappingView: React.FC<{
             />
           </div>
 
-          <div>
+          <div className="md:col-span-3">
             <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1.5">
               Master Nama Sales 2 (Opsional)
             </label>
@@ -1314,7 +1309,6 @@ export const MarketingSalesMappingView: React.FC<{
                 <th className="px-4">No. Telepon / WA Sales</th>
                 <th className="px-4">Master Nama Sales 1</th>
                 <th className="px-4">Master Nama Sales 2</th>
-                <th className="px-4">Integrasi Modul</th>
                 <th className="px-4 text-right">Aksi</th>
               </tr>
             </thead>
@@ -1342,9 +1336,6 @@ export const MarketingSalesMappingView: React.FC<{
                     </td>
                     <td className="px-4 font-extrabold text-indigo-700 dark:text-indigo-300 whitespace-nowrap">
                       {m.masterSalesName2 || '-'}
-                    </td>
-                    <td className="px-4 text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                      Validasi Faktur &middot; Aplikasi Penagihan
                     </td>
                     <td className="px-4 text-right whitespace-nowrap">
                       <button
@@ -1412,13 +1403,14 @@ export const MarketingInvoiceValidationView: React.FC<{
   }, []);
 
   const canViewAllSalesAccounts = useMemo(() => {
-    const r = String(currentUser?.role || '').toLowerCase();
+    const r = String(currentUser?.role || '').toLowerCase().trim();
+    const title = String(getUserRoleDisplayTitle(currentUser?.role) || '').toLowerCase().trim();
     return (
       r === 'super_admin' ||
+      r === 'spv_marketing' ||
       r === 'spv_marketing_offline' ||
-      r === 'spv_sales_admin' ||
-      r === 'sales_admin' ||
-      r === 'operasional'
+      title === 'super admin' ||
+      title === 'spv marketing'
     );
   }, [currentUser]);
   const isPersonalSalesMode = !canViewAllSalesAccounts;
@@ -1657,8 +1649,12 @@ export const MarketingInvoiceValidationView: React.FC<{
           const hargaSatuan = parseNum(row[6]);
           const persenVal = parseNum(row[7]);
           const persenRaw = persenVal > 0 ? persenVal : '';
-          const diskon = Math.max(0, parseNum(row[8]));
-          const rawTotalHarga = parseNum(row[9]);
+          const rawTotalHarga = parseNum(row[8]);
+          const ketCol10 = String(row[9] || '').trim().toUpperCase();
+          const diskon =
+            persenVal > 0 && kts > 0 && hargaSatuan > 0
+              ? Math.round((kts * hargaSatuan * persenVal) / 100)
+              : 0;
           const computedTotal =
             rawTotalHarga > 0
               ? rawTotalHarga
@@ -1695,7 +1691,7 @@ export const MarketingInvoiceValidationView: React.FC<{
               invoiceDate: todayIso,
               deliveryTomorrowDate: uploadTargetDate || tomorrowIso,
               customerName: currentCustomer || 'PELANGGAN',
-              areaName: 'BANYUWANGI',
+              areaName: ketCol10 || 'BANYUWANGI',
               paymentCategory: 'TEMPO',
               nominalTagihan: computedTotal,
               itemSummary: lineItem.keteranganBarang,
@@ -1703,7 +1699,7 @@ export const MarketingInvoiceValidationView: React.FC<{
               salesName: currentSales,
               salesWhatsapp: '0813-4455-6677',
               validationStatus: 'Menunggu Validasi',
-              marketingNotes: 'Diimpor dari file Excel Validasi Faktur',
+              marketingNotes: ketCol10 || 'Diimpor dari file Excel Validasi Faktur',
               lineItems: [lineItem]
             };
             const resolved = resolveSalesInfo(tempRecord);
